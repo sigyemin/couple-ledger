@@ -1,13 +1,13 @@
 // keepalive 워크플로 검사 (외부 패키지 없음: YAML 파서 대신 줄 단위로 본다)
 // 1) 정적 검사: 권한 최소화, 외부 액션 없음, ${{ }}는 env 대입에만, 로그 노출·커밋 금지
 // 2) 동작 검사: run 본문을 실제 셸 옵션(bash -eo pipefail)으로 실행. curl·git은 가짜로 바꿔 네트워크 호출 없음.
-//    격리: 작업 폴더는 새 임시 폴더, PATH는 가짜 도구 + 허용 도구(sed, head)만, 환경 변수는 시험 값만
+//    격리: 작업 폴더는 새 임시 폴더, PATH는 가짜 도구(curl·git·sed·head)만, 환경 변수는 시험 값만
 //    (HOME·GIT_*·GH_*·GITHUB_* 등 실제 환경을 넘기지 않는다)
 //    실행 전 관문: PATH·cwd 격리는 절대 경로(/usr/bin/git)나 /proc/$PPID 로 우회할 수 있으므로,
 //    워크플로 본문은 assertSafeBody(명령 허용 목록)를 통과해야만 실행한다. 통과 못 하면 실행 없이 throw
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync, symlinkSync } from 'node:fs';
+import { readFileSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync } from 'node:fs';
 import { spawnSync, execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -204,10 +204,21 @@ const FAKE_CURL = [
 ].join('\n');
 const FAKE_GIT = ['#!/bin/sh', 'echo "$*" >> "$GIT_LOG"', 'echo "fake git: blocked" >&2', 'exit 97'].join('\n');
 
-// 시험 본문이 쓸 수 있는 실제 도구는 이것뿐 (워크플로 run 본문이 sed·head를 쓴다)
 const which = (t) => execFileSync('sh', ['-c', `command -v ${t}`], { encoding: 'utf8' }).trim();
 const BASH = which('bash');
-const ALLOWED_TOOLS = ['sed', 'head'].map((t) => [t, which(t)]);
+
+// 가짜 sed·head: 워크플로가 쓰는 인자 형태와 정확히 같을 때만 실제 도구를 (고정 인자로) 실행한다.
+// 다른 인자(sed의 e·w 명령, 파일 경로 등)는 기록하고 98로 실패 → 허용 명령의 인자를 통한 우회 차단
+const SED_SCRIPT = 's/^ *"state": *"\\([a-z_]*\\)".*/\\1/p';
+const guardedTool = (name, cond, realArgs) => [
+  '#!/bin/sh',
+  'echo "$*" >> "$TOOL_LOG"',
+  `if ${cond}; then exec ${which(name)} ${realArgs}; fi`,
+  `echo "fake ${name}: 허용되지 않은 인자" >&2`,
+  'exit 98',
+].join('\n');
+const FAKE_SED = guardedTool('sed', `[ "$#" -eq 2 ] && [ "$1" = -n ] && [ "$2" = '${SED_SCRIPT}' ]`, `-n '${SED_SCRIPT}'`);
+const FAKE_HEAD = guardedTool('head', '[ "$#" -eq 2 ] && [ "$1" = -n ] && [ "$2" = 1 ]', '-n 1');
 
 function withFakeCurl(fn) {
   const dir = mkdtempSync(join(tmpdir(), 'keepalive-test-'));
@@ -215,11 +226,10 @@ function withFakeCurl(fn) {
     const bin = join(dir, 'bin');
     mkdirSync(bin);
     mkdirSync(join(dir, 'work'));
-    writeFileSync(join(bin, 'curl'), FAKE_CURL);
-    writeFileSync(join(bin, 'git'), FAKE_GIT);
-    chmodSync(join(bin, 'curl'), 0o755);
-    chmodSync(join(bin, 'git'), 0o755);
-    for (const [t, path] of ALLOWED_TOOLS) symlinkSync(path, join(bin, t));
+    for (const [t, text] of [['curl', FAKE_CURL], ['git', FAKE_GIT], ['sed', FAKE_SED], ['head', FAKE_HEAD]]) {
+      writeFileSync(join(bin, t), text);
+      chmodSync(join(bin, t), 0o755);
+    }
     return fn(dir);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -274,15 +284,15 @@ function runStep(body, env, dir) {
 function runIsolated(body, env, dir) {
   const curlLog = join(dir, 'curl.log');
   const gitLog = join(dir, 'git.log');
-  writeFileSync(curlLog, '');
-  writeFileSync(gitLog, '');
+  const toolLog = join(dir, 'tool.log');
+  for (const f of [curlLog, gitLog, toolLog]) writeFileSync(f, '');
   const r = spawnSync(BASH, ['--noprofile', '--norc', '-eo', 'pipefail', '-c', body], {
     encoding: 'utf8',
     cwd: join(dir, 'work'),
-    env: { PATH: join(dir, 'bin'), CURL_LOG: curlLog, GIT_LOG: gitLog, ...env }, // process.env는 넘기지 않는다
+    env: { PATH: join(dir, 'bin'), CURL_LOG: curlLog, GIT_LOG: gitLog, TOOL_LOG: toolLog, ...env }, // process.env는 넘기지 않는다
   });
   const read = (f) => readFileSync(f, 'utf8').trim().split('\n').filter(Boolean);
-  return { code: r.status, out: r.stdout + r.stderr, calls: read(curlLog), gitCalls: read(gitLog) };
+  return { code: r.status, out: r.stdout + r.stderr, calls: read(curlLog), gitCalls: read(gitLog), toolCalls: read(toolLog) };
 }
 
 const pingBody = runBodies(J.ping)[0];
@@ -356,7 +366,7 @@ test('격리: 작업 폴더는 임시 폴더, 환경 변수는 시험 값만 (HO
   const [cwd, ...names] = r.out.trim().split('\n');
   assert.equal(cwd, join(dir, 'work'));
   const auto = new Set(['PWD', 'OLDPWD', 'SHLVL', '_']); // bash가 스스로 만드는 것
-  assert.deepEqual(names.filter((n) => !auto.has(n)).sort(), ['CURL_LOG', 'GIT_LOG', 'PATH']);
+  assert.deepEqual(names.filter((n) => !auto.has(n)).sort(), ['CURL_LOG', 'GIT_LOG', 'PATH', 'TOOL_LOG']);
 }));
 
 test('격리: curl·git은 가짜, 그 밖의 네트워크·실행 도구는 PATH에 없다', () => withFakeCurl((dir) => {
@@ -412,6 +422,38 @@ for (const [name, line] of Object.entries(ESCAPES)) {
       assert.throws(() => runStep(mutated, { URL: 'https://db.example.test', KEY: 'pk' }, dir), /실행 거부/);
     }
     assert.ok(!existsSync(join(dir, 'curl.log'))); // 실행 준비 전에 멈췄다
+    if (before) assert.deepEqual(repoState(), before);
+  }));
+}
+
+// 재검토 R1: 관문은 명령 이름만 본다 → 허용 명령(sed·head)의 인자로 파일 읽기·쓰기·명령 실행을 시도하는 변형.
+// 관문은 통과하지만 가짜 sed·head가 워크플로와 다른 인자를 거부해야 한다
+const ARG_ESCAPES = {
+  'sed e 명령(명령 실행)': "echo x | sed 'e git push'",
+  'sed w 명령(파일 쓰기)': "echo x | sed -n 'w ../leak'",
+  'sed 파일 읽기': 'sed -n p ../../../etc/passwd',
+  'sed -i(파일 수정)': "sed -i 's/a/b/' ../x",
+  'head 파일 읽기': 'head -c 100 ../curl.log',
+  'head 인자 추가': 'echo x | head -n 1 ../x',
+};
+
+test('가짜 sed·head: 워크플로와 같은 인자면 실제 도구 결과를 낸다', () => withFakeCurl((dir) => {
+  const r = runIsolated(`printf '  "state": "active",\\n' | sed -n '${SED_SCRIPT}' | head -n 1`, {}, dir);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(r.out, 'active\n');
+}));
+
+for (const [name, line] of Object.entries(ARG_ESCAPES)) {
+  test(`가짜 sed·head: 다른 인자는 거부 (${name})`, () => withFakeCurl((dir) => {
+    assertSafeBody(line); // 관문은 통과하는 변형이다
+    let before = null;
+    try { before = repoState(); } catch { /* git 저장소가 아니면 상태 비교만 생략 */ }
+    const r = runStep(line, {}, dir);
+    assert.notEqual(r.code, 0, r.out);
+    assert.match(r.out, /fake (sed|head): 허용되지 않은 인자/);
+    assert.equal(r.toolCalls.length, 1);
+    assert.deepEqual(r.gitCalls, []);
+    assert.ok(!existsSync(join(dir, 'leak')));
     if (before) assert.deepEqual(repoState(), before);
   }));
 }
