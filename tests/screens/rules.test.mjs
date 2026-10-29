@@ -123,11 +123,11 @@ test('쓰기 허용: category_rules insert·update 칸만(삭제 없음), 정규
   assert.deepEqual(UPDATE_COLUMNS.category_rules, ['pattern', 'match_type', 'category_id', 'is_ambiguous', 'priority', 'is_active']);
 });
 
-test('주소·탭: 규칙 화면들, id가 틀리면 목록, 탭은 더보기, 이체 상대 칸은 아직 누를 수 없음', () => {
+test('주소·탭: 규칙 화면들, id가 틀리면 목록, 탭은 더보기, 세 칸 모두 주소', () => {
   assert.equal(parseHash(`#/rule/${ID(1)}`).screen, 'rule');
   assert.equal(parseHash('#/rule/x').screen, 'rules');
   assert.equal(parseHash(`#/reapply/${ID(1)}?period=3m`).query.get('period'), '3m');
   assert.equal(parseHash('#/rulenew').screen, 'rulenew');
   assert.deepEqual(['rules', 'rule', 'rulenew', 'reapply'].map(activeTab), ['more', 'more', 'more', 'more']);
-  assert.deepEqual(RULE_TABS.map((t) => t.screen), ['rules', null, 'categories']);
+  assert.deepEqual(RULE_TABS.map((t) => t.screen), ['rules', 'cprules', 'categories']);
 });

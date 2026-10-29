@@ -16,10 +16,11 @@ const RE_NAME = /^[a-z_][a-z0-9_]{0,62}$/;
 // - transactions: 거래 직접 추가(화면 설계 v0.1 4-4 "수동 추가") 한 행만. 넣을 수 있는 칸을 아래 목록으로 묶는다
 // - categories: 카테고리 관리(화면 설계 v0.2 3-9) 항목·그룹 추가
 // - category_rules: 가맹점 규칙 추가(화면 설계 v0.2 3-6). 정규식(regex)은 화면에서 만들지 않는다(결정 C2 — 앱이 막음)
+// - counterparty_rules: 이체 상대 직접 추가(화면 설계 v0.2 3-8). 업로드 미리보기도 같은 칸을 쓴다
 // - payment_sources: 결제수단 추가(화면 설계 v0.3 3-2). 시험용(is_test)은 칸 목록에 없다 — 관리자만
-export const INSERT_TABLES = Object.freeze(['import_batches', 'transactions', 'categories', 'category_rules', 'payment_sources']);
+export const INSERT_TABLES = Object.freeze(['import_batches', 'transactions', 'categories', 'category_rules', 'counterparty_rules', 'payment_sources']);
 // update를 허용하는 표 (지금 앱이 고치는 표만. 실수 방지용 — 실제로 막는 것은 RLS). 늘릴 때는 리뷰를 받는다
-export const UPDATE_TABLES = Object.freeze(['transactions', 'categories', 'category_rules', 'payment_sources']);
+export const UPDATE_TABLES = Object.freeze(['transactions', 'categories', 'category_rules', 'counterparty_rules', 'payment_sources']);
 // delete를 허용하는 표 (거래·업로드 묶음은 실제 삭제 금지 — DB도 막음). 카테고리는 쓰는 곳이 없을 때만 DB가 허용(FK)
 // 결제수단은 거래·업로드 묶음이 없을 때만 화면이 지우기를 보이고, 쓰는 곳이 있으면 DB가 거부(FK)
 export const DELETE_TABLES = Object.freeze(['categories', 'payment_sources']);
@@ -29,12 +30,17 @@ export const INSERT_COLUMNS = Object.freeze({
     'kind', 'is_shared', 'review_status', 'memo', 'dedup_key', 'created_by']),
   categories: Object.freeze(['parent_id', 'name', 'sort_order']), // code는 시스템 값 — 앱이 넣지 않음
   category_rules: Object.freeze(['pattern', 'match_type', 'category_id', 'is_ambiguous', 'priority', 'created_by']),
+  counterparty_rules: Object.freeze(['match_field', 'match_text', 'match_type', 'source_id', 'direction', 'alias', 'member_id',
+    'suggested_kind', 'suggested_exclude_reason', 'suggested_category_id', 'suggested_is_shared', 'created_by']),
   payment_sources: Object.freeze(['owner_member_id', 'kind', 'institution', 'label', 'last4', 'import_format_id', 'is_monthly_upload', 'is_active']),
 });
 // 표별로 고칠 수 있는 칸(없으면 칸 이름 형식만 검사)
 export const UPDATE_COLUMNS = Object.freeze({
   categories: Object.freeze(['name', 'sort_order', 'is_active', 'parent_id']),
   category_rules: Object.freeze(['pattern', 'match_type', 'category_id', 'is_ambiguous', 'priority', 'is_active']),
+  // 이름·범위(match_*·source_id·direction)는 고치지 않는다 — 바꾸려면 끄고 새로 추가
+  counterparty_rules: Object.freeze(['alias', 'member_id', 'suggested_kind', 'suggested_exclude_reason', 'suggested_category_id',
+    'suggested_is_shared', 'is_active']),
   // 결제자·종류는 거래가 있으면 DB가 거부(LG005). is_test는 없음
   payment_sources: Object.freeze(['owner_member_id', 'kind', 'institution', 'label', 'last4', 'import_format_id', 'is_monthly_upload', 'is_active']),
 });
@@ -43,6 +49,7 @@ export const UPDATE_COLUMNS = Object.freeze({
 // - payment_sources.kind: 화면 선택지만(check_card 없음). last4: 정확히 숫자 4개 또는 없음(DB CHECK와 같음)
 export const COLUMN_VALUES = Object.freeze({
   category_rules: Object.freeze({ match_type: Object.freeze(['contains', 'exact']) }),
+  counterparty_rules: Object.freeze({ match_type: Object.freeze(['exact', 'contains']) }), // DB CHECK와 같음
   payment_sources: Object.freeze({ kind: Object.freeze(['credit_card', 'bank_account', 'cash']), last4: (v) => v === null || /^[0-9]{4}$/.test(v) }),
 });
 function assertValues(table, row) {
