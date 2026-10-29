@@ -63,8 +63,8 @@ const q = (sql, vars) => {
   return r.out;
 };
 
-async function upload(bytes, format, sourceId, categories) {
-  const parsed = await parseFile(XLSX, bytes, { format, sourceId, categories });
+async function upload(bytes, format, sourceId, categories, counterpartyRules = []) {
+  const parsed = await parseFile(XLSX, bytes, { format, sourceId, categories, counterpartyRules });
   const hash = await fileHash(bytes);
   const { batchId, resumed } = await ensureBatch(pgDb, {
     sourceId, targetMonth: '2026-10-01', fileHash: hash, fileName: batchFileName(format.institution, '2026-10-01', parsed.fileType), memberId: MEMBER,
@@ -84,9 +84,13 @@ test('통합: 업로드·재업로드·겹치는 파일·카드 취소 자동 �
   { uid: UID, mem: MEMBER, sa: SOURCE, sb: SOURCE_B });
   const catId = q("select id from categories where code = 'interest'");
   const categories = new Map([['interest', catId]]);
+  // 이체 상대 규칙 1개(두 사람 간 송금)를 DB에 넣고, 앱이 읽는 모양(구성원 권한 select) 그대로 넘긴다
+  q(`insert into counterparty_rules (match_field, match_text, match_type, source_id, direction, suggested_kind, suggested_exclude_reason, created_by)
+     values ('merchant', '이시험', 'exact', :'sa'::uuid, 'out', 'transfer', 'personal_transfer', :'mem'::uuid)`, { sa: SOURCE, mem: MEMBER });
+  const cpRules = JSON.parse(psql('select json_agg(r) from counterparty_rules r where is_active;').out);
 
   // 1) 형식 A(통장) 업로드: 정규화한 7행이 모두 들어간다
-  const a = await upload(bookBytes(sheetA(), 'xlsx'), FORMAT_A, SOURCE, categories);
+  const a = await upload(bookBytes(sheetA(), 'xlsx'), FORMAT_A, SOURCE, categories, cpRules);
   assert.equal(a.error, null);
   assert.equal(a.resumed, false);
   assert.deepEqual(a.counts, { inserted: 7, duplicate: 0, sensitive: 0, refund_invalid: 0, invalid: 0 });
@@ -107,11 +111,13 @@ test('통합: 업로드·재업로드·겹치는 파일·카드 취소 자동 �
     assert.deepEqual(d.raw, row.raw);
   }
   assert.ok(db.some((x) => x.m === '김가짜 [숫자 가림]'));
+  assert.deepEqual(db.filter((x) => x.m === '이시험').map((x) => [x.kind, x.ex]), [['transfer', 'personal_transfer'], ['transfer', 'personal_transfer']]);
+  assert.equal(q("select count(*) from transactions where batch_id = :'b' and review_status <> 'needs_review'", { b: a.batchId }), '0');
   assert.equal(q("select count(*) from transaction_lines l join transactions t on t.id = l.txn_id where t.batch_id = :'b' and l.category_id = :'c'::uuid",
     { b: a.batchId, c: catId }), '1');
 
   // 2) 같은 파일 다시: 같은 묶음으로 이어 올리고 모두 duplicate
-  const a2 = await upload(bookBytes(sheetA(), 'xlsx'), FORMAT_A, SOURCE, categories);
+  const a2 = await upload(bookBytes(sheetA(), 'xlsx'), FORMAT_A, SOURCE, categories, cpRules);
   assert.equal(a2.resumed, true);
   assert.equal(a2.batchId, a.batchId);
   assert.deepEqual(a2.counts, { inserted: 0, duplicate: 7, sensitive: 0, refund_invalid: 0, invalid: 0 });
