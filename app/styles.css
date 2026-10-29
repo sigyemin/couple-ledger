@@ -237,6 +237,47 @@ ul { list-style: none; margin: 0; padding: 0; }
 .cat-add { display: grid; grid-template-columns: 1fr auto; gap: 6px; margin-top: 10px; }
 .cat-line .field { width: auto; flex: 1; min-width: 120px; }
 
+/* 리포트 (화면 설계 v0.2 3-2~3-4, 5장 차트 규칙) */
+.seg { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; background: var(--line); border-radius: 12px; }
+.seg a { display: flex; align-items: center; justify-content: center; min-height: 40px; border-radius: 9px;
+  text-decoration: none; color: var(--sub); font-size: 15px; font-weight: 600; }
+.seg a.on { background: var(--card); color: var(--text); }
+.chart { display: block; width: 100%; max-width: 420px; height: auto; margin-top: 10px; }
+.chart .axis { stroke: #D1D6DB; }
+.chart .bar { fill: #C9D7F2; }
+.chart .bar.on { fill: var(--blue); }
+.chart text { font-size: 11px; fill: var(--sub); }
+.chart text.on { fill: var(--text); font-weight: 700; }
+.card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.legend { font-size: 12px; color: var(--sub); }
+.up { color: var(--orange); }
+.down { color: var(--blue); }
+.same { color: var(--sub-on-white); }
+.cmp-list li + li .cmp { border-top: 1px solid var(--line); }
+.cmp { display: grid; grid-template-columns: minmax(0, 1fr) auto 120px; align-items: center; gap: 8px; min-height: 48px;
+  text-decoration: none; color: var(--text); font-size: 15px; }
+.cmp-name { overflow-wrap: anywhere; }
+.cmp-name.none { color: var(--sub); }
+.cmp-amount { font-weight: 600; text-align: right; }
+.cmp-diff { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; font-size: 12px; }
+.diff-bar .track { fill: var(--line); }
+.diff-bar .d.up { fill: var(--orange); }
+.diff-bar .d.down { fill: var(--blue); }
+.diff-bar .d.same { fill: #8B95A1; }
+.item-list li + li .item { border-top: 1px solid var(--line); }
+.item { display: flex; flex-direction: column; gap: 6px; padding: 12px 0; text-decoration: none; color: var(--text); }
+.item-top, .item-bottom { display: flex; align-items: center; gap: 8px; }
+.item-name { flex: 1; min-width: 0; font-size: 15px; }
+.item-amount { font-weight: 600; }
+.item-bottom { font-size: 12px; }
+.item-bottom .bar-track { flex: 1; height: 6px; }
+.item-pct { width: 40px; text-align: right; color: var(--sub); }
+.item-diff { width: 84px; text-align: right; }
+.stack { display: flex; flex-direction: column; gap: 12px; }
+@media (max-width: 360px) { .cmp { grid-template-columns: minmax(0, 1fr) auto 96px; } }
+.diff-bar { width: 100%; max-width: 120px; height: 6px; }
+.cmp:hover, .item:hover { color: var(--text); background: var(--bg); }
+
 /* 규칙·카테고리 탭, 가맹점 규칙 (화면 설계 v0.2 3-5~3-7) */
 .rule-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 4px; background: var(--line); border-radius: 12px; }
 .rule-tabs a, .rule-tabs span { display: flex; align-items: center; justify-content: center; min-height: 40px; border-radius: 9px;
