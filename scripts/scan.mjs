@@ -73,7 +73,8 @@ export { hasSensitiveNumber };
 // DB 함수에는 없는 단계다(DB의 검사 칸에는 UUID·해시가 들어가지 않는다).
 // 우회 방지: 16진 글자는 숫자만으로도 채워지므로, 식별자와 그 앞뒤로 이어진 숫자·구분자까지 합쳐
 // (날짜·시각은 뺀 뒤) 16진 글자에서 끊은 각 조각의 숫자가 10자리 이상이면 지우지 않는다.
-// 단 숫자의 절반 넘게 0인 조각은 0으로 채운 고정 id로 보고 지운다(카드·계좌번호가 그런 모양일 가능성은 낮음 — 추정).
+// 단 0이 아닌 숫자가 4개 이하인 조각은 0으로 채운 고정 id로 보고 지운다
+// (0으로 채운 테스트·시드 id. 10자리 이상 카드·계좌·전화번호에 0 아닌 숫자가 4개 이하일 가능성은 낮음 — 추정).
 // 무작위 UUID·SHA도 드물게 숫자가 10자리 이상 이어져 걸릴 수 있다 → 오탐이면 PR에 사유를 적는다.
 const RE_UUID = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/g;
 const RE_HEX = /(?<![0-9a-zA-Z])[0-9a-fA-F]{32,}(?![0-9a-zA-Z])/g;
@@ -82,8 +83,8 @@ const RE_RUN_CHAR = /[0-9 ./_()-]/;
 function hidesLongNumber(segment) {
   return removeDateTime(segment).split(/[^0-9 ./_()-]+/).some((piece) => {
     const d = piece.replace(/[^0-9]/g, '');
-    const zeros = d.replace(/[^0]/g, '').length;
-    return d.length >= MIN_SENSITIVE_DIGITS && zeros * 2 <= d.length;
+    const nonZero = d.replace(/0/g, '').length;
+    return d.length >= MIN_SENSITIVE_DIGITS && nonZero > 4;
   });
 }
 

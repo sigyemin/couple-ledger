@@ -45,17 +45,19 @@ export const MASK_TEXT = '[숫자 가림]';
 
 export function maskSensitiveNumbers(t, options) {
   if (t == null) return t;
-  let s = String(t).normalize('NFKC');
+  const s = String(t).normalize('NFKC');
   if (!hasSensitiveNumber(s, options)) return s;
-  // 날짜·시각은 살리고, 그 밖의 10자리 이상 덩어리만 가린다
-  const keep = [];
-  const hold = (m) => {
-    keep.push(m);
-    return `\uE000${keep.length - 1}\uE001`;
-  };
-  s = s.replace(RE_DATE, hold).replace(RE_TIME, hold);
-  if (options?.packedDateTime !== false) s = s.replace(RE_PACKED_DATETIME, hold);
-  s = s.replace(RE_DIGIT_RUN, (tok) =>
-    tok.replace(/[^0-9]/g, '').length >= MIN_SENSITIVE_DIGITS ? MASK_TEXT : tok);
-  return s.replace(/\uE000([0-9]+)\uE001/g, (_, i) => keep[Number(i)]);
+  // 검출과 같은 덩어리를 가린다: 날짜·시각을 같은 길이의 공백으로 바꾼 문자열에서 덩어리 위치를 찾고,
+  // 그 위치를 원문에서 가린다(공백은 구분자라 날짜를 사이에 둔 숫자도 검출처럼 한 덩어리가 된다)
+  const blank = (m) => ' '.repeat(m.length);
+  let probe = s.replace(RE_DATE, blank).replace(RE_TIME, blank);
+  if (options?.packedDateTime !== false) probe = probe.replace(RE_PACKED_DATETIME, blank);
+  let out = '';
+  let last = 0;
+  for (const m of probe.matchAll(RE_DIGIT_RUN)) {
+    if (m[0].replace(/[^0-9]/g, '').length < MIN_SENSITIVE_DIGITS) continue;
+    out += s.slice(last, m.index) + MASK_TEXT;
+    last = m.index + m[0].length;
+  }
+  return out + s.slice(last);
 }

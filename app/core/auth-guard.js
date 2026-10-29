@@ -11,19 +11,54 @@ import { AppError, toAppError } from './errors.js';
 
 export const NOT_MEMBER = new AppError('not_member', '이 계정은 사용할 수 없습니다. 등록된 구글 계정으로 로그인해 주세요');
 
-/** 브라우저 로컬 저장소 정리 (IndexedDB 전체, Cache Storage 전체). 실패해도 계속 */
-export async function clearLocalData(env = globalThis) {
+// localStorage·sessionStorage에서 지울 키 접두. 'sb-' = supabase-js 세션 토큰·PKCE code verifier
+// [추정: supabase-js v2 브라우저 기본 저장 키 sb-<ref>-auth-token. vendor 고정 PR에서 확인],
+// 'cl-' = 이 앱이 쓰는 키(앱 코드는 이 접두만 쓴다).
+// clear()는 쓰지 않는다: GitHub Pages 프로젝트 사이트는 같은 계정의 다른 페이지와 출처를 함께 쓴다.
+// 같은 출처에 다른 Supabase 앱이 있으면 'sb-'가 그 앱 키까지 지울 수 있다 → 클라이언트를 만드는 곳에서
+// 프로젝트 ref를 넣은 접두('sb-<ref>-')를 prefixes로 넘긴다(vendor·config PR에서 연결)
+export const STORAGE_PREFIXES = Object.freeze(['sb-', 'cl-']);
+
+function clearStorage(store, prefixes) {
+  if (!store) return;
+  const keys = [];
+  for (let i = 0; i < store.length; i++) keys.push(store.key(i));
+  for (const k of keys) {
+    if (typeof k === 'string' && prefixes.some((p) => k.startsWith(p))) store.removeItem(k);
+  }
+}
+
+/**
+ * 브라우저 로컬 저장소 정리: localStorage·sessionStorage(접두 키만), IndexedDB 전체, Cache Storage 전체.
+ * 실패해도 계속하고, 모두 지웠으면 true. 다른 탭이 DB를 열고 있어 막히면(onblocked) false
+ */
+export async function clearLocalData(env = globalThis, prefixes = STORAGE_PREFIXES) {
+  let clean = true;
+  for (const name of ['localStorage', 'sessionStorage']) {
+    try {
+      clearStorage(env[name], prefixes);
+    } catch {
+      clean = false;
+    }
+  }
   try {
     const dbs = (await env.indexedDB?.databases?.()) ?? [];
-    await Promise.all(dbs.map((d) => d?.name && new Promise((resolve) => {
+    const results = await Promise.all(dbs.map((d) => d?.name && new Promise((resolve) => {
       const req = env.indexedDB.deleteDatabase(d.name);
-      req.onsuccess = req.onerror = req.onblocked = () => resolve();
+      req.onsuccess = () => resolve(true);
+      req.onerror = req.onblocked = () => resolve(false);
     })));
-  } catch { /* 정리 실패는 무시 */ }
+    if (results.includes(false)) clean = false;
+  } catch {
+    clean = false;
+  }
   try {
     const keys = (await env.caches?.keys?.()) ?? [];
     await Promise.all(keys.map((k) => env.caches.delete(k)));
-  } catch { /* 정리 실패는 무시 */ }
+  } catch {
+    clean = false;
+  }
+  return clean;
 }
 
 /**
@@ -36,6 +71,11 @@ export async function clearLocalData(env = globalThis) {
 export function createAuthGuard({ auth, db, redirectTo, clear = clearLocalData } = {}) {
   if (!auth || !db) throw new TypeError('auth와 db가 필요합니다');
   let member = null;
+  // 로그아웃·계정 변경 등 세션이 바뀌면 확인된 구성원을 버린다(다음 화면 진입 때 다시 확인)
+  // [추정: 다른 탭의 로그아웃도 supabase-js가 이 이벤트로 알려 준다. 실환경 미확인]
+  auth.onAuthStateChange?.((event) => {
+    if (event !== 'TOKEN_REFRESHED' && event !== 'INITIAL_SESSION') member = null;
+  });
 
   async function signOut() {
     member = null;
@@ -65,7 +105,11 @@ export function createAuthGuard({ auth, db, redirectTo, clear = clearLocalData }
       if (!s?.session) throw new AppError('not_login', '로그인이 필요합니다');
 
       const { data: memberId, error: me } = await db.rpc('my_member_id', {}, { retry: true });
-      if (me) throw me;
+      if (me) {
+        // 권한 거부(42501 등)는 막힌 계정으로 보고 로그아웃·정리. 네트워크 등은 그대로 올린다
+        if (me.code === 'forbidden') await signOut();
+        throw me;
+      }
       if (!memberId) {
         await signOut();
         throw NOT_MEMBER;

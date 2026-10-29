@@ -48,3 +48,18 @@ test('maskSensitiveNumbers: 긴 숫자만 가리고 날짜·금액은 남긴다'
   assert.equal(maskSensitiveNumbers('GS25 강남2호점'), 'GS25 강남2호점');
   assert.equal(hasSensitiveNumber(maskSensitiveNumbers(`메모 ${j('1234 5678', ' 9012 3456')}`)), false);
 });
+
+test('마스킹은 검출과 같은 덩어리를 가린다 (날짜를 사이에 둔 숫자)', () => {
+  const s = `메모 ${j('12345')} 2026-10-06 ${j('67890')}`;
+  assert.equal(hasSensitiveNumber(s), true);
+  const masked = maskSensitiveNumbers(s);
+  assert.equal(hasSensitiveNumber(masked), false);
+  assert.equal(masked, `메모 ${MASK_TEXT}`);
+});
+
+test('사용 영역 문자가 있어도 글자를 망가뜨리지 않는다', () => {
+  const s = `\uE000\uE0010\uE001 ${j('010-1234', '-5678')}`;
+  const masked = maskSensitiveNumbers(s);
+  assert.equal(masked, `\uE000\uE0010\uE001 ${MASK_TEXT}`);
+  assert.ok(!masked.includes('undefined'));
+});

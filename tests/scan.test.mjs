@@ -164,6 +164,9 @@ test('0000이 든 숫자나 식별자 경계에 걸친 숫자도 지우지 않�
     `${digits(6)} ${digits(6, 3)}${'ef'.repeat(15)}`,   // 공백 앞은 밖, 뒤는 16진 덩어리 안
     `${digits(6)}-${uuidOf(`${digits(6, 3)}${'a'.repeat(26)}`)}`, // 하이픈 앞은 밖, 뒤는 UUID 안
   ];
+  // 0이 절반 넘는 13자리(0 아닌 숫자 6개)를 UUID 모양에 넣은 것
+  const zeroish = `1${'0'.repeat(3)}23${'0'.repeat(4)}456`;
+  cases.push(uuidOf(`${zeroish}${'b'.repeat(19)}`));
   for (const s of cases) assert.equal(checkContent('app/x.js', `v = '${s}';`).length, 1, s);
   // 0으로 채운 고정 id·평범한 SHA·날짜 옆 SHA는 여전히 제외
   for (const s of ['c0000000-0000-0000-0000-000000000020', 'e7e58c8d5e4dc8ec7cd9e38cbac82df818a496e2',
