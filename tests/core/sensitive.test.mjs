@@ -121,3 +121,25 @@ test('사용 영역 문자가 있어도 글자를 망가뜨리지 않는다', ()
   assert.equal(masked, `\uE000\uE0010\uE001 ${MASK_TEXT}`);
   assert.ok(!masked.includes('undefined'));
 });
+
+// ---------------------------------------------------------------- QA 결함 D1: 구분자의 NFKC 뒤 모양
+import { RUN_SEPARATORS, normalizeForCheck } from '../../app/core/sensitive.js';
+
+test('구분자 목록: 모든 구분자의 NFKC 뒤 모양이 목록 안에 있다 (기계적 점검)', () => {
+  for (const c of RUN_SEPARATORS) {
+    for (const n of c.normalize('NFKC')) {
+      assert.ok(RUN_SEPARATORS.includes(n), `U+${c.codePointAt(0).toString(16).toUpperCase()} → U+${n.codePointAt(0).toString(16).toUpperCase()}`);
+    }
+  }
+});
+
+test('구분자마다 그 구분자 하나만 써서 4자리 묶음 넷을 이으면 잡힌다 (ㆍ U+318D 포함)', () => {
+  const groups = ['1234', '5678', '9012', '3456'];
+  for (const c of RUN_SEPARATORS) {
+    const s = groups.join(c);
+    assert.equal(hasSensitiveNumber(s), true, `U+${c.codePointAt(0).toString(16).toUpperCase()}`);
+    assert.equal(hasSensitiveNumber(maskSensitiveNumbers(s)), false, `가림 U+${c.codePointAt(0).toString(16).toUpperCase()}`);
+  }
+  assert.equal(normalizeForCheck('ㆍ'), 'ᆞ'); // 원인
+  assert.equal(maskSensitiveNumbers(`김가짜 ${groups.join('ㆍ')} 메모`), `김가짜 ${MASK_TEXT} 메모`);
+});
