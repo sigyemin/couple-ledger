@@ -16,8 +16,8 @@ export const TABS = Object.freeze([
 /** 현재 화면에 맞는 탭 표시 (거래 상세는 내역 탭) */
 export function activeTab(screen) {
   if (screen === 'txn' || screen === 'add') return 'list';
-  return ['categories', 'trash', 'changes', 'change', 'review', 'report', 'rgroup', 'ritem', 'rules', 'rule', 'rulenew', 'reapply'].includes(screen)
-    ? 'more' : screen;
+  return ['categories', 'trash', 'changes', 'change', 'review', 'report', 'rgroup', 'ritem', 'rules', 'rule', 'rulenew', 'reapply',
+    'cprules', 'cprule', 'cprulenew', 'cpapply'].includes(screen) ? 'more' : screen;
 }
 
 export function tabBar(screen, doc = globalThis.document) {
@@ -48,7 +48,7 @@ export function errorView(message, code, doc = globalThis.document) {
 /** 규칙·카테고리 세 칸 전환(각자 주소 — 뒤로 가기가 탭을 되돌림, 설계 v0.2 5장). 아직 없는 칸은 누를 수 없다 */
 export const RULE_TABS = Object.freeze([
   { screen: 'rules', label: '가맹점 규칙' },
-  { screen: null, label: '이체 상대', sub: '준비 중' },
+  { screen: 'cprules', label: '이체 상대' },
   { screen: 'categories', label: '카테고리' },
 ]);
 
