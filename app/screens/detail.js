@@ -312,7 +312,11 @@ export async function renderDetail({ db, member, id, go, reload, isCurrent, onEr
 
   const main = h('main', { class: 'screen' }, [
     headOf('거래 상세'), hero, status, info, linkCard, classCard, settleCard, memoCard, historyCard, confirmBtn,
-    m.deleted ? h('p', { class: 'card muted', text: '휴지통에 있는 거래예요' }, [], doc) : trash,
+    m.deleted
+      ? h('a', { class: 'row-link soft', attrs: { href: buildHash('trash') } }, [
+        h('span', { text: '휴지통에 있는 거래예요' }, [], doc), h('strong', { text: '휴지통에서 되살리기 ›' }, [], doc),
+      ], doc)
+      : trash,
   ], doc);
   return main;
 }

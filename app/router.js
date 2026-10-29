@@ -6,7 +6,9 @@
 // 의존 없음.
 // =====================================================================
 
-export const SCREENS = Object.freeze(['home', 'list', 'txn', 'add', 'upload', 'settle', 'more', 'categories']);
+export const SCREENS = Object.freeze(['home', 'list', 'txn', 'add', 'upload', 'settle', 'more', 'categories', 'trash', 'changes', 'change']);
+// id를 받는 화면 → id가 틀리면 갈 목록 화면
+const ID_SCREENS = Object.freeze({ txn: 'list', change: 'changes' });
 const RE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const RE_KEY = /^[a-z][a-z_]{0,23}$/;
 const MAX_VALUE = 100;
@@ -31,7 +33,7 @@ export function parseHash(hash) {
     if (RE_KEY.test(key) && value.length <= MAX_VALUE && !query.has(key)) query.set(key, value);
   }
   if (!SCREENS.includes(name)) return { screen: 'home', id: null, query };
-  if (name === 'txn') return RE_ID.test(id ?? '') ? { screen: 'txn', id, query } : { screen: 'list', id: null, query };
+  if (name in ID_SCREENS) return RE_ID.test(id ?? '') ? { screen: name, id, query } : { screen: ID_SCREENS[name], id: null, query };
   return { screen: name, id: null, query };
 }
 
