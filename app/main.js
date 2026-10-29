@@ -14,6 +14,8 @@ import { startRouter, monthParam, currentMonth } from './router.js';
 import { h, replaceChildren } from './ui/dom.js';
 import { tabBar, comingSoon, errorView } from './screens/shell.js';
 import { renderHome } from './screens/home.js';
+import { renderList } from './screens/list.js';
+import { renderDetail } from './screens/detail.js';
 
 const doc = globalThis.document;
 const root = doc.getElementById('app');
@@ -72,7 +74,12 @@ async function boot() {
     ]);
   };
 
-  startRouter(async (route, isCurrent) => {
+  // 화면의 링크·쓰기 뒤 다시 그리기. 첫 화면을 그릴 때는 아직 router가 없지만, 이 둘은 사용자 동작 뒤에만 불린다
+  let router = null;
+  const go = (hash) => router?.go(hash);
+  const reload = () => router?.reload();
+
+  router = startRouter(async (route, isCurrent) => {
     let member;
     try {
       member = await guard.requireMember();
@@ -85,14 +92,23 @@ async function boot() {
       return replaceChildren(root, loginView(`${err.message} (오류 번호 ${displayCode(err, traceId)})`));
     }
     if (!isCurrent()) return;
-    const onError = (err) => logger.member(err, { stage: route.screen === 'home' ? STAGES.boot : STAGES.list, traceId: newTraceId() });
+    // 기록하고 화면에 보일 오류 번호를 돌려준다
+    const onError = (err, extra = {}) => {
+      const traceId = newTraceId();
+      logger.member(err, { stage: route.screen === 'home' ? STAGES.boot : STAGES.list, traceId, ...extra });
+      return displayCode(err, traceId);
+    };
     let view;
     try {
+      const monthStart = monthParam(route.query.get('month'), currentMonth());
       if (route.screen === 'home') {
-        const monthStart = monthParam(route.query.get('month'), currentMonth());
         view = await renderHome({ db, member, monthStart, isCurrent, onError });
+      } else if (route.screen === 'list') {
+        view = await renderList({ db, monthStart, query: route.query, go, isCurrent, onError });
+      } else if (route.screen === 'txn') {
+        view = await renderDetail({ db, member, id: route.id, go, reload, isCurrent, onError });
       } else {
-        const titles = { list: '내역', txn: '거래 상세', upload: '올리기', settle: '정산', more: '더보기' };
+        const titles = { upload: '올리기', settle: '정산', more: '더보기' };
         view = comingSoon(titles[route.screen]);
       }
     } catch (err) {

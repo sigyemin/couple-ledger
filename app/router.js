@@ -68,7 +68,7 @@ export function currentMonth(now = new Date()) {
 
 /**
  * 라우터 시작. render(route)는 화면을 그린다(비동기 가능). 빠르게 바뀌면 앞 화면 결과는 버린다
- * @returns {{ go(hash), stop() }}
+ * @returns {{ go(hash), reload(), stop() }}
  */
 export function startRouter(render, env = globalThis) {
   let seq = 0;
@@ -80,7 +80,11 @@ export function startRouter(render, env = globalThis) {
   onChange();
   return {
     go(hash) {
-      env.location.hash = hash;
+      if (env.location.hash === hash) onChange(); // 같은 주소면 hashchange가 없어 직접 다시 그린다
+      else env.location.hash = hash;
+    },
+    reload() {
+      onChange();
     },
     stop() {
       env.removeEventListener('hashchange', onChange);
