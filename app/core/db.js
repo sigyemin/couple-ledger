@@ -12,6 +12,8 @@
 import { AppError, toAppError } from './errors.js';
 
 const RE_NAME = /^[a-z_][a-z0-9_]{0,62}$/;
+// insert를 허용하는 표 (앱이 직접 행을 넣는 곳만. 나머지 쓰기는 RPC로). 늘릴 때는 리뷰를 받는다
+export const INSERT_TABLES = Object.freeze(['import_batches']);
 const FILTER_OPS = new Set(['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'in', 'is', 'ilike']);
 const IS_VALUES = new Set([null, true, false]);
 
@@ -126,6 +128,7 @@ export function createDb(client) {
     insert(table, row) {
       try {
         assertName('테이블', table);
+        if (!INSERT_TABLES.includes(table)) throw new TypeError('insert를 허용하지 않는 표입니다');
         const keys = Object.keys(row ?? {});
         if (!keys.length || Array.isArray(row)) throw new TypeError('넣을 값이 없습니다');
         keys.forEach((k) => assertName('컬럼', k));

@@ -119,3 +119,39 @@ test('db.insert: 형식 검사·재시도 없음', async () => {
     assert.equal((await bad).error.code, 'invalid');
   }
 });
+
+test('D3: 환불 행이 duplicate인데 DB 금액과 다르면 알림, 같으면 없음, 조회 실패는 표시만', async () => {
+  const rows = [
+    { rowNo: 3, kind: 'expense', amount: 20000, dedup_key: 'a' },
+    { rowNo: 3, kind: 'refund', amount: 6000, dedup_key: 'b' },
+    { rowNo: 4, kind: 'refund', amount: 9000, dedup_key: 'c' },
+  ];
+  const selects = [];
+  const db = {
+    async rpc(_, args) {
+      return { data: args.p_rows.map((r, i) => ({ row_no: i + 1, result: 'duplicate', txn_id: `t-${r.dedup_key}`, detail: null })), error: null };
+    },
+    async select(view, opts) {
+      selects.push([view, opts]);
+      return { data: [{ id: 't-b', amount: '5000' }, { id: 't-c', amount: 9000 }], error: null };
+    },
+  };
+  const r = await uploadRows(db, 'b1', rows);
+  assert.deepEqual(r.notices, [{ rowNo: 3, kind: 'refund_amount_changed', oldAmount: 5000, newAmount: 6000 }]);
+  assert.equal(r.noticeCheckFailed, false);
+  assert.deepEqual(selects[0], ['transactions', { columns: 'id,amount', filters: [{ col: 'id', op: 'in', value: ['t-b', 't-c'] }] }]);
+
+  const failing = { ...db, async select() { return { data: null, error: new AppError('network', 'x') }; } };
+  const r2 = await uploadRows(failing, 'b1', rows);
+  assert.deepEqual([r2.notices, r2.noticeCheckFailed, r2.counts.duplicate], [[], true, 3]);
+});
+
+test('db.insert: 허용 목록 밖의 표는 보내지 않는다', async () => {
+  const sent = [];
+  const client = { from(t) { sent.push(t); return {}; }, rpc() {} };
+  const db = createDb(client);
+  for (const t of ['members', 'transactions', 'categories']) {
+    assert.equal((await db.insert(t, { a: 1 })).error.code, 'invalid');
+  }
+  assert.deepEqual(sent, []);
+});

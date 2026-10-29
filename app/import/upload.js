@@ -5,6 +5,8 @@
 // - 묶음 파일명은 원본 파일명이 아니라 앱이 만든 이름(<기관>_<YYYY-MM>.<확장자>)만 (스키마 import_batches [I2])
 // - 쓰기 RPC는 재시도하지 않는다. 중간에 실패하면 멈추고 지금까지의 결과를 돌려준다(같은 파일을 다시 올리면 이어진다)
 // - 같은 묶음 안에서 원거래 행을 환불 행보다 앞에 둔다(정규화 결과 순서 그대로 보낸다)
+// - 환불 행이 duplicate인데 DB에 이미 있는 그 환불의 금액이 새 파일 값과 다르면 알림(notices)으로 돌려준다
+//   (부분취소 금액이 바뀜 — 사용자가 확인, 자동 반영 안 함. 설계 확인 D3). 조회는 구성원 select 권한 안에서
 // 의존: core/db.js(createDb 결과), core/errors.js, core/sensitive.js, ./normalize.js
 // =====================================================================
 import { AppError } from '../core/errors.js';
@@ -12,6 +14,7 @@ import { hasSensitiveNumber } from '../core/sensitive.js';
 import { toRpcRows } from './normalize.js';
 
 export const CHUNK_ROWS = 200;
+const LOOKUP_IDS = 100; // 금액 대조 조회 한 번에 넣는 id 수
 export const RESULTS = Object.freeze(['inserted', 'duplicate', 'sensitive', 'refund_invalid', 'invalid']);
 
 const RE_MONTH = /^[0-9]{4}-(0[1-9]|1[0-2])-01$/;
@@ -56,27 +59,54 @@ export async function ensureBatch(db, { sourceId, targetMonth, fileHash, fileNam
  * 행을 200행씩 보낸다
  * @param rows normalizeRows 결과 rows (rowNo 포함)
  * @returns {Promise<{ counts: object, failures: {rowNo:number, result:string, sqlState:string|null}[],
- *                     sentRows: number, error: AppError|null }>}
+ *                     notices: {rowNo:number, kind:'refund_amount_changed', oldAmount:number, newAmount:number}[],
+ *                     noticeCheckFailed: boolean, sentRows: number, error: AppError|null }>}
  *   failures: inserted·duplicate가 아닌 행 + 자동 환불 연결 실패(inserted, detail LG003)
  */
 export async function uploadRows(db, batchId, rows, { chunkRows = CHUNK_ROWS, onProgress } = {}) {
   const counts = Object.fromEntries(RESULTS.map((r) => [r, 0]));
   const failures = [];
+  const dupRefunds = []; // { rowNo, txnId, amount }
   let sentRows = 0;
   for (let i = 0; i < rows.length; i += chunkRows) {
     const part = rows.slice(i, i + chunkRows);
     const { data, error } = await db.rpc('import_transactions', { p_batch_id: batchId, p_rows: toRpcRows(part) });
-    if (error) return { counts, failures, sentRows, error };
+    if (error) return { counts, failures, notices: [], noticeCheckFailed: false, sentRows, error };
     for (const r of data ?? []) {
       const src = part[r.row_no - 1];
       const result = RESULTS.includes(r.result) ? r.result : 'invalid';
       counts[result]++;
       const sqlState = typeof r.detail === 'string' && /^[0-9A-Z]{5}$/.test(r.detail) ? r.detail : null;
+      if (result === 'duplicate' && src?.kind === 'refund' && typeof r.txn_id === 'string') {
+        dupRefunds.push({ rowNo: src.rowNo ?? null, txnId: r.txn_id, amount: src.amount });
+      }
       if (result !== 'inserted' && result !== 'duplicate') failures.push({ rowNo: src?.rowNo ?? null, result, sqlState });
       else if (result === 'inserted' && sqlState === 'LG003') failures.push({ rowNo: src?.rowNo ?? null, result: 'refund_unlinked', sqlState });
     }
     sentRows += part.length;
     onProgress?.({ sentRows, total: rows.length });
   }
-  return { counts, failures, sentRows, error: null };
+  const { notices, failed } = await refundAmountNotices(db, dupRefunds);
+  return { counts, failures, notices, noticeCheckFailed: failed, sentRows, error: null };
+}
+
+/** duplicate 환불의 DB 금액과 새 파일 금액 대조 (조회 실패는 업로드 결과를 막지 않고 failed로 알린다) */
+async function refundAmountNotices(db, dupRefunds) {
+  const notices = [];
+  for (let i = 0; i < dupRefunds.length; i += LOOKUP_IDS) {
+    const part = dupRefunds.slice(i, i + LOOKUP_IDS);
+    const { data, error } = await db.select('transactions', {
+      columns: 'id,amount',
+      filters: [{ col: 'id', op: 'in', value: part.map((d) => d.txnId) }],
+    });
+    if (error) return { notices, failed: true };
+    const amounts = new Map((data ?? []).map((t) => [t.id, Number(t.amount)]));
+    for (const d of part) {
+      const old = amounts.get(d.txnId);
+      if (old !== undefined && old !== d.amount) {
+        notices.push({ rowNo: d.rowNo, kind: 'refund_amount_changed', oldAmount: old, newAmount: d.amount });
+      }
+    }
+  }
+  return { notices, failed: false };
 }

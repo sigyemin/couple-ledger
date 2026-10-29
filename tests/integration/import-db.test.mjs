@@ -40,6 +40,10 @@ const json = (r) => (r.error ? { data: null, error: toAppError(r.error) } : { da
 // upload.js가 쓰는 db 모양(select·insert·rpc)만 psql로 흉내 낸다 (PostgREST 대신)
 const pgDb = {
   async select(view, { filters }) {
+    if (view === 'transactions') {
+      const ids = JSON.stringify(filters[0].value);
+      return json(psql("select coalesce(json_agg(json_build_object('id', id, 'amount', amount)), '[]') from transactions where id in (select jsonb_array_elements_text(:'ids'::jsonb)::uuid);", { ids }));
+    }
     assert.equal(view, 'import_batches');
     const [s, h] = filters.map((f) => f.value);
     return json(psql("select coalesce(json_agg(json_build_object('id', id)), '[]') from import_batches where source_id = :'s'::uuid and file_hash = :'h';", { s, h }));
@@ -143,6 +147,13 @@ test('통합: 업로드·재업로드·겹치는 파일·카드 취소 자동 �
   assert.deepEqual(b2.counts, { inserted: 1, duplicate: 5, sensitive: 0, refund_invalid: 0, invalid: 0 });
   assert.equal(q(`select count(*) from transactions r join transactions o on o.id = r.refund_of_txn_id
       where r.batch_id = :'b' and r.approval_no = '12345678' and o.kind = 'expense'`, { b: b2.batchId }), '1');
+
+  // 5-b) 부분취소 금액이 바뀐 파일: 환불은 duplicate, DB 금액과 달라 알림(자동 반영 안 함)
+  const changed = sheetB().map((row) => (row[6] === '87654321' ? row.map((c, i) => (i === 8 ? '6,000' : c)) : row));
+  const b3 = await upload(bookBytes(changed, 'biff8'), FORMAT_B, SOURCE_B, categories);
+  assert.equal(b3.counts.inserted, 0);
+  assert.deepEqual(b3.notices, [{ rowNo: 5, kind: 'refund_amount_changed', oldAmount: 5000, newAmount: 6000 }]);
+  assert.equal(b2.notices.length, 0);
 
   // 6) DB가 거부하는 행은 결과로 돌아오고 파일 줄 번호로 바뀐다(정규화를 거치지 않은 행을 일부러 보냄)
   const bad = [{ ...a.parsed.rows[0], rowNo: 99, dedup_key: `k2:${'0'.repeat(63)}1`, merchant_raw: `가짜 ${FAKE.phone}` }];
