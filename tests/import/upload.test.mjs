@@ -151,15 +151,25 @@ test('db.insert: 허용 목록 밖의 표는 보내지 않는다', async () => {
   const sent = [];
   const client = { from(t) { sent.push(t); return {}; }, rpc() {} };
   const db = createDb(client);
-  for (const t of ['members', 'categories', 'transaction_lines', 'payment_sources']) {
+  for (const t of ['members', 'transaction_lines', 'payment_sources']) {
     assert.equal((await db.insert(t, { a: 1 })).error.code, 'invalid');
   }
+  // categories는 부모·이름·순서만(code·is_active 등 거부)
+  for (const k of ['code', 'is_active', 'id']) {
+    assert.equal((await db.insert('categories', { name: 'x', [k]: null })).error.code, 'invalid', k);
+  }
+  assert.equal((await db.update('categories', 'id1', { code: 'x' })).error.code, 'invalid', 'code는 고칠 수 없음');
+  // delete는 categories만
+  for (const t of ['transactions', 'import_batches', 'members', 'category_rules']) {
+    assert.equal((await db.delete(t, 'id1')).error.code, 'invalid', t);
+  }
+  assert.equal((await db.delete('categories', '')).error.code, 'invalid');
   // transactions는 허용 칸만(직접 추가). 집계·삭제·연결 칸은 넣을 수 없다
   for (const k of ['deleted_at', 'is_excluded', 'refund_of_txn_id', 'batch_id', 'raw', 'updated_by', 'settlement_changed_at']) {
     assert.equal((await db.insert('transactions', { amount: 1, [k]: null })).error.code, 'invalid', k);
   }
   // update도 허용 표만(PR #17 리뷰 L1)
-  for (const t of ['members', 'monthly_reviews', 'categories', 'payment_sources', 'import_batches']) {
+  for (const t of ['members', 'monthly_reviews', 'payment_sources', 'import_batches']) {
     assert.equal((await db.update(t, 'id1', { a: 1 })).error.code, 'invalid', t);
   }
   assert.deepEqual(sent, []);

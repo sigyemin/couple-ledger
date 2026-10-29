@@ -1,7 +1,8 @@
 // 더보기·카테고리 보기 모델 (가짜 이름만)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { moreMenu, categoryTree } from '../../app/screens/more-model.js';
+import { moreMenu } from '../../app/screens/more-model.js';
+import { categoryTree } from '../../app/screens/categories-model.js';
 import { activeTab } from '../../app/screens/shell.js';
 import { parseHash } from '../../app/router.js';
 
