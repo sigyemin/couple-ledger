@@ -81,7 +81,8 @@ app/main.js           부팅: 인증 가드 → 라우터    (공통 컴포넌�
 app/core/             공통 컴포넌트: auth-guard(인증 가드), db(DB 래퍼), errors(오류 처리·기록),
                       format(표시), validate(검증), sensitive(민감번호 규칙), confirm(확인 대화상자)
 app/screens/          화면: 홈·내역·올리기·정산·더보기
-app/workers/          엑셀 파싱 Web Worker
+app/import/           엑셀 가져오기: 파일 판별, 형식 찾기(DB import_formats 행으로), 정규화, 중복 키 k2
+app/workers/          엑셀 파싱 Web Worker (같은 출처 module Worker, Trusted Types 정책 cl-worker)
 vendor/               supabase-js, SheetJS (버전 고정 + 해시 기록)
 db/                   schema.sql, migrations/
 docs/                 DB 설치 절차서 등 운영 문서
