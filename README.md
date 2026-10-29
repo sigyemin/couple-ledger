@@ -47,11 +47,14 @@ node scripts/scan.mjs --all             # 전체 파일 검사 (Node 20 이상)
 node --test $(find tests -name '*.test.mjs')
 ```
 
-## 배포 전 설정 (사용자)
+## 배포 설정
 
-1. `app/config.js`에 Supabase 프로젝트 주소(`https://<프로젝트 ref>.supabase.co`)와 **publishable 키**를 넣는다. secret·service_role 키는 넣지 않는다
-2. `index.html` CSP의 `connect-src` 자리표시자 `https://project-ref.supabase.co`를 같은 주소로 바꾼다(단위 시험이 두 값이 같은지 본다)
-3. 둘이 비어 있으면 앱은 "설정이 필요해요" 화면만 보여 준다
+상태: **운영 프로젝트 값 설정됨**(2026-10-29). 값은 `app/config.js` 한 곳에만 있다.
+
+1. `app/config.js`에는 Supabase 프로젝트 주소와 **publishable 키**만 둔다. publishable 키는 공개값이다. secret·service_role 키는 넣지 않는다
+2. 주소를 바꾸면 `index.html` CSP의 `connect-src`도 같은 주소로 바꾼다(단위 시험이 두 값이 같은지 본다)
+3. 두 값이 비어 있으면 앱은 "설정이 필요해요" 화면만 보여 준다
+4. 구글 로그인: 로그인 버튼은 Supabase 인증 주소로 **페이지를 이동**(CSP `connect-src` 대상 아님)하고, 돌아온 뒤 토큰 교환은 `connect-src`의 프로젝트 주소로 간다. 실제 로그인 시험은 GitHub Pages를 켠 뒤 한다
 
 ## 작업 규칙
 
