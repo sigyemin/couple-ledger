@@ -8,6 +8,7 @@ import {
   buildDetailModel, categoryOptions, categoryChangeText, changeDescription, trashPlan, trashPatch, monthState, classification,
 } from '../../app/screens/detail-model.js';
 import { buildHash, parseHash } from '../../app/router.js';
+import { readMonthRows } from '../../app/screens/list.js';
 
 const U = (n) => ['a0000000', '0000', '4000', '8000', String(n).padStart(12, '0')].join('-');
 const G_FOOD = U(901);
@@ -90,9 +91,39 @@ test('categoryLabel·rowView: 연결 환불 A·B·D, 나눈 거래, 이체', () 
   assert.equal(rowView({ ...rows[1], payer_member_id: 'zz' }, ctx).payer.slot, 0);
 });
 
-test('capNotice: 상한에 닿으면 잘림을 알림', () => {
-  assert.equal(capNotice(MAX_ROWS - 1), null);
-  assert.equal(capNotice(MAX_ROWS), '이 달 거래가 많아 앞 2,000건만 보여요. 합계·검색도 이 안에서만 맞아요.');
+test('capNotice: 잘렸을 때만 알림', () => {
+  assert.equal(capNotice(false), null);
+  assert.equal(capNotice(true), '이 달 거래가 많아 앞 2,000건만 보여요. 합계·검색도 이 안에서만 맞아요.');
+});
+
+/** 서버 max-rows(serverCap)를 흉내 내는 가짜 db: range를 받아도 serverCap건까지만 준다 */
+function pagedDb(total, serverCap) {
+  const calls = [];
+  return {
+    calls,
+    async select(view, { range, order }) {
+      calls.push({ ...range, order: order.map((o) => o.col).join(',') });
+      const to = Math.min(range.to, range.from + serverCap - 1, total - 1);
+      return { data: Array.from({ length: Math.max(0, to - range.from + 1) }, (_, i) => ({ id: range.from + i })), error: null };
+    },
+  };
+}
+
+test('readMonthRows: 서버가 1000·500건씩만 줘도 끝까지 읽고, 2,000건을 넘으면 잘렸다고 알림', async () => {
+  for (const cap of [1000, 500]) {
+    const small = await readMonthRows(pagedDb(1500, cap), '2026-10-01');
+    assert.deepEqual([small.data.rows.length, small.data.capped], [1500, false], `cap ${cap}`);
+    const exact = await readMonthRows(pagedDb(MAX_ROWS, cap), '2026-10-01');
+    assert.deepEqual([exact.data.rows.length, exact.data.capped], [MAX_ROWS, false], `cap ${cap}`);
+    const db = pagedDb(5000, cap);
+    const big = await readMonthRows(db, '2026-10-01');
+    assert.deepEqual([big.data.rows.length, big.data.capped], [MAX_ROWS, true], `cap ${cap}`);
+    assert.deepEqual(big.data.rows.map((r) => r.id), Array.from({ length: MAX_ROWS }, (_, i) => i), '빠짐·겹침 없음');
+    assert.ok(db.calls.every((c) => c.order === 'occurred_on,id'), '쪽이 어긋나지 않게 id로 끝 정렬');
+    assert.ok(db.calls.at(-1).to <= MAX_ROWS, '상한 + 1건까지만 요청');
+  }
+  const failing = { async select() { return { data: null, error: { code: 'network' } }; } };
+  assert.deepEqual(await readMonthRows(failing, '2026-10-01'), { error: { code: 'network' } });
 });
 
 test('groupByDay: 최근 날짜 먼저, 같은 날은 늦은 시각 먼저, 요일 계산', () => {

@@ -28,6 +28,9 @@ const MINI = 'id,occurred_on,merchant_raw,amount';
 
 const eq = (col, value) => ({ col, op: 'eq', value });
 
+// 다시 읽은 뒤에도 보여 줄 오류 안내(거래 id → 문구). 한 번 보여 주면 지운다
+const carryNotice = new Map();
+
 export async function loadDetail(db, id) {
   const [txn, members, categories, refunds] = await Promise.all([
     db.select('v_transaction_detail', { columns: DETAIL_COLUMNS, filters: [eq('id', id)] }),
@@ -83,6 +86,10 @@ export async function renderDetail({ db, member, id, go, reload, isCurrent, onEr
     status.textContent = msg;
     status.className = `status-line${isError ? ' error' : ''}`;
   };
+  if (carryNotice.has(row.id)) {
+    say(carryNotice.get(row.id), true);
+    carryNotice.delete(row.id);
+  }
   const fail = (err, extra) => {
     const code = onError?.(err, { txnId: row.id, ...extra });
     say(`${err.message}${code ? ` (오류 번호 ${code})` : ''}`, true);
@@ -183,8 +190,11 @@ export async function renderDetail({ db, member, id, go, reload, isCurrent, onEr
       if (r.error || !r.data?.length) {
         busy(false);
         if (r.error) fail(r.error, { stage: STAGES.db_update, txnId: tid });
-        else say('휴지통으로 옮기지 못했어요. 새로고침해 주세요.', true);
+        else say('휴지통으로 옮기지 못했어요.', true);
         if (done > 0) say(`${status.textContent} (연결된 환불 ${done}건은 이미 휴지통으로 갔어요)`, true);
+        // 화면을 실제 상태로 다시 읽는다(이미 옮긴 환불은 연결 목록에서 빠짐). 안내는 다시 그린 화면에 남긴다
+        carryNotice.set(row.id, status.textContent);
+        reload();
         return;
       }
       done += 1;

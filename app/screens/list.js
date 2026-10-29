@@ -21,20 +21,41 @@ export const LIST_COLUMNS = [
 
 const eq = (col, value) => ({ col, op: 'eq', value });
 
-export async function loadList(db, monthStart) {
-  const [txns, members, categories] = await Promise.all([
-    db.select('v_transaction_detail', {
+export const PAGE_SIZE = 1000;
+
+/**
+ * 한 달 거래를 쪽 단위로 끝까지 읽는다(최대 MAX_ROWS + 1건 — 넘는지 알려고 한 건 더).
+ * - 서버(PostgREST max-rows)가 요청한 range보다 적게 줄 수 있어, 쪽 크기와 비교하지 않고 빈 쪽이 올 때까지 읽는다
+ * - 쪽이 어긋나지 않게 id로 끝 정렬을 고정한다
+ * @returns {{ data: { rows, capped } } | { error }}
+ */
+export async function readMonthRows(db, monthStart, { pageSize = PAGE_SIZE, max = MAX_ROWS } = {}) {
+  const rows = [];
+  while (rows.length <= max) {
+    const from = rows.length;
+    const r = await db.select('v_transaction_detail', {
       columns: LIST_COLUMNS,
       filters: [eq('period_month', monthStart), { col: 'deleted_at', op: 'is', value: null }, eq('is_test_source', false)],
-      order: [{ col: 'occurred_on', ascending: false }],
-      range: { from: 0, to: MAX_ROWS - 1 },
-    }),
+      order: [{ col: 'occurred_on', ascending: false }, { col: 'id', ascending: true }],
+      range: { from, to: Math.min(from + pageSize, max + 1) - 1 },
+    });
+    if (r.error) return { error: r.error };
+    const page = r.data ?? [];
+    if (page.length === 0) break;
+    rows.push(...page);
+  }
+  return { data: { rows: rows.slice(0, max), capped: rows.length > max } };
+}
+
+export async function loadList(db, monthStart) {
+  const [txns, members, categories] = await Promise.all([
+    readMonthRows(db, monthStart),
     db.select('members', { columns: 'id,member_slot,display_name' }),
     db.select('categories', { columns: 'id,parent_id,name,code,sort_order,is_active' }),
   ]);
   const error = [txns, members, categories].find((r) => r.error)?.error;
   if (error) return { error };
-  return { data: { rows: txns.data ?? [], members: members.data ?? [], categories: categories.data ?? [] } };
+  return { data: { rows: txns.data.rows, capped: txns.data.capped, members: members.data ?? [], categories: categories.data ?? [] } };
 }
 
 function monthHead(monthStart, f, doc) {
@@ -81,7 +102,7 @@ export async function renderList({ db, monthStart, query, go, isCurrent, onError
     onError?.(res.error);
     return h('main', { class: 'screen' }, [head, errorView(res.error.message, res.error.detail?.sqlState ?? res.error.code, doc)], doc);
   }
-  const { rows, members, categories } = res.data;
+  const { rows, capped: isCapped, members, categories } = res.data;
   const ctx = { cats: categoryIndex(categories), slotOf: new Map(members.map((m) => [m.id, m.member_slot])) };
   const set = (patch) => go(buildHash('list', { query: filterQuery(ym, { ...f, ...patch }) }));
 
@@ -124,6 +145,8 @@ export async function renderList({ db, monthStart, query, go, isCurrent, onError
 
   const shown = filterRows(rows, f, ctx);
   const sum = summarize(shown);
+  const cap = capNotice(isCapped);
+  const capped = cap ? h('p', { class: 'card notice', text: cap, attrs: { role: 'status' } }, [], doc) : null;
   const summary = h('section', { class: 'card sum-row', attrs: { 'aria-label': '합계' } }, [
     h('p', {}, [h('span', { class: 'sub', text: '지출' }, [], doc), h('strong', { text: sum.expense }, [], doc)], doc),
     h('p', {}, [h('span', { class: 'sub', text: '수입' }, [], doc), h('strong', { text: sum.income }, [], doc)], doc),
@@ -152,7 +175,5 @@ export async function renderList({ db, monthStart, query, go, isCurrent, onError
       }), doc),
     ], doc)), doc);
 
-  const cap = capNotice(rows.length);
-  const capped = cap ? h('p', { class: 'card notice', text: cap, attrs: { role: 'status' } }, [], doc) : null;
-  return h('main', { class: 'screen' }, [head, capped, search, chips, more, summary, list], doc);
+  return h('main', { class: 'screen' }, [head, search, chips, more, capped, summary, list], doc);
 }
