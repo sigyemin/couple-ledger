@@ -151,8 +151,12 @@ test('db.insert: 허용 목록 밖의 표는 보내지 않는다', async () => {
   const sent = [];
   const client = { from(t) { sent.push(t); return {}; }, rpc() {} };
   const db = createDb(client);
-  for (const t of ['members', 'transactions', 'categories']) {
+  for (const t of ['members', 'categories', 'transaction_lines', 'payment_sources']) {
     assert.equal((await db.insert(t, { a: 1 })).error.code, 'invalid');
+  }
+  // transactions는 허용 칸만(직접 추가). 집계·삭제·연결 칸은 넣을 수 없다
+  for (const k of ['deleted_at', 'is_excluded', 'refund_of_txn_id', 'batch_id', 'raw', 'updated_by', 'settlement_changed_at']) {
+    assert.equal((await db.insert('transactions', { amount: 1, [k]: null })).error.code, 'invalid', k);
   }
   assert.deepEqual(sent, []);
 });

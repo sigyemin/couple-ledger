@@ -13,7 +13,13 @@ import { AppError, toAppError } from './errors.js';
 
 const RE_NAME = /^[a-z_][a-z0-9_]{0,62}$/;
 // insert를 허용하는 표 (앱이 직접 행을 넣는 곳만. 나머지 쓰기는 RPC로). 늘릴 때는 리뷰를 받는다
-export const INSERT_TABLES = Object.freeze(['import_batches']);
+// - transactions: 거래 직접 추가(화면 설계 v0.1 4-4 "수동 추가") 한 행만. 넣을 수 있는 칸을 아래 목록으로 묶는다
+export const INSERT_TABLES = Object.freeze(['import_batches', 'transactions']);
+// 표별로 넣을 수 있는 칸(없으면 칸 이름 형식만 검사)
+export const INSERT_COLUMNS = Object.freeze({
+  transactions: Object.freeze(['source_id', 'origin', 'occurred_on', 'occurred_time', 'merchant_raw', 'merchant_norm', 'amount',
+    'kind', 'is_shared', 'review_status', 'memo', 'dedup_key', 'created_by']),
+});
 const FILTER_OPS = new Set(['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'in', 'is', 'ilike']);
 const IS_VALUES = new Set([null, true, false]);
 
@@ -132,6 +138,8 @@ export function createDb(client) {
         const keys = Object.keys(row ?? {});
         if (!keys.length || Array.isArray(row)) throw new TypeError('넣을 값이 없습니다');
         keys.forEach((k) => assertName('컬럼', k));
+        const allowed = INSERT_COLUMNS[table];
+        if (allowed && keys.some((k) => !allowed.includes(k))) throw new TypeError('넣을 수 없는 칸입니다');
       } catch {
         return misuse();
       }

@@ -6,7 +6,7 @@
 // 의존 없음.
 // =====================================================================
 
-export const SCREENS = Object.freeze(['home', 'list', 'txn', 'upload', 'settle', 'more']);
+export const SCREENS = Object.freeze(['home', 'list', 'txn', 'add', 'upload', 'settle', 'more']);
 const RE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const RE_KEY = /^[a-z][a-z_]{0,23}$/;
 const MAX_VALUE = 100;
