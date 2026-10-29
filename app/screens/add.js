@@ -55,6 +55,7 @@ export async function renderAdd({ db, member, query, go, isCurrent, onError }, d
   const srcOpts = sourceOptions(sources, members);
   // 이 화면에서 쓸 중복 키 하나. 응답이 끊겨 다시 눌러도 같은 키로 보내므로 두 번 들어가지 않는다(unique 위반 → 이미 추가됨)
   const entryKey = globalThis.crypto.randomUUID();
+  let firstSent = null; // 이 키로 처음 보낸 내용(응답이 끊긴 뒤 고쳐서 다시 눌렀는지 알려고)
 
   const status = h('p', { class: 'status-line', attrs: { role: 'status', 'aria-live': 'polite' } }, [], doc);
   const say = (msg, isError = false) => {
@@ -124,13 +125,23 @@ export async function renderAdd({ db, member, query, go, isCurrent, onError }, d
     const warn = addConfirmText(b.row, rs.data?.[0]?.review_state);
     if (warn && !(await confirmDialog({ ...warn, confirmLabel: '추가하기', doc }))) { busy(false); return; }
 
+    const sent = JSON.stringify([b.row, b.categoryId]);
+    firstSent ??= sent;
     const ins = await db.insert('transactions', b.row);
     if (ins.error?.code === 'duplicate') {
-      // 앞서 보낸 요청이 이미 들어감(응답만 끊김) → 그 거래로 간다
+      // 앞서 보낸 요청이 이미 들어감(응답만 끊김) → 그 거래로 간다 (transactions의 unique는 dedup_key뿐 — 스키마)
       const found = await db.select('transactions', { columns: 'id', filters: [eq('dedup_key', b.row.dedup_key)] });
       const prev = found.data?.[0]?.id;
-      if (prev) noteForTxn(prev, '이미 추가된 거래예요. 내용을 확인해 주세요.');
-      go(prev ? buildHash('txn', { id: prev }) : buildHash('list', { query: { month: b.row.occurred_on.slice(0, 7) } }));
+      if (!prev) {
+        busy(false);
+        const code = onError?.(found.error ?? ins.error, { stage: STAGES.db_select });
+        say(`추가하지 못했어요. 내역에서 같은 거래가 이미 있는지 확인해 주세요. (오류 번호 ${code ?? ins.error.code})`, true);
+        return;
+      }
+      noteForTxn(prev, sent === firstSent
+        ? '이미 추가된 거래예요. 내용을 확인해 주세요.'
+        : '이전에 저장된 내용이 열렸어요. 고친 값은 반영되지 않았으니 다시 확인해 주세요.');
+      go(buildHash('txn', { id: prev }));
       return;
     }
     if (ins.error || !ins.data?.[0]?.id) {
