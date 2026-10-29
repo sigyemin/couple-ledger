@@ -7,17 +7,17 @@
 // - 쓰기: counterparty_rules insert(created_by = 나) · update(바뀐 칸만). 지우기는 두지 않는다(끄기만 — 설계 일관성)
 // - 같은 이름·범위 중복은 DB가 거부(23505)
 // - 이미 확인한 거래는 바뀌지 않는다(결정 C3). 적용한 거래는 검토가 확인함이 된다(함수 주석)
-// 의존: ui/dom.js, router.js, core/confirm.js, core/errors.js, screens/counterparty-model.js, screens/detail-model.js, screens/shell.js
+// 의존: ui/dom.js, router.js, core/confirm.js, core/errors.js, screens/counterparty-model.js, screens/counterparty-card.js, screens/shell.js
 // =====================================================================
 import { h } from '../ui/dom.js';
 import { buildHash } from '../router.js';
 import { confirmDialog } from '../core/confirm.js';
 import { STAGES } from '../core/errors.js';
 import {
-  CHOICES, DIRECTIONS, categoryIndex, choiceOf, cpList, scopeText, choiceValues, checkNames, cpPatch, cpPreview, cpChangeLine,
+  DIRECTIONS, categoryIndex, choiceOf, cpList, scopeText, choiceValues, checkNames, cpPatch, cpPreview, cpChangeLine,
   cpApplyResult, cpErrorText,
 } from './counterparty-model.js';
-import { categoryOptions } from './detail-model.js';
+import { choiceCard } from './counterparty-card.js';
 import { errorView, rulesTabs } from './shell.js';
 
 const RULE_COLUMNS = [
@@ -154,49 +154,22 @@ export async function renderCounterpartyEdit({ db, member, id = null, go, isCurr
       ], doc);
     })();
 
-  // 선택
-  const now = original ? choiceOf(original, cats) : { key: 'expense' };
-  const catSel = h('select', { class: 'field', attrs: { 'aria-label': '카테고리' } }, [], doc);
-  const fillCats = (kind) => {
-    const opts = categoryOptions(categories, kind);
-    catSel.replaceChildren(
-      h('option', { text: '카테고리 고르기', attrs: { value: '' } }, [], doc),
-      ...opts.map((g) => h('optgroup', { attrs: { label: g.group } }, g.items.map((it) => h('option', { text: it.name, attrs: { value: it.id } }, [], doc)), doc)),
-    );
-  };
-  const catWrap = h('div', { class: 'form' }, [h('label', { class: 'field-label', text: '카테고리' }, [], doc), catSel], doc);
-  const choiceGroup = h('div', { class: 'radio-group', attrs: { role: 'radiogroup', 'aria-label': '어떻게 볼까요' } },
-    CHOICES.map((c) => radio('choice', c.key, c.label, c.key === now.key)), doc);
-  const refreshChoice = () => {
-    const c = picked('choice');
-    const dir = original ? (original.direction ?? '') : picked('direction');
-    const incomeRadio = main.querySelector('input[name="choice"][value="income"]');
-    incomeRadio.disabled = dir === 'out';
-    if (incomeRadio.disabled && incomeRadio.checked) incomeRadio.checked = false;
-    const kind = c === 'income' ? 'income' : 'expense';
-    if (catSel.dataset.kind !== kind) {
-      fillCats(kind);
-      catSel.dataset.kind = kind;
-      const cur = original?.suggested_category_id;
-      if (cur && [...catSel.options].some((o) => o.value === cur)) catSel.value = cur;
-    }
-    catWrap.hidden = !(c === 'expense' || c === 'income');
-  };
-  const alias = h('input', { class: 'field', attrs: { 'aria-label': '보일 이름(선택)', maxlength: '50', placeholder: '예: 집주인' } }, [], doc);
-  alias.value = original?.alias ?? '';
+  // 선택 카드(업로드 미리보기와 같은 부품)
+  const card = choiceCard({ categories, cats, initial: original, direction: original ? original.direction : 'out' }, doc);
 
   const save = h('button', { class: 'btn primary', text: '저장', attrs: { type: 'button' } }, [], doc);
-  const lock = (on) => { for (const el of main.querySelectorAll('button, input, select')) el.disabled = on; if (!on) refreshChoice(); };
+  const lock = (on) => { for (const el of main.querySelectorAll('button, input, select')) el.disabled = on; card.setDisabled(on); };
   save.addEventListener('click', async () => {
-    const names = checkNames({ matchText: original ? null : nameInput.value, alias: alias.value });
+    const input = card.read();
+    const names = checkNames({ matchText: original ? null : nameInput.value, alias: input.alias });
     if (!names.ok) { status.say(names.message, true); return; }
-    const choice = picked('choice');
+    const { choice } = input;
     const direction = original ? (original.direction ?? null) : (picked('direction') || null);
     const sourceId = original ? original.source_id : (srcSel.value || null);
     let values = {};
-    if (choice || !original || now.key !== 'custom') {
+    if (choice || !card.isCustom) {
       const cv = choiceValues({
-        choice, categoryId: catSel.value || null, direction,
+        choice, categoryId: input.categoryId, direction,
         sourceOwnerId: sources.find((s) => s.id === sourceId)?.owner_member_id ?? null, meId: member.memberId, members,
       }, cats);
       if (!cv.ok) { status.say(cv.message, true); return; }
@@ -251,17 +224,11 @@ export async function renderCounterpartyEdit({ db, member, id = null, go, isCurr
     status,
     original && !original.is_active ? h('p', { class: 'notice small', text: '꺼진 규칙이에요. 켜야 업로드에 쓰여요.' }, [], doc) : null,
     scopeSection,
-    h('section', { class: 'card form' }, [
-      h('p', { class: 'field-label', text: '어떻게 볼까요' }, [], doc),
-      original && now.key === 'custom' ? h('p', { class: 'muted small', text: `지금 값: ${now.label}. 고르지 않으면 그대로 둬요.` }, [], doc) : null,
-      choiceGroup, catWrap,
-      h('label', { class: 'field-label', text: '보일 이름(선택)' }, [], doc), alias,
-    ], doc),
+    h('section', { class: 'card' }, [card.el], doc),
     h('p', { class: 'muted small', text: '저장하면 다음 업로드부터 적용돼요. 이미 들어온 검토 대기 거래에도 적용할지 다음 화면에서 미리 보여 드려요. 이미 확인한 거래는 바뀌지 않아요.' }, [], doc),
     save,
   ], doc);
-  main.addEventListener('change', (e) => { if (e.target.name === 'choice' || e.target.name === 'direction') refreshChoice(); });
-  refreshChoice();
+  main.addEventListener('change', (e) => { if (e.target.name === 'direction') card.setDirection(e.target.value); });
   return main;
 }
 
