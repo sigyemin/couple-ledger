@@ -1,12 +1,15 @@
 // keepalive 워크플로 검사 (외부 패키지 없음: YAML 파서 대신 줄 단위로 본다)
 // 1) 정적 검사: 권한 최소화, 외부 액션 없음, ${{ }}는 env 대입에만, 로그 노출·커밋 금지
-// 2) 동작 검사: run 본문을 실제 셸 옵션(bash -eo pipefail)으로 실행. curl은 가짜로 바꿔 네트워크 호출 없음
+// 2) 동작 검사: run 본문을 실제 셸 옵션(bash -eo pipefail)으로 실행. curl·git은 가짜로 바꿔 네트워크 호출 없음.
+//    격리: 작업 폴더는 새 임시 폴더, PATH는 가짜 도구 + 허용 도구(sed, head)만, 환경 변수는 시험 값만
+//    (HOME·GIT_*·GH_*·GITHUB_* 등 실제 환경을 넘기지 않는다 → 본문이 저장소를 건드릴 수 없다)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, mkdtempSync, writeFileSync, chmodSync, rmSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync, symlinkSync } from 'node:fs';
+import { spawnSync, execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const src = readFileSync(new URL('../.github/workflows/keepalive.yml', import.meta.url), 'utf8');
 const lines = src.split('\n');
@@ -184,22 +187,37 @@ test('keep-active는 이 워크플로의 enable API를 PUT으로 호출한다', 
 // ---------------------------------------------------------------------
 // 가짜 curl: 받은 인자를 기록하고, 메서드별로 정해진 값을 출력한다.
 // CURL_FAIL=GET|PUT|POST 이면 그 요청에서 curl --fail처럼 22로 끝난다.
+// 가짜 git: 받은 인자를 기록하고 바로 실패한다(커밋·push가 실제로 일어나지 않게).
+const FAKE_CURL = [
+  '#!/bin/sh',
+  'echo "$*" >> "$CURL_LOG"',
+  'method=GET',
+  'case " $* " in *" -X PUT "*) method=PUT ;; *" -X POST "*) method=POST ;; esac',
+  'if [ "$CURL_FAIL" = "$method" ]; then echo "curl: (22) error" >&2; exit 22; fi',
+  'case $method in',
+  '  GET) printf \'{\\n  "id": 1,\\n  "state": "active",\\n  "path": "x"\\n}\\n\' ;;',
+  '  PUT) printf 204 ;;',
+  '  POST) printf 200 ;;',
+  'esac',
+].join('\n');
+const FAKE_GIT = ['#!/bin/sh', 'echo "$*" >> "$GIT_LOG"', 'echo "fake git: blocked" >&2', 'exit 97'].join('\n');
+
+// 시험 본문이 쓸 수 있는 실제 도구는 이것뿐 (워크플로 run 본문이 sed·head를 쓴다)
+const which = (t) => execFileSync('sh', ['-c', `command -v ${t}`], { encoding: 'utf8' }).trim();
+const BASH = which('bash');
+const ALLOWED_TOOLS = ['sed', 'head'].map((t) => [t, which(t)]);
+
 function withFakeCurl(fn) {
   const dir = mkdtempSync(join(tmpdir(), 'keepalive-test-'));
   try {
-    writeFileSync(join(dir, 'curl'), [
-      '#!/bin/sh',
-      'echo "$*" >> "$CURL_LOG"',
-      'method=GET',
-      'case " $* " in *" -X PUT "*) method=PUT ;; *" -X POST "*) method=POST ;; esac',
-      'if [ "$CURL_FAIL" = "$method" ]; then echo "curl: (22) error" >&2; exit 22; fi',
-      'case $method in',
-      '  GET) printf \'{\\n  "id": 1,\\n  "state": "active",\\n  "path": "x"\\n}\\n\' ;;',
-      '  PUT) printf 204 ;;',
-      '  POST) printf 200 ;;',
-      'esac',
-    ].join('\n'));
-    chmodSync(join(dir, 'curl'), 0o755);
+    const bin = join(dir, 'bin');
+    mkdirSync(bin);
+    mkdirSync(join(dir, 'work'));
+    writeFileSync(join(bin, 'curl'), FAKE_CURL);
+    writeFileSync(join(bin, 'git'), FAKE_GIT);
+    chmodSync(join(bin, 'curl'), 0o755);
+    chmodSync(join(bin, 'git'), 0o755);
+    for (const [t, path] of ALLOWED_TOOLS) symlinkSync(path, join(bin, t));
     return fn(dir);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -207,13 +225,17 @@ function withFakeCurl(fn) {
 }
 
 function runStep(body, env, dir) {
-  const log = join(dir, 'log');
-  writeFileSync(log, '');
-  const r = spawnSync('bash', ['--noprofile', '--norc', '-eo', 'pipefail', '-c', body], {
+  const curlLog = join(dir, 'curl.log');
+  const gitLog = join(dir, 'git.log');
+  writeFileSync(curlLog, '');
+  writeFileSync(gitLog, '');
+  const r = spawnSync(BASH, ['--noprofile', '--norc', '-eo', 'pipefail', '-c', body], {
     encoding: 'utf8',
-    env: { PATH: `${dir}:${process.env.PATH}`, CURL_LOG: log, ...env },
+    cwd: join(dir, 'work'),
+    env: { PATH: join(dir, 'bin'), CURL_LOG: curlLog, GIT_LOG: gitLog, ...env }, // process.env는 넘기지 않는다
   });
-  return { code: r.status, out: r.stdout + r.stderr, calls: readFileSync(log, 'utf8').trim().split('\n').filter(Boolean) };
+  const read = (f) => readFileSync(f, 'utf8').trim().split('\n').filter(Boolean);
+  return { code: r.status, out: r.stdout + r.stderr, calls: read(curlLog), gitCalls: read(gitLog) };
 }
 
 const pingBody = runBodies(J.ping)[0];
@@ -276,4 +298,45 @@ test('keep-active: GET 실패도 단계 실패 (pipefail), PUT까지 가지 않�
 test('keep-active: PUT 실패 → 단계 실패', () => withFakeCurl((dir) => {
   const r = runStep(kaBody, { ...KA_ENV, CURL_FAIL: 'PUT' }, dir);
   assert.notEqual(r.code, 0, r.out);
+}));
+
+// ---------------------------------------------------------------------
+// 격리 검사: 동작 시험이 실제 저장소·환경을 건드리지 못한다
+// ---------------------------------------------------------------------
+test('격리: 작업 폴더는 임시 폴더, 환경 변수는 시험 값만 (HOME·GIT_*·GH_*·GITHUB_* 없음)', () => withFakeCurl((dir) => {
+  const r = runStep('pwd; compgen -e', {}, dir);
+  assert.equal(r.code, 0, r.out);
+  const [cwd, ...names] = r.out.trim().split('\n');
+  assert.equal(cwd, join(dir, 'work'));
+  const auto = new Set(['PWD', 'OLDPWD', 'SHLVL', '_']); // bash가 스스로 만드는 것
+  assert.deepEqual(names.filter((n) => !auto.has(n)).sort(), ['CURL_LOG', 'GIT_LOG', 'PATH']);
+}));
+
+test('격리: curl·git은 가짜, 그 밖의 네트워크·실행 도구는 PATH에 없다', () => withFakeCurl((dir) => {
+  const r = runStep([
+    '[ "$(command -v curl)" = "' + join(dir, 'bin', 'curl') + '" ]',
+    '[ "$(command -v git)" = "' + join(dir, 'bin', 'git') + '" ]',
+    'for t in wget nc ncat ssh scp python3 python perl node gh; do if command -v "$t" >/dev/null; then echo "found $t"; exit 9; fi; done',
+    'if git status; then exit 8; fi',
+  ].join('\n'), {}, dir);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.gitCalls, ['status']);
+}));
+
+const REPO = fileURLToPath(new URL('..', import.meta.url));
+function repoState() {
+  const g = (...a) => execFileSync('git', a, { cwd: REPO, encoding: 'utf8' });
+  return { head: g('rev-parse', 'HEAD'), reflog: g('reflog', '--format=%H').split('\n').length, status: g('status', '--porcelain') };
+}
+
+test('격리: git commit·push를 넣은 변형(M8)을 실행해도 실제 저장소는 그대로', (t) => withFakeCurl((dir) => {
+  let before;
+  try { before = repoState(); } catch { t.skip('git 저장소가 아님'); return; }
+  const anchor = 'echo "keepalive RPC: HTTP $code"';
+  const mutated = pingBody.replace(anchor, `${anchor}\ngit commit --allow-empty -m x && git push`);
+  assert.notEqual(mutated, pingBody);
+  const r = runStep(mutated, { URL: 'https://db.example.test', KEY: 'pk' }, dir);
+  assert.notEqual(r.code, 0, r.out);
+  assert.deepEqual(r.gitCalls, ['commit --allow-empty -m x']);
+  assert.deepEqual(repoState(), before);
 }));
