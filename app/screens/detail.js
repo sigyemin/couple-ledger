@@ -223,7 +223,7 @@ export async function renderDetail({ db, member, id, go, reload, isCurrent, onEr
     };
     const draw = () => {
       const add = draft.length < MAX_LINES
-        ? button('줄 더하기', 'secondary small-btn', () => { draft.push({ categoryId: '', amountText: '0', note: '' }); draw(); })
+        ? button('줄 더하기', 'secondary small-btn', () => { draft.push({ categoryId: '', amountText: '', note: '' }); draw(); })
         : null;
       const save = button('나눈 대로 저장', 'primary', async () => {
         const v = check();

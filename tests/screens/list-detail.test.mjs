@@ -241,8 +241,9 @@ test('나누기: 처음 값과 입력 검사(카테고리·금액·품목 민감
   assert.match(v([{ categoryId: C_DINING, amountText: '13000', note: '' }]), /1,000원이 넘쳐요/);
   const digits = Array.from({ length: 10 }, () => 1 + Math.floor(Math.random() * 9)).join('');
   assert.match(v([{ categoryId: C_DINING, amountText: '12000', note: `번호 ${digits}` }]), /품목: 카드·계좌/);
+  assert.match(v([{ categoryId: C_DINING, amountText: '12000', note: '' }, { categoryId: C_DINING, amountText: '0', note: '' }]), /2번째 줄 금액은 1원 이상/);
   assert.match(v([]), /1~50줄/);
-  assert.match(v(Array.from({ length: MAX_LINES + 1 }, () => ({ categoryId: C_DINING, amountText: '0', note: '' }))), /1~50줄/);
+  assert.match(v(Array.from({ length: MAX_LINES + 1 }, () => ({ categoryId: C_DINING, amountText: '1', note: '' }))), /1~50줄/);
 });
 
 test('일괄 분류: 이체 빼고, 수입·지출 섞이면 거부, 500건 상한, 나눈 거래 알림', async () => {

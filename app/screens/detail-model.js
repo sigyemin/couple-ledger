@@ -260,6 +260,7 @@ export function validateLines(draft, total, allowedCategoryIds, checks) {
     const n = i + 1;
     if (!allowedCategoryIds.has(d.categoryId)) return bad(`${n}번째 줄의 카테고리를 골라 주세요`);
     if (!amounts[i].ok) return bad(`${n}번째 줄: ${amounts[i].message}`);
+    if (amounts[i].value === 0) return bad(`${n}번째 줄 금액은 1원 이상이어야 해요`); // 0원 줄은 앱이 막음(DB는 0 허용, PR #14 리뷰 L1)
     const note = checks.text(d.note, 'item_note');
     if (!note.ok) return bad(`${n}번째 줄 품목: ${note.message}`);
     lines.push({ category_id: d.categoryId, amount: amounts[i].value, item_note: note.value || null });
