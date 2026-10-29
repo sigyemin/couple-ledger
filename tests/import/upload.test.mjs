@@ -8,6 +8,7 @@ import { createDb } from '../../app/core/db.js';
 const SRC = 'a0000000-0000-4000-8000-0000000000a1';
 const MEMBER = 'a0000000-0000-4000-8000-0000000000e1';
 const HASH = 'ab'.repeat(32);
+const guard = { async requireMember() { return { memberId: MEMBER, memberSlot: 1, displayName: '사용자A' }; } };
 
 function fakeDb({ existing = null, insertError = null, rpc } = {}) {
   const calls = [];
@@ -37,23 +38,23 @@ test('batchFileName: 앱이 만든 이름만, 60자 이하', () => {
 
 test('ensureBatch: 새 묶음 / 같은 해시면 이어 올리기', async () => {
   const db = fakeDb();
-  assert.deepEqual(await ensureBatch(db, { sourceId: SRC, targetMonth: '2026-10-01', fileHash: HASH, fileName: 'x_2026-10.xlsx', memberId: MEMBER }),
+  assert.deepEqual(await ensureBatch(db, guard, { sourceId: SRC, targetMonth: '2026-10-01', fileHash: HASH, fileName: 'x_2026-10.xlsx'}),
     { batchId: 'b-new', resumed: false });
   assert.deepEqual(db.calls[0][2].filters, [{ col: 'source_id', op: 'eq', value: SRC }, { col: 'file_hash', op: 'eq', value: HASH }]);
   assert.deepEqual(db.calls[1], ['insert', 'import_batches',
     { source_id: SRC, target_month: '2026-10-01', file_name: 'x_2026-10.xlsx', file_hash: HASH, uploaded_by: MEMBER }]);
 
   const db2 = fakeDb({ existing: 'b-old' });
-  assert.deepEqual(await ensureBatch(db2, { sourceId: SRC, targetMonth: '2026-10-01', fileHash: HASH, fileName: 'x', memberId: MEMBER }),
+  assert.deepEqual(await ensureBatch(db2, guard, { sourceId: SRC, targetMonth: '2026-10-01', fileHash: HASH, fileName: 'x'}),
     { batchId: 'b-old', resumed: true });
   assert.equal(db2.calls.length, 1);
 });
 
 test('ensureBatch: 형식 오류·DB 오류', async () => {
-  await assert.rejects(ensureBatch(fakeDb(), { sourceId: SRC, targetMonth: '2026-10-02', fileHash: HASH }), TypeError);
-  await assert.rejects(ensureBatch(fakeDb(), { sourceId: SRC, targetMonth: '2026-10-01', fileHash: 'xyz' }), TypeError);
+  await assert.rejects(ensureBatch(fakeDb(), guard, { sourceId: SRC, targetMonth: '2026-10-02', fileHash: HASH }), TypeError);
+  await assert.rejects(ensureBatch(fakeDb(), guard, { sourceId: SRC, targetMonth: '2026-10-01', fileHash: 'xyz' }), TypeError);
   const err = new AppError('forbidden', 'x', { sqlState: '42501' });
-  await assert.rejects(ensureBatch(fakeDb({ insertError: err }), { sourceId: SRC, targetMonth: '2026-10-01', fileHash: HASH, fileName: 'x', memberId: MEMBER }), { code: 'forbidden' });
+  await assert.rejects(ensureBatch(fakeDb({ insertError: err }), guard, { sourceId: SRC, targetMonth: '2026-10-01', fileHash: HASH, fileName: 'x'}), { code: 'forbidden' });
 });
 
 const rows = (n) => Array.from({ length: n }, (_, i) => ({ rowNo: i + 10, dedup_key: `k${i}`, amount: i }));
@@ -154,4 +155,14 @@ test('db.insert: 허용 목록 밖의 표는 보내지 않는다', async () => {
     assert.equal((await db.insert(t, { a: 1 })).error.code, 'invalid');
   }
   assert.deepEqual(sent, []);
+});
+
+test('ensureBatch: uploaded_by는 인증 가드의 구성원 id만, 호출자 값은 무시, 구성원 아니면 만들지 않음', async () => {
+  const db = fakeDb();
+  await ensureBatch(db, guard, { sourceId: SRC, targetMonth: '2026-10-01', fileHash: HASH, fileName: 'x', memberId: 'OTHER-MEMBER-ID', uploaded_by: 'OTHER' });
+  assert.equal(db.calls[1][2].uploaded_by, MEMBER);
+  const db2 = fakeDb();
+  const noMember = { async requireMember() { throw new AppError('not_member', 'x'); } };
+  await assert.rejects(ensureBatch(db2, noMember, { sourceId: SRC, targetMonth: '2026-10-01', fileHash: HASH, fileName: 'x' }), { code: 'not_member' });
+  assert.equal(db2.calls.filter((c) => c[0] === 'insert').length, 0);
 });

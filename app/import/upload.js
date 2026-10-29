@@ -29,10 +29,11 @@ export function batchFileName(institution, targetMonth, fileType) {
 }
 
 /**
- * 묶음 찾기 또는 만들기
+ * 묶음 찾기 또는 만들기. uploaded_by는 호출자 값을 받지 않고 인증 가드가 확인한 내 구성원 id만 쓴다
+ * @param guard createAuthGuard 결과 (requireMember)
  * @returns {Promise<{ batchId: string, resumed: boolean }>}  실패 시 AppError throw
  */
-export async function ensureBatch(db, { sourceId, targetMonth, fileHash, fileName, memberId }) {
+export async function ensureBatch(db, guard, { sourceId, targetMonth, fileHash, fileName }) {
   if (!RE_MONTH.test(targetMonth ?? '')) throw new TypeError('대상 달은 YYYY-MM-01이어야 합니다');
   if (!RE_HASH.test(fileHash ?? '')) throw new TypeError('파일 해시 형식이 맞지 않습니다');
   const find = () => db.select('import_batches', {
@@ -43,6 +44,7 @@ export async function ensureBatch(db, { sourceId, targetMonth, fileHash, fileNam
   if (found.error) throw found.error;
   if (found.data?.[0]) return { batchId: found.data[0].id, resumed: true };
 
+  const { memberId } = await guard.requireMember(); // 구성원이 아니면 여기서 throw
   const made = await db.insert('import_batches', {
     source_id: sourceId, target_month: targetMonth, file_name: fileName, file_hash: fileHash, uploaded_by: memberId,
   });

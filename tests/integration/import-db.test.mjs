@@ -70,8 +70,9 @@ const q = (sql, vars) => {
 async function upload(bytes, format, sourceId, categories, counterpartyRules = []) {
   const parsed = await parseFile(XLSX, bytes, { format, sourceId, categories, counterpartyRules });
   const hash = await fileHash(bytes);
-  const { batchId, resumed } = await ensureBatch(pgDb, {
-    sourceId, targetMonth: '2026-10-01', fileHash: hash, fileName: batchFileName(format.institution, '2026-10-01', parsed.fileType), memberId: MEMBER,
+  const guard = { async requireMember() { return { memberId: MEMBER, memberSlot: 1, displayName: '사용자A' }; } };
+  const { batchId, resumed } = await ensureBatch(pgDb, guard, {
+    sourceId, targetMonth: '2026-10-01', fileHash: hash, fileName: batchFileName(format.institution, '2026-10-01', parsed.fileType),
   });
   const res = await uploadRows(pgDb, batchId, parsed.rows, { chunkRows: 3 });
   return { parsed, batchId, resumed, ...res };
