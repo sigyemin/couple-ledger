@@ -6,6 +6,7 @@
 # - 권한은 job마다 최소로. contents 쓰기 권한 없음
 # - 변수·이벤트 값(${{ }})은 run 안에 직접 넣지 않고 env로만 넘긴다(명령 삽입 방지)
 # - publishable 키는 공개값이라 Actions 변수(vars)로 둔다. service_role·secret 키는 어디에도 넣지 않는다
+#   (vars 값은 로그에서 가려지지 않는다. URL·publishable 키 모두 공개값이라 허용)
 name: keepalive
 
 on:
@@ -15,6 +16,11 @@ on:
 
 permissions: {}
 
+# shell: bash → bash --noprofile --norc -eo pipefail {0} (파이프 중간 실패도 단계 실패로)
+defaults:
+  run:
+    shell: bash
+
 jobs:
   ping:
     runs-on: ubuntu-latest
@@ -23,10 +29,16 @@ jobs:
     env:
       URL: ${{ vars.SUPABASE_URL }}
       KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
+      REQUIRED: ${{ vars.KEEPALIVE_REQUIRED }}
     steps:
       - name: Call keepalive RPC
         run: |
           if [ -z "$URL" ] || [ -z "$KEY" ]; then
+            # 운영 DB 설치 후에는 KEEPALIVE_REQUIRED=1 → 변수가 빠지면 실패(= GitHub 실패 알림)
+            if [ "$REQUIRED" = "1" ]; then
+              echo "::error::SUPABASE_URL 또는 SUPABASE_PUBLISHABLE_KEY 변수가 없음 (KEEPALIVE_REQUIRED=1)"
+              exit 1
+            fi
             echo "::notice::SUPABASE_URL 또는 SUPABASE_PUBLISHABLE_KEY 변수가 없음 → 건너뜀 (운영 DB 설치 전)"
             exit 0
           fi
