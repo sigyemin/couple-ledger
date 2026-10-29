@@ -4,7 +4,7 @@
 //   칸 구분자 '|', 없는 값은 빈 문자열
 //   1순위(카드, 승인번호 있음): source_id | approval_no | kind            (kind = expense / refund)
 //   2순위(그 밖):               source_id | 방향 | 일시 | 설명 정리값 | 금액 | 거래 후 잔액 | n번째
-//     방향 = out / in, 일시 = 'YYYY-MM-DD HH:MI[:SS]'(초는 파일에 있을 때만), 설명 정리값 = merchant_norm,
+//     방향 = out / in, 일시 = 'YYYY-MM-DD HH:MI'(분 단위, 초는 넣지 않음 — 사용자 결정 D1), 설명 정리값 = merchant_norm,
 //     잔액 = balance_after(키 전용 열, 없으면 빈 값), n번째 = 한 파일 안에서 앞 칸이 모두 같은 행의 순번(1부터)
 // 의존 없음 (crypto.subtle: 브라우저·Worker·Node 20+)
 // =====================================================================

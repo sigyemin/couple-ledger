@@ -331,3 +331,33 @@ test('column_map이 매핑 금지 헤더와 겹치는 형식은 거부한다', (
   assert.equal(findHeader(sheetA(), bad), null);
   assert.deepEqual(matchFormats(sheetA(), [bad], 'xlsx'), []);
 });
+
+// ---------------------------------------------------------------- 결정 반영 (D1·D2, PC 전용 자리)
+import { canUpload } from '../../app/import/env.js';
+
+test('D1: 2순위 키 일시는 분 단위 — 초가 있는 형식·없는 형식의 같은 거래는 같은 키', async () => {
+  const withSec = { ...FORMAT_A, date_format: 'YYYY.MM.DD HH24:MI:SS' };
+  const noSec = { ...FORMAT_A, date_format: 'YYYY.MM.DD HH24:MI' };
+  const head = ['거래일시', '구분', '내용', '나간 돈', '들어온 돈', '남은 돈'];
+  const g1 = [head, ['2026.10.06 12:30:41', '이체', '가짜상점', '1,000', '', '9,000']];
+  const g2 = [head, ['2026.10.06 12:30', '이체', '가짜상점', '1,000', '', '9,000']];
+  const r1 = await normalizeRows(g1, withSec, findHeader(g1, withSec), { sourceId: SOURCE });
+  const r2 = await normalizeRows(g2, noSec, findHeader(g2, noSec), { sourceId: SOURCE });
+  assert.equal(r1.rows[0].dedup_key, r2.rows[0].dedup_key);
+  assert.equal(r1.rows[0].dedup_key, `k2:${sha(`${SOURCE}|out|2026-10-06 12:30|가짜상점|1000|9000|1`)}`);
+  assert.deepEqual([r1.rows[0].occurred_time, r2.rows[0].occurred_time], ['12:30:41', '12:30']); // 저장하는 시각은 그대로
+});
+
+test('D2: 한 파일 안에서 같은 1순위 키가 두 번째로 나오면 행 오류(duplicate_key)', async () => {
+  const grid = sheetB();
+  grid.push(['', '2026-10-08', '10:00', '같은승인번호', '7,000', '', '12345678', '정상', '']);
+  grid.push(['', '2026-10-09', '10:00', '같은승인번호 취소', '7,000', '', '12345678', '취소', '7,000']);
+  const r = await normalizeRows(grid, FORMAT_B, findHeader(grid, FORMAT_B), { sourceId: SOURCE });
+  assert.deepEqual(r.errors.filter((e) => e.reason === 'duplicate_key').map((e) => e.rowNo), [8, 9]);
+  assert.equal(r.rows.filter((x) => x.approval_no === '12345678').length, 1);
+  assert.ok(r.rows.every((x) => x.row_seq === 1 || x.approval_no === null));
+});
+
+test('canUpload: 자리만 있음(판별은 화면 작업에서)', () => {
+  assert.deepEqual(canUpload(), { ok: true, reason: null });
+});
