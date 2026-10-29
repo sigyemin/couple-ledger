@@ -1,7 +1,7 @@
 // 정산 화면 모델 (DB·브라우저 없이, 가짜 이름만)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { settleSummary, reviewView, confirmMonthText, unconfirmMonthText, pastMonths } from '../../app/screens/settle-model.js';
+import { settleSummary, reviewView, confirmMonthText, unconfirmMonthText, pastMonths, defaultSettleMonth } from '../../app/screens/settle-model.js';
 
 const members = [{ id: 'm2', member_slot: 2, display_name: '나리' }, { id: 'm1', member_slot: 1, display_name: '가람' }];
 const oct = [
@@ -43,4 +43,11 @@ test('지난 달: 지금 달 빼고 최근 순, 상태·차이 문장, 최대 12
   assert.deepEqual(p.map((x) => [x.label, x.state, x.diff]), [['2026년 9월', '확인 완료', '나리가 50원 더 냈어요'], ['2026년 8월', '확인 후 변경됨', '공동지출 없음']]);
   const many = Array.from({ length: 20 }, (_, i) => ({ period_month: `20${25 + Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, '0')}-01`, review_state: 'reviewed' }));
   assert.equal(pastMonths([], many, members).length, 12);
+});
+
+test('정산 기본 달 = 지난달(서울 기준), 1월이면 전년 12월', () => {
+  assert.equal(defaultSettleMonth(new Date('2026-10-29T03:00:00Z')), '2026-09-01');
+  assert.equal(defaultSettleMonth(new Date('2026-01-15T03:00:00Z')), '2025-12-01');
+  assert.equal(defaultSettleMonth(new Date('2026-01-31T15:30:00Z')), '2026-01-01', '서울은 이미 2월 1일');
+  assert.equal(defaultSettleMonth(new Date('2025-12-31T14:59:00Z')), '2025-11-01', '서울 12월 31일 23:59');
 });
