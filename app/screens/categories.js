@@ -1,6 +1,6 @@
 // =====================================================================
 // 카테고리 관리 (화면 설계 v0.2 3-9, 시안 18): 보기 · 순서 · 이름 · 항목/그룹 추가 · 끄기/켜기 · 지우기 · 다른 그룹으로
-// 조회: categories / 끄기 전: category_rules(category_id)·counterparty_rules(suggested_category_id) 수
+// 조회: categories / 끄기 전: 켜진 category_rules(category_id)·counterparty_rules(suggested_category_id) 수
 // 쓰기: categories insert(부모·이름·순서) · update(이름·순서·켜짐·부모) · delete(사용자가 만든 것만, 쓰는 곳 있으면 DB 거부)
 // - 기본(code) 항목은 지우기·옮기기 없음. 2단계까지만
 // - 여러 행을 바꾸는 일(순서 다시 매기기·그룹 끄기)은 한 건씩 update → 중간 실패면 멈추고 다시 읽음
@@ -11,7 +11,7 @@ import { buildHash } from '../router.js';
 import { confirmDialog } from '../core/confirm.js';
 import { STAGES } from '../core/errors.js';
 import {
-  categoryTree, checkName, moveUpdates, nextSortOrder, offTargets, offConfirmText, moveGroupText, deleteErrorText, nameErrorText,
+  categoryTree, checkName, moveUpdates, moveTargets, nextSortOrder, offTargets, offConfirmText, moveGroupText, deleteErrorText, nameErrorText,
 } from './categories-model.js';
 import { errorView } from './shell.js';
 
@@ -88,7 +88,7 @@ export async function renderCategories({ db, reload, isCurrent, onError }, doc =
     if (!node.isActive) { await updateMany([{ id: node.id, is_active: true }], `'${node.name}'을(를) 켰어요.`); return; }
     const ids = offTargets(node);
     const [rules, cps] = await Promise.all([
-      db.select('category_rules', { columns: 'id', filters: [{ col: 'category_id', op: 'in', value: ids }] }),
+      db.select('category_rules', { columns: 'id', filters: [{ col: 'category_id', op: 'in', value: ids }, { col: 'is_active', op: 'eq', value: true }] }),
       db.select('counterparty_rules', { columns: 'id', filters: [{ col: 'suggested_category_id', op: 'in', value: ids }] }),
     ]);
     const err = rules.error ?? cps.error;
@@ -109,7 +109,7 @@ export async function renderCategories({ db, reload, isCurrent, onError }, doc =
   };
 
   const moveTo = async (node, groupId) => {
-    const g = tree.expense.concat(tree.income).find((x) => x.id === groupId);
+    const g = moveTargets(tree, node).find((x) => x.id === groupId);
     if (!g) return;
     if (!(await confirmDialog({ ...moveGroupText(node, g.name), confirmLabel: '옮기기', doc }))) { reload(); return; }
     if (checkName(node.name, siblingsOf(g.id)).ok === false) { say(`'${g.name}'에 같은 이름이 있어 옮길 수 없어요`, true); return; }
@@ -147,8 +147,8 @@ export async function renderCategories({ db, reload, isCurrent, onError }, doc =
     ];
     controls[0].disabled = i === 0;
     controls[1].disabled = i === siblings.length - 1;
-    if (node.canMove) {
-      const groups = tree.expense.concat(tree.income).filter((g) => g.id !== node.parentId);
+    const groups = node.canMove ? moveTargets(tree, node) : [];
+    if (groups.length) {
       const sel = h('select', { class: 'field mini-select', attrs: { 'aria-label': `${node.name} 다른 그룹으로` } }, [
         h('option', { text: '옮기기…', attrs: { value: '' } }, [], doc),
         ...groups.map((g) => h('option', { text: g.name, attrs: { value: g.id } }, [], doc)),

@@ -4,7 +4,7 @@
 // - 순서: ↑↓로 이웃과 sort_order 맞바꿈. 값이 같으면 그 묶음을 10 간격으로 다시 매김
 // - 이름: 같은 그룹 같은 이름 금지(DB unique (parent_id, name) → 23505)
 // - 끄기: 확인 대화상자(규칙 N개·이체 상대 규칙 M개는 남지만 다시 적용할 수 없음). 그룹 끄기 = 안의 켜진 항목까지
-// - 지우기·옮기기: 사용자가 만든 것(code 없음)만. 쓰는 거래·규칙이 있으면 DB가 지우기를 거부(23503)
+// - 지우기·옮기기: 사용자가 만든 것(code 없음)만. 옮기기는 같은 쪽(지출/수입) 그룹으로만. 쓰는 거래·규칙이 있으면 DB가 지우기를 거부(23503)
 // - 2단계(그룹 › 항목)까지만: 항목 아래 항목은 만들지 않는다
 // 의존: core/validate.js
 // =====================================================================
@@ -64,6 +64,12 @@ export function nextSortOrder(siblings, { before = null } = {}) {
   const max = siblings.reduce((m, c) => Math.max(m, c.sort_order), 0);
   const next = max + 10;
   return before != null && next >= before ? Math.max(max + 1, before - 1) : next;
+}
+
+/** 옮길 수 있는 그룹: 같은 쪽(지출↔지출, 수입↔수입)의 다른 그룹. DB는 지출·수입 구분을 검사하지 않는다 */
+export function moveTargets(tree, node) {
+  const side = tree.income.some((g) => g.id === node.parentId) ? tree.income : tree.expense;
+  return side.filter((g) => g.id !== node.parentId);
 }
 
 /** 끄기 대상: 항목이면 자신, 그룹이면 자신 + 켜진 항목 */

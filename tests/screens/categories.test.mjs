@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  categoryTree, checkName, moveUpdates, nextSortOrder, offTargets, offConfirmText, moveGroupText, deleteErrorText, nameErrorText,
+  categoryTree, checkName, moveUpdates, moveTargets, nextSortOrder, offTargets, offConfirmText, moveGroupText, deleteErrorText, nameErrorText,
 } from '../../app/screens/categories-model.js';
 
 const cats = [
@@ -59,4 +59,12 @@ test('끄기: 그룹은 켜진 항목까지, 문구에 규칙 수, 옮기기·�
   assert.match(moveGroupText({ name: '야식' }, '취미모임').message, /지난 리포트도 새 그룹으로 다시 묶여요/);
   assert.equal(deleteErrorText({ detail: { sqlState: '23503' } }), '쓰는 거래·규칙이나 항목이 있어 끌 수만 있어요');
   assert.equal(deleteErrorText({ detail: {} }), null);
+});
+
+test('옮기기 대상: 같은 쪽(지출↔지출, 수입↔수입)의 다른 그룹만', () => {
+  const t = categoryTree([...cats, { id: 'c9', parent_id: 'g9', name: '부수입', code: null, sort_order: 1, is_active: true }]);
+  const yasik = t.expense[0].items.find((i) => i.name === '야식');
+  assert.deepEqual(moveTargets(t, yasik).map((g) => g.name), ['취미모임']);
+  const side = t.income[0].items[0];
+  assert.deepEqual(moveTargets(t, side), []);
 });
