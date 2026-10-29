@@ -127,7 +127,7 @@ test('app/ 소스: innerHTML·eval·new Function·style 속성 문자열 없음'
 test('config.js: 주소는 https supabase.co, 키는 공개용(publishable)만 (비어 있으면 사용자가 아직 안 넣음)', () => {
   assert.equal(typeof config.SUPABASE_URL, 'string');
   if (config.SUPABASE_URL) assert.match(config.SUPABASE_URL, /^https:\/\/[a-z0-9]+\.supabase\.co$/);
-  // CSP connect-src의 Supabase 주소: 설정 전에는 자리표시자, 설정 뒤에는 config와 같은 주소 하나
+  // CSP connect-src의 Supabase 주소: config와 같은 주소 하나(비어 있던 때는 자리표시자)
   const html = readFileSync(new URL('../../index.html', import.meta.url), 'utf8');
   const hosts = html.match(/https:\/\/[a-z0-9-]+\.supabase\.co/g);
   assert.equal(hosts.length, 1);
