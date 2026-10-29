@@ -9,7 +9,7 @@ import { h } from '../ui/dom.js';
 import { addMonths, buildHash } from '../router.js';
 import { month } from '../core/format.js';
 import {
-  MAX_ROWS, parseListFilter, filterQuery, categoryIndex, filterRows, summarize, rowView, groupByDay, hasFilter,
+  capNotice, MAX_ROWS, parseListFilter, filterQuery, categoryIndex, filterRows, summarize, rowView, groupByDay, hasFilter,
 } from './list-model.js';
 import { errorView } from './shell.js';
 
@@ -152,6 +152,7 @@ export async function renderList({ db, monthStart, query, go, isCurrent, onError
       }), doc),
     ], doc)), doc);
 
-  const capped = rows.length >= MAX_ROWS ? h('p', { class: 'muted small', text: `앞 ${MAX_ROWS}건만 보여요` }, [], doc) : null;
-  return h('main', { class: 'screen' }, [head, search, chips, more, summary, list, capped], doc);
+  const cap = capNotice(rows.length);
+  const capped = cap ? h('p', { class: 'card notice', text: cap, attrs: { role: 'status' } }, [], doc) : null;
+  return h('main', { class: 'screen' }, [head, capped, search, chips, more, summary, list], doc);
 }

@@ -154,6 +154,13 @@ export function groupByDay(rows) {
   return groups;
 }
 
+/** 읽은 건수가 상한에 닿으면 잘렸다고 알린다(조용히 자르지 않음). 합계·검색도 읽은 것 안에서만 맞다 */
+export function capNotice(count) {
+  return count >= MAX_ROWS
+    ? `이 달 거래가 많아 앞 ${MAX_ROWS.toLocaleString('ko-KR')}건만 보여요. 합계·검색도 이 안에서만 맞아요.`
+    : null;
+}
+
 /** 필터가 하나라도 걸렸는지(검색 제외) — "필터 지우기" 표시용 */
 export function hasFilter(f) {
   return Boolean(f.payer || f.status || f.kind || f.cat || f.src || f.share || f.excluded || f.changed || f.q);

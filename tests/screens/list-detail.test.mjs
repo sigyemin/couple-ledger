@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  parseListFilter, filterQuery, categoryIndex, filterRows, summarize, categoryLabel, rowView, groupByDay, hasFilter,
+  capNotice, MAX_ROWS, parseListFilter, filterQuery, categoryIndex, filterRows, summarize, categoryLabel, rowView, groupByDay, hasFilter,
 } from '../../app/screens/list-model.js';
 import {
   buildDetailModel, categoryOptions, categoryChangeText, changeDescription, trashPlan, trashPatch, monthState, classification,
@@ -88,6 +88,11 @@ test('categoryLabel·rowView: 연결 환불 A·B·D, 나눈 거래, 이체', () 
   assert.deepEqual([x.tone, x.tags], ['excluded', ['검토 대기', '제외']]);
   assert.equal(rowView(rows[5], ctx).amountText, '+2,000,000원');
   assert.equal(rowView({ ...rows[1], payer_member_id: 'zz' }, ctx).payer.slot, 0);
+});
+
+test('capNotice: 상한에 닿으면 잘림을 알림', () => {
+  assert.equal(capNotice(MAX_ROWS - 1), null);
+  assert.equal(capNotice(MAX_ROWS), '이 달 거래가 많아 앞 2,000건만 보여요. 합계·검색도 이 안에서만 맞아요.');
 });
 
 test('groupByDay: 최근 날짜 먼저, 같은 날은 늦은 시각 먼저, 요일 계산', () => {
