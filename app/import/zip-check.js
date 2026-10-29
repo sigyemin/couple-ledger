@@ -20,6 +20,7 @@ const SIG_EOCD = 0x06054b50;
 const SIG_CEN = 0x02014b50;
 const SIG_LOC = 0x04034b50;
 const EOCD_MIN = 22;
+const COMMENT_MAX = 0xffff;
 
 function sameBytes(a, b) {
   if (a.length !== b.length) return false;
@@ -37,11 +38,28 @@ function fail(code) {
  * 서로 다른 중앙 디렉터리를 보게 하는 우회를 막음 — 리뷰 PR13 B)
  */
 function findEocd(dv) {
+  let found = -1;
   for (let i = dv.byteLength - 4; i >= 0; i--) {
     if (dv.getUint32(i, true) !== SIG_EOCD) continue;
-    return i + EOCD_MIN <= dv.byteLength && i + EOCD_MIN + dv.getUint16(i + 20, true) === dv.byteLength ? i : -1;
+    if (found < 0) {
+      if (!(i + EOCD_MIN <= dv.byteLength && i + EOCD_MIN + dv.getUint16(i + 20, true) === dv.byteLength)) return -1;
+      found = i;
+    } else if (i >= dv.byteLength - EOCD_MIN - COMMENT_MAX) {
+      return -1; // 끝 64KB+22 안에 끝 레코드 시그니처가 둘 이상 — 애매하면 거부
+    } else {
+      break;
+    }
   }
-  return -1;
+  return found;
+}
+
+/** extra 영역에 ZIP64(0x0001) 항목이 있는지 */
+function hasZip64Extra(dv, start, len) {
+  for (let p = start; p + 4 <= start + len;) {
+    if (dv.getUint16(p, true) === 0x0001) return true;
+    p += 4 + dv.getUint16(p + 2, true);
+  }
+  return false;
 }
 
 /** 브라우저·Node 내장 압축 해제로 실제 길이를 센다. limit을 넘으면 그 자리에서 멈추고 Infinity */
@@ -109,6 +127,7 @@ export function readCentralDirectory(bytes, { maxEntries = MAX_ZIP_ENTRIES, maxB
     if (flags & 0x41) throw fail('unsupported_file'); // 암호화(0x01)·강한 암호화(0x40)
     if (method !== 0 && method !== 8) throw fail('unsupported_file');
     if (csz === 0xffffffff || usz === 0xffffffff || localOffset === 0xffffffff) throw fail('unsupported_file'); // ZIP64
+    if (p + 46 + nameLen + extraLen > e || hasZip64Extra(dv, p + 46 + nameLen, extraLen)) throw fail('unsupported_file');
     sum += usz;
     if (sum > maxBytes) throw fail('zip_too_large');
     entries.push({ method, flags, csz, usz, localOffset, name: bytes.subarray(p + 46, p + 46 + nameLen) });
@@ -137,7 +156,11 @@ export async function checkZipSize(bytes, { maxEntries = MAX_ZIP_ENTRIES, maxByt
     if (method !== it.method || (flags & 0x41) !== (it.flags & 0x41) || !sameBytes(bytes.subarray(o + 30, o + 30 + nameLen), it.name)) {
       throw fail('unsupported_file');
     }
-    const start = o + 30 + nameLen + dv.getUint16(o + 28, true);
+    const extraLen = dv.getUint16(o + 28, true);
+    if (o + 30 + nameLen + extraLen > dv.byteLength || hasZip64Extra(dv, o + 30 + nameLen, extraLen)) throw fail('unsupported_file');
+    // 데이터 디스크립터(플래그 8)가 아니면 로컬 크기도 중앙과 같아야 한다
+    if (!(flags & 8) && (dv.getUint32(o + 18, true) !== it.csz || dv.getUint32(o + 22, true) !== it.usz)) throw fail('unsupported_file');
+    const start = o + 30 + nameLen + extraLen;
     const end = start + it.csz;
     if (end > dv.byteLength) throw fail('unsupported_file');
     const data = bytes.subarray(start, end);
