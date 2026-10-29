@@ -4,7 +4,7 @@ npm으로 설치하지 않는다. 공식 배포처에서 받은 파일을 **고�
 
 | 라이브러리 | 버전 | 파일 | 라이선스 | 받은 날 |
 |---|---|---|---|---|
-| supabase-js | 2.118.0 (npm 공개 2026-10-15) | `supabase-js-2.118.0/supabase.js` (패키지의 `dist/umd/supabase.js`, 의존 패키지까지 묶인 단일 파일) | MIT (`LICENSE`) | 2026-10-29 |
+| supabase-js | 2.118.0 (npm 공개 2026-10-15) | `supabase-js-2.118.0/supabase.js` (패키지의 `dist/umd/supabase.js`, 의존 패키지까지 묶인 단일 파일) | MIT (`LICENSE`). 묶음에 든 다른 패키지: `@supabase/phoenix` 0.4.5 MIT (`LICENSE-phoenix-0.4.5.md`), `iceberg-js` 0.8.1 MIT (`LICENSE-iceberg-js-0.8.1`), `tslib` 0BSD(고지 의무 없음) | 2026-10-29 |
 | SheetJS (xlsx) | 0.20.3 | `xlsx-0.20.3/xlsx.mjs` (ES 모듈 단일 파일) | Apache-2.0 (`LICENSE`) | 2026-10-29 |
 
 ## 받은 곳과 대조 근거
@@ -14,6 +14,7 @@ npm으로 설치하지 않는다. 공식 배포처에서 받은 파일을 **고�
 - 레지스트리가 공개한 `dist.integrity`: `sha512-FxI8UXMVC2UG7IkeiI8fuQZqq2oI3JeSuN8MPIC2RLVaoEAxKS0nqE6kii9Ewpq8f9gNPM6git1Y8f0vN/QLFw==`
 - 받은 tarball의 sha512(base64)를 계산해 위 값과 **일치** 확인. `supabase.js`와 `LICENSE`는 그 tarball에서 꺼낸 파일 그대로
 - ES 모듈 단일 파일은 패키지에 없다(`dist/index.mjs`는 `@supabase/*` 패키지를 이름으로 import). CDN이 만든 ESM 묶음(+esm)은 Supabase가 만든 파일이 아니라서 쓰지 않는다(보안 리뷰 v0.1 9장). 그래서 공식 UMD 묶음을 일반 `<script>`로 읽고(전역 `supabase`), 앱은 `app/core/supabase-client.js`로만 쓴다
+- 묶음에 든 의존 패키지 라이선스: `@supabase/realtime-js`·`@supabase/storage-js` 2.118.0의 의존 `@supabase/phoenix@0.4.5`, `iceberg-js@0.8.1`의 npm tarball을 받아 레지스트리 `dist.integrity`(sha512)와 **일치** 확인 후 LICENSE를 그대로 꺼냄. `@supabase/*` 하위 패키지는 supabase-js와 같은 MIT(Supabase)
 - 파일 안에 `eval`·`new Function`·`innerHTML`·`document.write` 없음(문자열 검색)
 - 이 버전을 고른 이유: 받은 날 기준 최신(2.118.0)이 공개 14일째
 

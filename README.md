@@ -33,7 +33,7 @@
 `scripts/scan.mjs`가 막는 것: 금지 파일 종류, Supabase secret 키, 개인 키 블록, 비밀번호가 든 DB 주소, anon이 아닌 JWT(anon JWT도 `app/config.js` 밖에서는 금지), 10자리 이상 숫자 덩어리(카드·계좌·전화번호 모양, DB의 `has_sensitive_number`와 같은 규칙. 구현은 `app/core/sensitive.js` 하나를 앱 입력 검증과 함께 쓴다). 결과에는 경로·줄 번호·규칙 이름만 나오고 찾은 값은 출력하지 않는다. 사람 이름은 자동으로 찾을 수 없으므로 리뷰에서 확인한다. UTF-16(BOM 있음) 텍스트는 풀어서 검사하고, 그 밖에 NUL 바이트가 든 파일은 `icons/*.png`·`vendor/` 밖에서 막는다.
 
 검사의 한계 (리뷰에서 확인):
-- 워크플로 파일(`.github/workflows/scan.yml`)은 PR 쪽 것이 실행된다. `scripts/`, `app/core/sensitive.js`, `.scan-allow`, `.github/`, `.githooks/`, `.gitignore`를 바꾸는 PR은 검사에 경고가 뜨며, 리뷰에서 반드시 확인한다
+- 워크플로 파일(`.github/workflows/scan.yml`)은 PR 쪽 것이 실행된다. `scripts/`, `app/core/sensitive.js`, `vendor/`, `.scan-allow`, `.github/`, `.githooks/`, `.gitignore`를 바꾸는 PR은 검사에 경고가 뜨며, 리뷰에서 반드시 확인한다
 - 한 줄씩 검사하므로 줄바꿈으로 나눈 숫자, 탭·쉼표로 구분한 숫자는 걸리지 않는다
 - PR 검사는 마지막 커밋의 파일 내용만 본다. 중간 커밋, 커밋 메시지, PR 본문은 검사하지 않는다
 

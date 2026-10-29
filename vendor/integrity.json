@@ -14,5 +14,13 @@
   "xlsx-0.20.3/LICENSE": {
     "sha256": "4d2a38ac35cda06a555c84074a819d413339cd3691b822cae50f8f322fe01f64",
     "sri": "sha384-30G/AGRWEIVx9Mtzfj1lO3zubLmzSAkwPz8H0EXwPYrk/kW3zEv26lZxqR5s9x7S"
+  },
+  "supabase-js-2.118.0/LICENSE-phoenix-0.4.5.md": {
+    "sha256": "41a686069f0199ff369d7e5277d5267385cc54d9199f1efc960bacbe2e799255",
+    "sri": "sha384-kc97t1sx3LNIx9NIC6MTXWAoc2IB/hbrWpVbqMcSPit3aeEmZTXRHeOsMp4yurPp"
+  },
+  "supabase-js-2.118.0/LICENSE-iceberg-js-0.8.1": {
+    "sha256": "e6e972dba808fb9d80863fe90ca222a47710cb850f6e6e2af95cdc0d022f79bd",
+    "sri": "sha384-bqiLk6cFS66un8V/4IvgYhRZZCzq1LWqtsvlPIE9Gh0AlWw/nne7DZf6OtDINU6W"
   }
 }
