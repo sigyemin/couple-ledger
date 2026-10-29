@@ -37,9 +37,14 @@ jobs:
       - name: Leak scan (changed files, base scanner)
         working-directory: src
         run: |
+          # 검사기가 app/core/sensitive.js를 import하므로 base의 두 경로를 같은 배치로 꺼낸다
           if git cat-file -e "$BASE_SHA:scripts/scan.mjs" 2>/dev/null; then
-            git show "$BASE_SHA:scripts/scan.mjs" > "$RUNNER_TEMP/scan-base.mjs"
-            scanner="$RUNNER_TEMP/scan-base.mjs"
+            base_dir="$RUNNER_TEMP/scan-base"
+            mkdir -p "$base_dir"
+            paths="scripts"
+            if git cat-file -e "$BASE_SHA:app/core/sensitive.js" 2>/dev/null; then paths="$paths app/core"; fi
+            git archive "$BASE_SHA" $paths | tar -x -C "$base_dir"
+            scanner="$base_dir/scripts/scan.mjs"
           else
             echo "base에 scripts/scan.mjs 없음 → PR 쪽 검사기 사용"
             scanner=scripts/scan.mjs
@@ -50,10 +55,11 @@ jobs:
       - name: Warn on scan setup changes
         working-directory: src
         run: |
-          changed=$(git diff --name-only "$BASE_SHA...HEAD" -- scripts/ .scan-allow .github/ .githooks/ .gitignore)
+          changed=$(git diff --name-only "$BASE_SHA...HEAD" -- scripts/ app/core/sensitive.js .scan-allow .github/ .githooks/ .gitignore)
           if [ -n "$changed" ]; then
             echo "::warning::검사 장치가 바뀌었습니다. 리뷰에서 반드시 확인하세요:"
-            echo "$changed"
+            # 줄 앞에 '- '를 붙여 '::'로 시작하는 파일 이름이 워크플로 명령으로 해석되지 않게 한다
+            printf '%s\n' "$changed" | sed 's/^/  - /'
           fi
 
       - name: Unit tests
