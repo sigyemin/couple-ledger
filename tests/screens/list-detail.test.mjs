@@ -6,7 +6,9 @@ import {
 } from '../../app/screens/list-model.js';
 import {
   buildDetailModel, categoryOptions, categoryChangeText, changeDescription, trashPlan, trashPatch, monthState, classification,
+  editability, settlementChangeText, sharePatch, excludePatch, confirmPatch, linesDraft, validateLines, MAX_LINES,
 } from '../../app/screens/detail-model.js';
+import { amount as checkAmount, text as checkText, exclusion } from '../../app/core/validate.js';
 import { buildHash, parseHash } from '../../app/router.js';
 import { readMonthRows } from '../../app/screens/list.js';
 
@@ -122,6 +124,18 @@ test('readMonthRows: 서버가 1000·500건씩만 줘도 끝까지 읽고, 2,000
     assert.ok(db.calls.every((c) => c.order === 'occurred_on,id'), '쪽이 어긋나지 않게 id로 끝 정렬');
     assert.ok(db.calls.at(-1).to <= MAX_ROWS, '상한 + 1건까지만 요청');
   }
+  // 읽는 도중 맨 앞에 거래 1건이 추가됨 → 둘째 쪽 첫 행이 첫 쪽 마지막 행과 같음 → id로 걸러 한 번만
+  let calls = 0;
+  const shifting = {
+    async select(view, { range }) {
+      const shift = calls++ === 0 ? 0 : 1;
+      const all = Array.from({ length: 1500 + shift }, (_, i) => ({ id: i - shift }));
+      return { data: all.slice(range.from, Math.min(range.to + 1, range.from + 1000)), error: null };
+    },
+  };
+  const dup = await readMonthRows(shifting, '2026-10-01');
+  assert.equal(new Set(dup.data.rows.map((r) => r.id)).size, dup.data.rows.length, '중복 없음');
+  assert.equal(dup.data.rows.length, 1500, '앞에 새로 들어온 1건은 이번 읽기에는 없음(다시 열면 보임)');
   const failing = { async select() { return { data: null, error: { code: 'network' } }; } };
   assert.deepEqual(await readMonthRows(failing, '2026-10-01'), { error: { code: 'network' } });
 });
@@ -182,4 +196,51 @@ test('휴지통: 연결된 환불 먼저, 원거래 나중 + 확인한 달 안�
   assert.match(p.message, /2026년 10월은 확인을 마친 달/);
   assert.deepEqual(trashPlan(detailRow, []).ids, [U(1)]);
   assert.deepEqual(trashPatch('m1', new Date('2026-10-29T00:00:00Z')), { deleted_at: '2026-10-29T00:00:00.000Z', deleted_by: 'm1', updated_by: 'm1' });
+});
+
+test('editability: 공동/개인·제외·나누기·되돌리기 가능 여부', () => {
+  const e = editability(detailRow);
+  assert.deepEqual(e, { canConfirm: true, canShare: true, canExclude: true, excludeBlocked: null, canSplit: true, canRevertToOriginal: false });
+  assert.match(editability(detailRow, [{ id: U(3), amount: 5000 }]).excludeBlocked, /연결된 환불이 있어/);
+  assert.equal(editability({ ...detailRow, is_excluded: true }, [{ id: U(3) }]).excludeBlocked, null, '다시 넣기는 막지 않음');
+  const linked = editability({ ...detailRow, ...rows[2] });
+  assert.deepEqual([linked.canShare, linked.canRevertToOriginal], [false, false], '연결 환불은 원거래를 따름, 라인 없으면 되돌릴 것 없음');
+  assert.equal(editability({ ...detailRow, ...rows[2], lines: rows[0].lines }).canRevertToOriginal, true);
+  assert.equal(editability({ ...detailRow, ...rows[4] }).canShare, true, '미연결 환불은 바꿀 수 있음');
+  const tr = editability({ ...detailRow, ...rows[3] });
+  assert.deepEqual([tr.canExclude, tr.canSplit, tr.canShare], [false, false, false]);
+  assert.equal(editability({ ...detailRow, review_status: 'confirmed' }).canConfirm, false);
+  assert.deepEqual(Object.values(editability({ ...detailRow, deleted_at: 'x' })).filter(Boolean), []);
+});
+
+test('정산 변경 문구·patch (C9 제외 규칙과 맞음)', () => {
+  assert.match(settlementChangeText(detailRow, { type: 'share', to: false }).message, /^이 거래를 개인 지출로/);
+  assert.match(settlementChangeText(detailRow, { type: 'share', to: false }, [{ id: U(3) }]).message, /연결된 환불 1건도 함께 바뀌어요/);
+  assert.match(settlementChangeText({ ...detailRow, month_reviewed_at: 'x' }, { type: 'exclude', to: true }).message, /2026년 10월은 확인을 마친 달/);
+  assert.deepEqual(sharePatch(false, 'm1'), { is_shared: false, updated_by: 'm1' });
+  for (const to of [true, false]) {
+    const p = excludePatch(to, 'm1');
+    assert.equal(exclusion({ kind: 'expense', isExcluded: p.is_excluded, excludeReason: p.exclude_reason }).ok, true);
+  }
+  assert.deepEqual(confirmPatch('m1'), { review_status: 'confirmed', updated_by: 'm1' });
+});
+
+test('나누기: 처음 값과 입력 검사(카테고리·금액·품목 민감번호·합계)', () => {
+  const allowed = new Set([C_DINING, U(905)]);
+  const checks = { amount: checkAmount, text: checkText };
+  assert.deepEqual(linesDraft({ amount: '30000', lines: [] }), [{ categoryId: '', amountText: '30000', note: '' }]);
+  assert.deepEqual(linesDraft(rows[0]), [{ categoryId: C_DINING, amountText: '12000', note: '' }]);
+  const ok = validateLines([{ categoryId: C_DINING, amountText: '10,000', note: ' 점심 ' }, { categoryId: U(905), amountText: '2000', note: '' }], 12000, allowed, checks);
+  assert.deepEqual(ok, { ok: true, sumText: '합계 12,000원 / 거래 12,000원', lines: [
+    { category_id: C_DINING, amount: 10000, item_note: '점심' }, { category_id: U(905), amount: 2000, item_note: null }] });
+  const v = (draft) => validateLines(draft, 12000, allowed, checks).message;
+  assert.match(v([{ categoryId: '', amountText: '12000', note: '' }]), /1번째 줄의 카테고리/);
+  assert.match(v([{ categoryId: G_FOOD, amountText: '12000', note: '' }]), /카테고리를 골라/, '고를 수 없는 카테고리');
+  assert.match(v([{ categoryId: C_DINING, amountText: '-1', note: '' }]), /금액은/);
+  assert.match(v([{ categoryId: C_DINING, amountText: '10000', note: '' }]), /2,000원이 남았어요/);
+  assert.match(v([{ categoryId: C_DINING, amountText: '13000', note: '' }]), /1,000원이 넘쳐요/);
+  const digits = Array.from({ length: 10 }, () => 1 + Math.floor(Math.random() * 9)).join('');
+  assert.match(v([{ categoryId: C_DINING, amountText: '12000', note: `번호 ${digits}` }]), /품목: 카드·계좌/);
+  assert.match(v([]), /1~50줄/);
+  assert.match(v(Array.from({ length: MAX_LINES + 1 }, () => ({ categoryId: C_DINING, amountText: '0', note: '' }))), /1~50줄/);
 });

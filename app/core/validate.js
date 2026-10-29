@@ -63,6 +63,7 @@ export function date(v) {
 export const TEXT_LIMITS = Object.freeze({
   merchant: 200,
   memo: 500,
+  item_note: 100, // transaction_lines.item_note (DB 길이 제한 없음 — 앱 제안 값)
   alias: 50, // counterparty_rules.alias
   display_name: 20, // members.display_name
   description: 200, // change_batches.description

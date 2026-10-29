@@ -1,19 +1,22 @@
 // =====================================================================
 // 화면 6 거래 상세 (화면 설계 v0.1 4-4, 시안 6·19): 조회, 분류 바꾸기, 메모, 휴지통으로
 // 조회: v_transaction_detail(이 거래, 원거래, 연결된 환불), members, categories
-// 쓰기: bulk_set_category([id], …) · transactions update(memo / deleted_at·deleted_by, 항상 updated_by = 나)
-// - 쓰기는 재시도하지 않는다. 끝나면 다시 읽어 그린다(reload)
-// - 공동 여부·제외·나누기·확인했어요·원거래 찾기는 다음 단계(지금은 표시만)
+// 쓰기: bulk_set_category([id], …) · set_transaction_lines(나누기·원거래 카테고리로 되돌리기)
+//       transactions update(memo · review_status · is_shared · is_excluded/exclude_reason · deleted_at/deleted_by, 항상 updated_by = 나)
+// - 쓰기는 재시도하지 않는다. 끝나면 다시 읽어 그린다(reload). 0행이 바뀌면 실패로 본다
+// - 정산에 영향 주는 변경(공동/개인·집계 제외)은 확인 대화상자를 거친다(확인 완료 달이면 '확인 후 변경됨' 안내)
+// - 원거래 찾기는 다음 단계(사용자 결정 대기)
 // 의존: ui/dom.js, router.js, core/confirm.js, core/validate.js, core/errors.js, screens/detail-model.js, screens/list-model.js, screens/shell.js
 // =====================================================================
-import { h } from '../ui/dom.js';
+import { h, replaceChildren } from '../ui/dom.js';
 import { buildHash } from '../router.js';
 import { confirmDialog } from '../core/confirm.js';
-import { text as checkText } from '../core/validate.js';
+import { text as checkText, amount as checkAmount } from '../core/validate.js';
 import { STAGES, ACTIONS } from '../core/errors.js';
 import { categoryIndex } from './list-model.js';
 import {
   buildDetailModel, categoryOptions, categoryChangeText, changeDescription, trashPlan, trashPatch,
+  editability, settlementChangeText, sharePatch, excludePatch, confirmPatch, linesDraft, validateLines, MAX_LINES,
 } from './detail-model.js';
 import { errorView } from './shell.js';
 
@@ -95,8 +98,19 @@ export async function renderDetail({ db, member, id, go, reload, isCurrent, onEr
     say(`${err.message}${code ? ` (오류 번호 ${code})` : ''}`, true);
   };
   const busy = (on) => {
-    for (const el of main.querySelectorAll('button, select, textarea')) el.disabled = on;
+    for (const el of main.querySelectorAll('button, select, textarea, input')) el.disabled = on;
   };
+  /** 이 거래 한 행 update → 성공하면 다시 읽기 */
+  const updateRow = async (patch) => {
+    busy(true);
+    const r = await db.update('transactions', row.id, patch);
+    busy(false);
+    if (r.error) { fail(r.error, { stage: STAGES.db_update }); return; }
+    if (!r.data?.length) { say('저장하지 못했어요. 새로고침해 주세요.', true); return; }
+    reload();
+  };
+  const ed = editability(row, refunds);
+  const button = (text, cls, onClick) => h('button', { class: `btn ${cls}`, text, attrs: { type: 'button' }, on: { click: onClick } }, [], doc);
 
   // 머리: 가맹점 · 금액 · 상태
   const hero = h('section', { class: 'card hero' }, [
@@ -154,8 +168,98 @@ export async function renderDetail({ db, member, id, go, reload, isCurrent, onEr
     });
     classCard.append(h('label', { class: 'filter-field' }, [pick], doc));
   }
+  if (ed.canSplit) classCard.append(splitEditor());
+  if (ed.canRevertToOriginal) {
+    classCard.append(button('원거래 카테고리로 되돌리기', 'secondary', async () => {
+      const yes = await confirmDialog({
+        title: '원거래 카테고리로', message: '이 환불의 분류를 지우고 원거래 카테고리를 따르게 해요.', confirmLabel: '되돌리기', doc,
+      });
+      if (!yes) return;
+      busy(true);
+      const r = await db.rpc('set_transaction_lines', { p_txn_id: row.id, p_lines: [] });
+      busy(false);
+      if (r.error) { fail(r.error, { stage: STAGES.db_rpc }); return; }
+      reload();
+    }));
+  }
+
+  /** 금액 나누기(set_transaction_lines — 한 번에 전부 바뀌거나 전부 안 바뀜) */
+  function splitEditor() {
+    const options = categoryOptions(categories, row.kind);
+    const allowed = new Set(options.flatMap((g) => g.items.map((it) => it.id)));
+    const draft = linesDraft(row);
+    const box = h('div', { class: 'split', attrs: { hidden: true } }, [], doc);
+    const sumLine = h('p', { class: 'muted small split-sum', attrs: { 'aria-live': 'polite' } }, [], doc);
+    const check = () => validateLines(draft, row.amount, allowed, { amount: checkAmount, text: checkText });
+    const showSum = () => {
+      const v = check();
+      sumLine.textContent = v.ok ? v.sumText : `${v.sumText} · ${v.message}`;
+    };
+    const lineRow = (d, i) => {
+      const sel = h('select', { class: 'field', attrs: { 'aria-label': `${i + 1}번째 줄 카테고리` } }, [
+        h('option', { text: '카테고리', attrs: { value: '' } }, [], doc),
+        ...options.map((g) => h('optgroup', { attrs: { label: g.group } }, g.items.map((it) => {
+          const o = h('option', { text: it.name, attrs: { value: it.id } }, [], doc);
+          if (it.id === d.categoryId) o.selected = true;
+          return o;
+        }), doc)),
+      ], doc);
+      sel.addEventListener('change', () => { d.categoryId = sel.value; showSum(); });
+      const amt = h('input', { class: 'field', attrs: { inputmode: 'numeric', 'aria-label': `${i + 1}번째 줄 금액`, maxlength: '20' } }, [], doc);
+      amt.value = d.amountText;
+      amt.addEventListener('input', () => { d.amountText = amt.value; showSum(); });
+      const note = h('input', { class: 'field', attrs: { 'aria-label': `${i + 1}번째 줄 품목`, placeholder: '품목(선택)', maxlength: '100' } }, [], doc);
+      note.value = d.note;
+      note.addEventListener('input', () => { d.note = note.value; });
+      const del = draft.length > 1
+        ? button('빼기', 'secondary small-btn', () => { draft.splice(i, 1); draw(); })
+        : null;
+      return h('div', { class: 'split-row' }, [sel, amt, note, del], doc);
+    };
+    const draw = () => {
+      const add = draft.length < MAX_LINES
+        ? button('줄 더하기', 'secondary small-btn', () => { draft.push({ categoryId: '', amountText: '0', note: '' }); draw(); })
+        : null;
+      const save = button('나눈 대로 저장', 'primary', async () => {
+        const v = check();
+        if (!v.ok) { say(v.message, true); return; }
+        busy(true);
+        const r = await db.rpc('set_transaction_lines', { p_txn_id: row.id, p_lines: v.lines });
+        busy(false);
+        if (r.error) { fail(r.error, { stage: STAGES.db_rpc }); return; }
+        reload();
+      });
+      replaceChildren(box, ...draft.map(lineRow), add, sumLine, save);
+      showSum();
+    };
+    draw();
+    const toggle = button('금액 나누기', 'secondary', () => {
+      box.hidden = !box.hidden;
+      toggle.setAttribute('aria-expanded', String(!box.hidden));
+    });
+    toggle.setAttribute('aria-expanded', 'false');
+    return h('div', { class: 'split-wrap' }, [toggle, box], doc);
+  }
 
   const settleCard = h('section', { class: 'card' }, [h('h2', { class: 'card-title', text: '정산' }, [], doc), rows(m.settle, doc)], doc);
+  const settleChange = async (change, patch) => {
+    const t = settlementChangeText(row, change, refunds);
+    if (!(await confirmDialog({ ...t, confirmLabel: '바꾸기', doc }))) return;
+    await updateRow(patch);
+  };
+  if (ed.canShare) {
+    const to = !row.is_shared;
+    settleCard.append(button(to ? '공동 지출로 바꾸기' : '개인 지출로 바꾸기', 'secondary',
+      () => settleChange({ type: 'share', to }, sharePatch(to, member.memberId))));
+  }
+  if (ed.canExclude) {
+    const to = !row.is_excluded;
+    if (ed.excludeBlocked) settleCard.append(h('p', { class: 'muted small', text: ed.excludeBlocked }, [], doc));
+    else {
+      settleCard.append(button(to ? '집계에서 빼기' : '집계에 다시 넣기', 'secondary',
+        () => settleChange({ type: 'exclude', to }, excludePatch(to, member.memberId))));
+    }
+  }
 
   // 메모
   const memo = h('textarea', { class: 'field memo', attrs: { 'aria-label': '메모', maxlength: '500', rows: '3', placeholder: '메모 (500자 이하)' } }, [], doc);
@@ -165,12 +269,7 @@ export async function renderDetail({ db, member, id, go, reload, isCurrent, onEr
     const v = checkText(memo.value, 'memo');
     if (!v.ok) { say(v.message, true); return; }
     if (v.value === (row.memo ?? '')) { say('바뀐 내용이 없어요'); return; }
-    busy(true);
-    const r = await db.update('transactions', row.id, { memo: v.value || null, updated_by: member.memberId });
-    busy(false);
-    if (r.error) { fail(r.error, { stage: STAGES.db_update }); return; }
-    if (!r.data?.length) { say('저장하지 못했어요. 새로고침해 주세요.', true); return; }
-    reload();
+    await updateRow({ memo: v.value || null, updated_by: member.memberId });
   });
   const memoCard = h('section', { class: 'card' }, [h('h2', { class: 'card-title', text: '메모' }, [], doc), memo, memoSave], doc);
 
@@ -202,8 +301,12 @@ export async function renderDetail({ db, member, id, go, reload, isCurrent, onEr
     go(buildHash('list', { query: { month: row.period_month.slice(0, 7) } }));
   });
 
+  const confirmBtn = ed.canConfirm
+    ? button('확인했어요', 'primary', () => updateRow(confirmPatch(member.memberId)))
+    : null;
+
   const main = h('main', { class: 'screen' }, [
-    headOf('거래 상세'), hero, status, info, linkCard, classCard, settleCard, memoCard, historyCard,
+    headOf('거래 상세'), hero, status, info, linkCard, classCard, settleCard, memoCard, historyCard, confirmBtn,
     m.deleted ? h('p', { class: 'card muted', text: '휴지통에 있는 거래예요' }, [], doc) : trash,
   ], doc);
   return main;
