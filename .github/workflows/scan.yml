@@ -1,0 +1,42 @@
+# PR 검사 (보안 리뷰 v0.1 6장 2층): 유출 검사 + 단위 테스트
+# - 외부 액션을 쓰지 않는다(공급망 위험 제거). 소스는 git으로 직접 받는다
+# - 권한은 읽기만. pull_request_target은 쓰지 않는다
+# - 이벤트 값(${{ }})은 run 안에 직접 넣지 않고 env로만 넘긴다(명령 삽입 방지)
+# 저장소 설정에서 이 검사(job: scan)를 main 브랜치의 필수 상태 검사로 지정한다.
+name: scan
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+    steps:
+      - name: Fetch source (no third-party action)
+        run: |
+          git init -q src
+          cd src
+          git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+          git fetch -q --no-tags origin "$BASE_SHA" "+refs/pull/$PR_NUMBER/head:refs/remotes/pr/head"
+          git checkout -q --detach pr/head
+          git log -1 --format='head %H'
+
+      - name: Leak scan (changed files)
+        working-directory: src
+        run: node scripts/scan.mjs --range "$BASE_SHA" HEAD
+
+      - name: Unit tests
+        working-directory: src
+        run: |
+          node --version
+          node --test $(find tests -name '*.test.mjs' | sort)
