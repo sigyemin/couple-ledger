@@ -25,6 +25,7 @@ import { renderRules, renderRuleEdit, renderReapply } from './screens/rules.js';
 import { renderTrash } from './screens/trash.js';
 import { renderChanges, renderChange } from './screens/changes.js';
 import { renderReview } from './screens/review.js';
+import { renderReport, renderReportGroup, renderReportItem } from './screens/report.js';
 import { defaultReviewMonth } from './screens/review-model.js';
 
 const doc = globalThis.document;
@@ -120,6 +121,12 @@ async function boot() {
         view = await renderMore({ db, member, monthStart: defaultReviewMonth(), signOut, isCurrent, onError });
       } else if (route.screen === 'review') {
         view = await renderReview({ db, member, monthStart: monthParam(route.query.get('month'), defaultReviewMonth()), reload, isCurrent, onError });
+      } else if (route.screen === 'report') {
+        view = await renderReport({ db, monthStart, view: route.query.get('view') === 'income' ? 'income' : 'expense', isCurrent, onError });
+      } else if (route.screen === 'rgroup') {
+        view = await renderReportGroup({ db, id: route.id, monthStart, isCurrent, onError });
+      } else if (route.screen === 'ritem') {
+        view = await renderReportItem({ db, id: route.id, monthStart, isCurrent, onError });
       } else if (route.screen === 'trash') {
         view = await renderTrash({ db, member, reload, isCurrent, onError });
       } else if (route.screen === 'changes') {
