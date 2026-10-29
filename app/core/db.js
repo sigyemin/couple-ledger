@@ -15,6 +15,8 @@ const RE_NAME = /^[a-z_][a-z0-9_]{0,62}$/;
 // insert를 허용하는 표 (앱이 직접 행을 넣는 곳만. 나머지 쓰기는 RPC로). 늘릴 때는 리뷰를 받는다
 // - transactions: 거래 직접 추가(화면 설계 v0.1 4-4 "수동 추가") 한 행만. 넣을 수 있는 칸을 아래 목록으로 묶는다
 export const INSERT_TABLES = Object.freeze(['import_batches', 'transactions']);
+// update를 허용하는 표 (지금 앱이 고치는 표만. 실수 방지용 — 실제로 막는 것은 RLS). 늘릴 때는 리뷰를 받는다
+export const UPDATE_TABLES = Object.freeze(['transactions']);
 // 표별로 넣을 수 있는 칸(없으면 칸 이름 형식만 검사)
 export const INSERT_COLUMNS = Object.freeze({
   transactions: Object.freeze(['source_id', 'origin', 'occurred_on', 'occurred_time', 'merchant_raw', 'merchant_norm', 'amount',
@@ -120,6 +122,7 @@ export function createDb(client) {
     update(table, id, patch) {
       try {
         assertName('테이블', table);
+        if (!UPDATE_TABLES.includes(table)) throw new TypeError('update를 허용하지 않는 표입니다');
         if (typeof id !== 'string' || !id) throw new TypeError('id가 필요합니다');
         const keys = Object.keys(patch ?? {});
         if (!keys.length) throw new TypeError('바꿀 값이 없습니다');

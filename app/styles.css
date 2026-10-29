@@ -184,3 +184,13 @@ ul { list-style: none; margin: 0; padding: 0; }
 .bulk-bar .field { grid-column: 1 / 2; }
 .bulk-bar .btn { margin: 0; }
 .add-form .btn.primary { width: 100%; margin-top: 16px; }
+
+/* 정산 (화면 9) */
+.amount-l { margin-top: 6px; font-size: 24px; font-weight: 700; letter-spacing: -0.3px; }
+.settle-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 14px; }
+.settle-table th, .settle-table td { padding: 10px 4px; text-align: right; border-bottom: 1px solid var(--line); }
+.settle-table th[scope=row], .settle-table thead th:first-child { text-align: left; }
+.settle-table thead th { font-weight: 400; font-size: 12px; color: var(--sub-on-white); }
+.settle-table .plus { color: var(--blue); font-weight: 700; }
+.settle-table .minus { color: var(--orange); font-weight: 700; }
+.card.review.changed_after_review { border: 1px solid var(--orange); }

@@ -17,6 +17,8 @@ import { renderHome } from './screens/home.js';
 import { renderList } from './screens/list.js';
 import { renderDetail } from './screens/detail.js';
 import { renderAdd } from './screens/add.js';
+import { renderSettle } from './screens/settle.js';
+import { defaultSettleMonth } from './screens/settle-model.js';
 
 const doc = globalThis.document;
 const root = doc.getElementById('app');
@@ -106,12 +108,14 @@ async function boot() {
         view = await renderHome({ db, member, monthStart, isCurrent, onError });
       } else if (route.screen === 'list') {
         view = await renderList({ db, monthStart, query: route.query, go, isCurrent, onError });
+      } else if (route.screen === 'settle') {
+        view = await renderSettle({ db, monthStart: monthParam(route.query.get('month'), defaultSettleMonth()), reload, isCurrent, onError });
       } else if (route.screen === 'add') {
         view = await renderAdd({ db, member, query: route.query, go, isCurrent, onError });
       } else if (route.screen === 'txn') {
         view = await renderDetail({ db, member, id: route.id, go, reload, isCurrent, onError });
       } else {
-        const titles = { upload: '올리기', settle: '정산', more: '더보기' };
+        const titles = { upload: '올리기', more: '더보기' };
         view = comingSoon(titles[route.screen]);
       }
     } catch (err) {
