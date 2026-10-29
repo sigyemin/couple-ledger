@@ -49,9 +49,27 @@ node --test $(find tests -name '*.test.mjs')
 
 ## 작업 규칙
 
-- 모든 변경은 브랜치 → PR → 보안·코드 리뷰 후 병합. 예외: keepalive 워크플로의 날짜 표식 자동 커밋
+- 모든 변경은 브랜치 → PR → 보안·코드 리뷰 후 병합. 예외 없음(keepalive 워크플로도 커밋하지 않는다)
 - 운영 DB에서 테스트할 때는 테스트 결제수단(`is_test`)으로 구분하고 끝나면 일괄 삭제한다. 스키마 변경 전에는 반드시 백업한다
 - 화면에 DB 값을 넣을 때는 `textContent`만 쓴다(`innerHTML` 금지). `eval`·`new Function` 금지
+
+## keepalive (`.github/workflows/keepalive.yml`)
+
+무료 플랜의 두 가지 자동 정지를 막는다. 매일 1회(21:17 UTC) 예약 실행되고, Actions 탭에서 수동 실행(`workflow_dispatch`)도 된다. 커밋하지 않으며 외부 액션·checkout을 쓰지 않는다.
+
+| job | 막는 것 | 하는 일 | 권한 |
+|---|---|---|---|
+| `ping` | Supabase 무료 플랜: DB 활동 1주일 없으면 프로젝트 일시정지 | `POST /rest/v1/rpc/keepalive` (publishable 키). 변수가 없으면 "건너뜀"을 남기고 성공 종료 | 없음 (`{}`) |
+| `keep-active` | 공개 저장소: 저장소 활동 60일 없으면 예약 워크플로 자동 비활성화 | GitHub REST API `PUT /repos/{owner}/{repo}/actions/workflows/keepalive.yml/enable` (`GITHUB_TOKEN`) | `actions: write`만 |
+
+- `keepalive` RPC 함수는 DB 스키마 쪽에서 만든다. 함수가 없으면 `ping`이 실패(HTTP 404)로 표시된다
+- `keep-active`의 enable 호출이 60일 계산의 "저장소 활동"으로 인정되는지는 GitHub 공식 문서에 적혀 있지 않다. 그래서 아래 관찰 항목으로 확인한다
+
+설치 후 할 일 (운영 DB 설치 뒤):
+1. GitHub 저장소 Settings → Secrets and variables → Actions → **Variables** 탭에 `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` 추가 (Secrets 아님. publishable 키는 공개값이다. service_role·secret 키는 넣지 않는다)
+2. Actions 탭 → keepalive → Run workflow로 한 번 실행해 `ping`이 `HTTP 200`(또는 204)을 남기는지 확인
+3. 첫 2주: Supabase에서 비활성 경고 메일이 오지 않는지 확인
+4. 첫 60일: 저장소에 커밋이 없는 기간이 생겨도 keepalive가 비활성화되지 않는지(Actions 탭에 "disabled" 표시·경고 메일이 없는지) 확인. 비활성화되면 Actions 탭에서 다시 켜고 방식을 재검토한다
 
 ## 폴더
 
