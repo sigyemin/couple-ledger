@@ -21,6 +21,7 @@ import { renderSettle } from './screens/settle.js';
 import { defaultSettleMonth } from './screens/settle-model.js';
 import { renderMore } from './screens/more.js';
 import { renderCategories } from './screens/categories.js';
+import { renderRules, renderRuleEdit, renderReapply } from './screens/rules.js';
 import { renderSources, renderSourceEdit } from './screens/sources.js';
 import { renderTrash } from './screens/trash.js';
 import { renderChanges, renderChange } from './screens/changes.js';
@@ -133,6 +134,12 @@ async function boot() {
         view = await renderChanges({ db, isCurrent, onError });
       } else if (route.screen === 'change') {
         view = await renderChange({ db, id: route.id, reload, isCurrent, onError });
+      } else if (route.screen === 'rules') {
+        view = await renderRules({ db, isCurrent, onError });
+      } else if (route.screen === 'rule' || route.screen === 'rulenew') {
+        view = await renderRuleEdit({ db, member, id: route.id, go, isCurrent, onError });
+      } else if (route.screen === 'reapply') {
+        view = await renderReapply({ db, id: route.id, query: route.query, go, isCurrent, onError });
       } else if (route.screen === 'sources') {
         view = await renderSources({ db, isCurrent, onError });
       } else if (route.screen === 'source' || route.screen === 'sourcenew') {
