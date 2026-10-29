@@ -53,6 +53,8 @@ export async function renderAdd({ db, member, query, go, isCurrent, onError }, d
   }
   const { sources, members, categories } = res.data;
   const srcOpts = sourceOptions(sources, members);
+  // 이 화면에서 쓸 중복 키 하나. 응답이 끊겨 다시 눌러도 같은 키로 보내므로 두 번 들어가지 않는다(unique 위반 → 이미 추가됨)
+  const entryKey = globalThis.crypto.randomUUID();
 
   const status = h('p', { class: 'status-line', attrs: { role: 'status', 'aria-live': 'polite' } }, [], doc);
   const say = (msg, isError = false) => {
@@ -113,7 +115,7 @@ export async function renderAdd({ db, member, query, go, isCurrent, onError }, d
     const b = buildManualRow({
       sourceId: src.value, kind: kind.value, date: date.value, time: time.value, merchant: merchant.value,
       amountText: amount.value, categoryId: cat.value, isShared: shared.checked, memo: memo.value,
-    }, { sourceIds: new Set(srcOpts.map((o) => o.id)), categoryIds: allowedCats, memberId: member.memberId, newId: () => globalThis.crypto.randomUUID() });
+    }, { sourceIds: new Set(srcOpts.map((o) => o.id)), categoryIds: allowedCats, memberId: member.memberId, newId: () => entryKey });
     if (!b.ok) { say(b.message, true); return; }
 
     busy(true);
@@ -123,6 +125,14 @@ export async function renderAdd({ db, member, query, go, isCurrent, onError }, d
     if (warn && !(await confirmDialog({ ...warn, confirmLabel: '추가하기', doc }))) { busy(false); return; }
 
     const ins = await db.insert('transactions', b.row);
+    if (ins.error?.code === 'duplicate') {
+      // 앞서 보낸 요청이 이미 들어감(응답만 끊김) → 그 거래로 간다
+      const found = await db.select('transactions', { columns: 'id', filters: [eq('dedup_key', b.row.dedup_key)] });
+      const prev = found.data?.[0]?.id;
+      if (prev) noteForTxn(prev, '이미 추가된 거래예요. 내용을 확인해 주세요.');
+      go(prev ? buildHash('txn', { id: prev }) : buildHash('list', { query: { month: b.row.occurred_on.slice(0, 7) } }));
+      return;
+    }
     if (ins.error || !ins.data?.[0]?.id) {
       busy(false);
       if (ins.error) say(`${ins.error.message} (오류 번호 ${onError?.(ins.error, { stage: STAGES.db_update }) ?? ''})`, true);
