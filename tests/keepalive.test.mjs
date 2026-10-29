@@ -2,10 +2,12 @@
 // 1) 정적 검사: 권한 최소화, 외부 액션 없음, ${{ }}는 env 대입에만, 로그 노출·커밋 금지
 // 2) 동작 검사: run 본문을 실제 셸 옵션(bash -eo pipefail)으로 실행. curl·git은 가짜로 바꿔 네트워크 호출 없음.
 //    격리: 작업 폴더는 새 임시 폴더, PATH는 가짜 도구 + 허용 도구(sed, head)만, 환경 변수는 시험 값만
-//    (HOME·GIT_*·GH_*·GITHUB_* 등 실제 환경을 넘기지 않는다 → 본문이 저장소를 건드릴 수 없다)
+//    (HOME·GIT_*·GH_*·GITHUB_* 등 실제 환경을 넘기지 않는다)
+//    실행 전 관문: PATH·cwd 격리는 절대 경로(/usr/bin/git)나 /proc/$PPID 로 우회할 수 있으므로,
+//    워크플로 본문은 assertSafeBody(명령 허용 목록)를 통과해야만 실행한다. 통과 못 하면 실행 없이 throw
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync, symlinkSync } from 'node:fs';
+import { readFileSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync, symlinkSync } from 'node:fs';
 import { spawnSync, execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -224,7 +226,52 @@ function withFakeCurl(fn) {
   }
 }
 
+// 실행 전 관문: 워크플로 run 본문이 쓰는 셸 문법·명령만 허용한다.
+// - 따옴표 안 내용은 지우고 본다. 단 큰따옴표 안의 $( 와 백틱, ${! 간접 참조는 금지
+// - 어디서든 금지: /proc, PPID, $$, BASHPID, 백틱
+// - 리다이렉트(<, >) 금지. 절대 경로 인자는 /dev/null만
+// - 명령 위치의 첫 단어는 허용 목록만 (if/then/else/fi 와 VAR=값 대입은 건너뜀)
+const SAFE_COMMANDS = new Set(['echo', 'exit', 'curl', 'sed', 'head', '[', 'fi']);
+function assertSafeBody(body) {
+  const fail = (why) => { throw new Error(`실행 거부(${why})`); };
+  if (/\/proc|PPID|\$\$|BASHPID|`/.test(body)) fail('/proc·PPID·$$·백틱');
+  let t = body.replace(/\\\n/g, ' ').split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+  // 왼쪽부터 읽으며 따옴표 안 내용을 Q로 바꾼다 (작은따옴표 안은 그대로 문자, 큰따옴표 안은 치환 검사)
+  let out = '';
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (c === '\\') { i++; out += '_'; continue; }
+    if (c !== "'" && c !== '"') { out += c; continue; }
+    let j = i + 1;
+    let inner = '';
+    while (j < t.length && t[j] !== c) {
+      if (c === '"' && t[j] === '\\') { inner += t[j] + (t[j + 1] ?? ''); j += 2; continue; }
+      inner += t[j++];
+    }
+    if (j >= t.length) fail('닫히지 않은 따옴표');
+    if (c === '"' && /\$\(|\$\{!/.test(inner)) fail('따옴표 안 명령 치환·간접 참조');
+    out += 'Q';
+    i = j;
+  }
+  t = out;
+  if (/\$\{!/.test(t)) fail('간접 참조');
+  if (/[<>]/.test(t)) fail('리다이렉트');
+  for (const w of t.split(/\s+/)) if (w.startsWith('/') && w !== '/dev/null') fail(`절대 경로 ${w}`);
+  for (let seg of t.split(/\n|;|&&|\|\||\||\$\(|\(|\)/)) {
+    const words = seg.trim().split(/\s+/).filter(Boolean);
+    while (words.length && (/^(if|then|else|elif|!)$/.test(words[0]) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0]))) words.shift();
+    if (words.length && !SAFE_COMMANDS.has(words[0])) fail(`허용되지 않은 명령 ${words[0]}`);
+  }
+}
+
+// 워크플로 본문 실행: 관문 통과 후에만 격리 환경에서 실행
 function runStep(body, env, dir) {
+  assertSafeBody(body);
+  return runIsolated(body, env, dir);
+}
+
+// 격리 환경 실행 (관문 없음). 이 파일에 직접 쓴 고정 문자열(격리 자체 점검용)에만 쓴다
+function runIsolated(body, env, dir) {
   const curlLog = join(dir, 'curl.log');
   const gitLog = join(dir, 'git.log');
   writeFileSync(curlLog, '');
@@ -304,7 +351,7 @@ test('keep-active: PUT 실패 → 단계 실패', () => withFakeCurl((dir) => {
 // 격리 검사: 동작 시험이 실제 저장소·환경을 건드리지 못한다
 // ---------------------------------------------------------------------
 test('격리: 작업 폴더는 임시 폴더, 환경 변수는 시험 값만 (HOME·GIT_*·GH_*·GITHUB_* 없음)', () => withFakeCurl((dir) => {
-  const r = runStep('pwd; compgen -e', {}, dir);
+  const r = runIsolated('pwd; compgen -e', {}, dir);
   assert.equal(r.code, 0, r.out);
   const [cwd, ...names] = r.out.trim().split('\n');
   assert.equal(cwd, join(dir, 'work'));
@@ -313,7 +360,7 @@ test('격리: 작업 폴더는 임시 폴더, 환경 변수는 시험 값만 (HO
 }));
 
 test('격리: curl·git은 가짜, 그 밖의 네트워크·실행 도구는 PATH에 없다', () => withFakeCurl((dir) => {
-  const r = runStep([
+  const r = runIsolated([
     '[ "$(command -v curl)" = "' + join(dir, 'bin', 'curl') + '" ]',
     '[ "$(command -v git)" = "' + join(dir, 'bin', 'git') + '" ]',
     'for t in wget nc ncat ssh scp python3 python perl node gh; do if command -v "$t" >/dev/null; then echo "found $t"; exit 9; fi; done',
@@ -329,14 +376,42 @@ function repoState() {
   return { head: g('rev-parse', 'HEAD'), reflog: g('reflog', '--format=%H').split('\n').length, status: g('status', '--porcelain') };
 }
 
-test('격리: git commit·push를 넣은 변형(M8)을 실행해도 실제 저장소는 그대로', (t) => withFakeCurl((dir) => {
-  let before;
-  try { before = repoState(); } catch { t.skip('git 저장소가 아님'); return; }
-  const anchor = 'echo "keepalive RPC: HTTP $code"';
-  const mutated = pingBody.replace(anchor, `${anchor}\ngit commit --allow-empty -m x && git push`);
-  assert.notEqual(mutated, pingBody);
-  const r = runStep(mutated, { URL: 'https://db.example.test', KEY: 'pk' }, dir);
-  assert.notEqual(r.code, 0, r.out);
-  assert.deepEqual(r.gitCalls, ['commit --allow-empty -m x']);
-  assert.deepEqual(repoState(), before);
-}));
+// 리뷰 PR #5의 우회 변형들: 관문이 실행 전에 막아야 한다
+const ANCHOR = 'echo "keepalive RPC: HTTP $code"';
+const ESCAPES = {
+  'M8 git commit·push': 'git commit --allow-empty -m x && git push',
+  'P1 /proc/$PPID/cwd + 절대 경로 git': 'cd "/proc/$PPID/cwd" && /usr/bin/git commit -q --allow-empty -m LEAK && /usr/bin/git push -q origin HEAD || true',
+  'P2 부모 환경 읽기': "while IFS= read -r -d '' l; do echo \"$l\"; done < /proc/$PPID/environ || true",
+  'P3 /usr/bin/env': '/usr/bin/env',
+  '절대 경로 curl': '/usr/bin/curl -sS https://example.test',
+  'cd': 'cd ..',
+  'eval': 'eval "$KEY"',
+  'exec': 'exec bash',
+  'source': 'source x',
+  '. (source)': '. ./x',
+  '백틱': 'echo `id`',
+  '따옴표 안 명령 치환': 'echo "$(id)"',
+  '간접 참조 A6': 't=GH_; t="${t}TOKEN"; echo "${!t}"',
+  '$$': 'echo $$',
+  '파일 쓰기 리다이렉트': 'echo x > ../../leak',
+  '함수 정의 뒤 실행': 'f() { :; }; f',
+  'bash 재실행': 'bash -c true',
+};
+
+test('관문: 워크플로의 실제 본문 두 개는 통과한다', () => {
+  assertSafeBody(pingBody);
+  assertSafeBody(kaBody);
+});
+
+for (const [name, line] of Object.entries(ESCAPES)) {
+  test(`관문: 우회 변형은 실행 전에 거부 (${name})`, () => withFakeCurl((dir) => {
+    let before = null;
+    try { before = repoState(); } catch { /* git 저장소가 아니면 상태 비교만 생략 */ }
+    for (const mutated of [pingBody.replace(ANCHOR, () => `${ANCHOR}\n${line}`), `${pingBody}\n${line}\necho after`]) {
+      assert.notEqual(mutated, pingBody);
+      assert.throws(() => runStep(mutated, { URL: 'https://db.example.test', KEY: 'pk' }, dir), /실행 거부/);
+    }
+    assert.ok(!existsSync(join(dir, 'curl.log'))); // 실행 준비 전에 멈췄다
+    if (before) assert.deepEqual(repoState(), before);
+  }));
+}
