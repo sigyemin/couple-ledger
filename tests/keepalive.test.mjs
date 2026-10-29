@@ -82,6 +82,23 @@ test('예약 실행은 정각이 아닌 하루 1회 + 수동 실행', () => {
   assert.match(src, /^\s+workflow_dispatch:/m);
 });
 
+test('트리거는 schedule, workflow_dispatch 두 개뿐', () => {
+  const start = codeLines.findIndex((l) => /^on:\s*$/.test(l));
+  assert.ok(start >= 0);
+  const keys = [];
+  for (const l of codeLines.slice(start + 1)) {
+    if (l.trim() !== '' && indentOf(l) === 0) break;
+    const m = l.match(/^ {2}([a-z_]+):/);
+    if (m) keys.push(m[1]);
+  }
+  assert.deepEqual(keys, ['schedule', 'workflow_dispatch']);
+  assert.equal((code.match(/^\S*on:/gm) || []).length, 1);
+});
+
+test('실패를 성공으로 바꾸는 continue-on-error가 없다', () => {
+  assert.ok(!/continue-on-error/.test(code));
+});
+
 test('기본 셸은 bash (pipefail 켜짐)', () => {
   assert.match(code, /^defaults:\n {2}run:\n {4}shell: bash\s*$/m);
   assert.ok(!/^\s+shell:(?! bash\s*$)/m.test(code));
@@ -127,6 +144,7 @@ test('run 본문: 명령 추적·curl 상세 출력·git(커밋·push)·인코�
   for (const b of allRuns) {
     assert.ok(!/\bset\s+[-+][a-z]*x|xtrace/.test(b), 'set -x');
     assert.ok(!/(?:^|\s)-[a-zA-Z]*v[a-zA-Z]*(?=\s|$)|--verbose|--trace|--libcurl/.test(b), 'curl -v/--trace');
+    assert.ok(!/(?:^|\s)-[a-zA-Z]*[kD][a-zA-Z]*(?=\s|$)|--insecure|--dump-header/.test(b), 'curl -k/-D');
     assert.ok(!/\bgit\b/.test(b), 'git');
     assert.ok(!/\b(base64|xxd|od|hexdump|rev|openssl|printenv|env)\b/.test(b), '인코딩·환경 출력 도구');
   }
