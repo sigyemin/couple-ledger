@@ -143,3 +143,33 @@ test('구분자마다 그 구분자 하나만 써서 4자리 묶음 넷을 이�
   assert.equal(normalizeForCheck('ㆍ'), 'ᆞ'); // 원인
   assert.equal(maskSensitiveNumbers(`김가짜 ${groups.join('ㆍ')} 메모`), `김가짜 ${MASK_TEXT} 메모`);
 });
+
+// ---------------------------------------------------------------- 구분자 9자 추가 (설계 문서 v0.17 민감번호 규칙, 최종 26자)
+const ADDED_SEPARATORS = ['∙', '⋅', '⸱', '⸳', '‣', '⁃', '●', '᛫', '⦁'];
+const hex = (c) => `U+${c.codePointAt(0).toString(16).toUpperCase()}`;
+
+test('구분자 목록: 26자, 추가 9자 포함, 글자 U+A78F·U+11A2는 없음, 중복 없음', () => {
+  const list = [...RUN_SEPARATORS];
+  assert.equal(list.length, 26);
+  assert.equal(new Set(list).size, 26);
+  for (const c of ADDED_SEPARATORS) assert.ok(list.includes(c), hex(c));
+  assert.ok(!list.includes('ꞏ'));
+  assert.ok(!list.includes('ᆢ'));
+});
+
+test('추가 구분자: 각 문자 단독으로 4-4-4-4를 이으면 잡히고 가려지며, 9자리 이하 이음은 안 잡힌다', () => {
+  for (const c of ADDED_SEPARATORS) {
+    const s = ['1234', '5678', '9012', '3456'].join(c);
+    assert.equal(hasSensitiveNumber(s), true, hex(c));
+    assert.equal(maskSensitiveNumbers(`김가짜 ${s} 메모`), `김가짜 ${MASK_TEXT} 메모`, hex(c));
+    assert.equal(hasSensitiveNumber(['123', '456', '789'].join(c)), false, `9자리 ${hex(c)}`);
+    assert.equal(hasSensitiveNumber(['1234', '5678', '9'].join(c)), false, `9자리 ${hex(c)}`);
+    assert.equal(hasSensitiveNumber(['1234', '5678', '90'].join(c)), true, `10자리 ${hex(c)}`);
+  }
+});
+
+test('글자 U+A78F·U+11A2는 구분자가 아니다: 이를 사이에 둔 숫자는 이어지지 않는다', () => {
+  for (const c of ['ꞏ', 'ᆢ']) {
+    assert.equal(hasSensitiveNumber(['12345', '67890'].join(c)), false, hex(c));
+  }
+});
