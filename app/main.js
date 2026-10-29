@@ -22,6 +22,7 @@ import { defaultSettleMonth } from './screens/settle-model.js';
 import { renderMore, renderCategories } from './screens/more.js';
 import { renderTrash } from './screens/trash.js';
 import { renderChanges, renderChange } from './screens/changes.js';
+import { renderReview } from './screens/review.js';
 
 const doc = globalThis.document;
 const root = doc.getElementById('app');
@@ -114,6 +115,8 @@ async function boot() {
       } else if (route.screen === 'more') {
         const signOut = async () => { await guard.signOut(); replaceChildren(root, loginView('로그아웃했어요.')); };
         view = await renderMore({ db, member, monthStart: currentMonth(), signOut, isCurrent, onError });
+      } else if (route.screen === 'review') {
+        view = await renderReview({ db, member, monthStart, reload, isCurrent, onError });
       } else if (route.screen === 'trash') {
         view = await renderTrash({ db, member, reload, isCurrent, onError });
       } else if (route.screen === 'changes') {

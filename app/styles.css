@@ -212,3 +212,11 @@ ul { list-style: none; margin: 0; padding: 0; }
 .change-items .tag { margin-left: 6px; }
 .change-items .tag.keep { background: var(--orange-soft); color: var(--orange); }
 .change-items .sub { font-size: 13px; color: var(--sub-on-white); margin-top: 4px; }
+
+/* 월 검토 (v0.1 4-5) */
+.bar-track.progress { display: block; margin-top: 10px; }
+.review-groups > li { padding: 12px 0; border-top: 1px solid var(--line); }
+.review-groups > li:first-child { border-top: 0; }
+.review-groups .sub { font-size: 13px; color: var(--sub-on-white); }
+.review-pick { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 8px; align-items: center; }
+.review-pick .btn { margin: 0; }
