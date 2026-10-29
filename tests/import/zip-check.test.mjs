@@ -9,10 +9,12 @@ import { readGrid } from '../../app/import/pipeline.js';
 const MB = 2 ** 20;
 
 /**
- * 작은 ZIP 작성기. 항목: { name, data(Uint8Array), method = 8, cenUsz?, locUsz?, flags = 0, dd = false, cenCsz? }
+ * 작은 ZIP 작성기. 항목: { name, data(Uint8Array), method = 8, cenUsz?, locUsz?, flags = 0, dd = false, cenCsz?,
+ *   cenMethod?(중앙만 다른 방식), cenName?(중앙만 다른 이름), locFlags?(로컬에만 더할 플래그) }
+ * comment: 끝 레코드 주석(Uint8Array)
  * dd = true면 로컬 머리의 크기를 0으로 두고 데이터 디스크립터를 붙인다
  */
-function zip(items, { zip64Count = false } = {}) {
+function zip(items, { zip64Count = false, comment = new Uint8Array(0) } = {}) {
   const parts = [];
   const cen = [];
   let off = 0;
@@ -22,24 +24,26 @@ function zip(items, { zip64Count = false } = {}) {
     const name = Buffer.from(it.name);
     const flags = (it.flags ?? 0) | (it.dd ? 8 : 0);
     const loc = Buffer.alloc(30);
-    loc.writeUInt32LE(0x04034b50, 0); loc.writeUInt16LE(20, 4); loc.writeUInt16LE(flags, 6); loc.writeUInt16LE(method, 8);
+    loc.writeUInt32LE(0x04034b50, 0); loc.writeUInt16LE(20, 4); loc.writeUInt16LE(flags | (it.locFlags ?? 0), 6); loc.writeUInt16LE(method, 8);
     loc.writeUInt32LE(it.dd ? 0 : comp.length, 18); loc.writeUInt32LE(it.dd ? 0 : (it.locUsz ?? it.data.length), 22);
     loc.writeUInt16LE(name.length, 26);
     const desc = it.dd ? Buffer.alloc(16) : Buffer.alloc(0);
     if (it.dd) { desc.writeUInt32LE(0x08074b50, 0); desc.writeUInt32LE(comp.length, 8); desc.writeUInt32LE(it.data.length, 12); }
     parts.push(loc, name, comp, desc);
     const c = Buffer.alloc(46);
-    c.writeUInt32LE(0x02014b50, 0); c.writeUInt16LE(20, 4); c.writeUInt16LE(20, 6); c.writeUInt16LE(flags, 8); c.writeUInt16LE(method, 10);
-    c.writeUInt32LE(it.cenCsz ?? comp.length, 20); c.writeUInt32LE(it.cenUsz ?? it.data.length, 24); c.writeUInt16LE(name.length, 28);
+    const cname = it.cenName ? Buffer.from(it.cenName) : name;
+    c.writeUInt32LE(0x02014b50, 0); c.writeUInt16LE(20, 4); c.writeUInt16LE(20, 6); c.writeUInt16LE(flags, 8); c.writeUInt16LE(it.cenMethod ?? method, 10);
+    c.writeUInt32LE(it.cenCsz ?? comp.length, 20); c.writeUInt32LE(it.cenUsz ?? it.data.length, 24); c.writeUInt16LE(cname.length, 28);
     c.writeUInt32LE(off, 42);
-    cen.push(c, name);
+    cen.push(c, cname);
     off += 30 + name.length + comp.length + desc.length;
   }
   const cd = Buffer.concat(cen);
   const e = Buffer.alloc(22);
   const n = zip64Count ? 0xffff : items.length;
   e.writeUInt32LE(0x06054b50, 0); e.writeUInt16LE(n, 8); e.writeUInt16LE(n, 10); e.writeUInt32LE(cd.length, 12); e.writeUInt32LE(off, 16);
-  return new Uint8Array(Buffer.concat([...parts, cd, e]));
+  e.writeUInt16LE(comment.length, 20);
+  return new Uint8Array(Buffer.concat([...parts, cd, e, comment]));
 }
 
 const zeros = (n) => new Uint8Array(n);
@@ -89,6 +93,20 @@ test('구조: 항목 수 상한, 암호화·모르는 방식·ZIP64·잘림·쓰
   const ok = zip([one]);
   await assert.rejects(checkZipSize(ok.subarray(0, ok.length - 30)), { message: 'unsupported_file' }, '끝 레코드 없음');
   await assert.rejects(checkZipSize(text('PK\u0003\u0004 not a zip at all, just text padding....')), { message: 'unsupported_file' });
+});
+
+test('검사와 SheetJS가 다른 자료를 보게 하는 우회는 거부(리뷰 PR13 A·B)', async () => {
+  const big = zeros(MAX_UNZIPPED_BYTES + 1);
+  // A: 중앙 디렉터리만 '저장'(0), 로컬 머리는 deflate(8) — SheetJS는 로컬 방식으로 끝까지 푼다
+  await assert.rejects(checkZipSize(zip([{ name: 's.xml', data: big, cenMethod: 0, cenUsz: 100 }])), { message: 'unsupported_file' });
+  await assert.rejects(checkZipSize(zip([{ name: 's.xml', data: text('<a/>'), cenName: 't.xml' }])), { message: 'unsupported_file' }, '이름 다름');
+  await assert.rejects(checkZipSize(zip([{ name: 's.xml', data: text('<a/>'), locFlags: 0x2000 }])), { message: 'unsupported_file' }, '로컬 암호화 비트');
+  // B: 끝 레코드 주석 안에 가짜 끝 레코드(SheetJS는 끝에서 처음 만난 것을 씀)
+  const fake = new Uint8Array(24);
+  fake.set([0x50, 0x4b, 0x05, 0x06]);
+  await assert.rejects(checkZipSize(zip([{ name: 'a.xml', data: text('<a/>') }], { comment: fake })), { message: 'unsupported_file' });
+  // 주석이 있어도 시그니처가 없으면 정상
+  assert.equal(await checkZipSize(zip([{ name: 'a.xml', data: text('<a/>') }], { comment: text('plain comment') })), 4);
 });
 
 test('DecompressionStream이 없으면 통과시키지 않는다', async () => {

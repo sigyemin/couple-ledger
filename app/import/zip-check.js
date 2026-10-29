@@ -20,17 +20,26 @@ const SIG_EOCD = 0x06054b50;
 const SIG_CEN = 0x02014b50;
 const SIG_LOC = 0x04034b50;
 const EOCD_MIN = 22;
-const COMMENT_MAX = 0xffff;
+
+function sameBytes(a, b) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
 
 function fail(code) {
   return new Error(code);
 }
 
+/**
+ * 끝 레코드(EOCD) 찾기. SheetJS parse_zip과 같게 "끝에서부터 처음 만난 시그니처"를 쓰고,
+ * 그 레코드의 주석 길이가 파일 끝과 정확히 맞아야 받는다(주석 안에 가짜 레코드를 숨겨 검사와 SheetJS가
+ * 서로 다른 중앙 디렉터리를 보게 하는 우회를 막음 — 리뷰 PR13 B)
+ */
 function findEocd(dv) {
-  const last = dv.byteLength - EOCD_MIN;
-  const first = Math.max(0, last - COMMENT_MAX);
-  for (let i = last; i >= first; i--) {
-    if (dv.getUint32(i, true) === SIG_EOCD && i + EOCD_MIN + dv.getUint16(i + 20, true) === dv.byteLength) return i;
+  for (let i = dv.byteLength - 4; i >= 0; i--) {
+    if (dv.getUint32(i, true) !== SIG_EOCD) continue;
+    return i + EOCD_MIN <= dv.byteLength && i + EOCD_MIN + dv.getUint16(i + 20, true) === dv.byteLength ? i : -1;
   }
   return -1;
 }
@@ -102,7 +111,7 @@ export function readCentralDirectory(bytes, { maxEntries = MAX_ZIP_ENTRIES, maxB
     if (csz === 0xffffffff || usz === 0xffffffff || localOffset === 0xffffffff) throw fail('unsupported_file'); // ZIP64
     sum += usz;
     if (sum > maxBytes) throw fail('zip_too_large');
-    entries.push({ method, flags, csz, usz, localOffset });
+    entries.push({ method, flags, csz, usz, localOffset, name: bytes.subarray(p + 46, p + 46 + nameLen) });
     p += 46 + nameLen + extraLen + commentLen;
   }
   if (p > e) throw fail('unsupported_file');
@@ -120,11 +129,19 @@ export async function checkZipSize(bytes, { maxEntries = MAX_ZIP_ENTRIES, maxByt
   for (const it of entries) {
     const o = it.localOffset;
     if (o + 30 > dv.byteLength || dv.getUint32(o, true) !== SIG_LOC) throw fail('unsupported_file');
-    const start = o + 30 + dv.getUint16(o + 26, true) + dv.getUint16(o + 28, true);
+    // SheetJS는 로컬 머리의 방식·플래그를 쓴다("trust local file header instead of CD entry") → 중앙 값과 다르면 거부(리뷰 PR13 A)
+    const flags = dv.getUint16(o + 6, true);
+    const method = dv.getUint16(o + 8, true);
+    const nameLen = dv.getUint16(o + 26, true);
+    if (flags & 0x2041) throw fail('unsupported_file'); // SheetJS와 같은 암호화 비트
+    if (method !== it.method || (flags & 0x41) !== (it.flags & 0x41) || !sameBytes(bytes.subarray(o + 30, o + 30 + nameLen), it.name)) {
+      throw fail('unsupported_file');
+    }
+    const start = o + 30 + nameLen + dv.getUint16(o + 28, true);
     const end = start + it.csz;
     if (end > dv.byteLength) throw fail('unsupported_file');
     const data = bytes.subarray(start, end);
-    const n = it.method === 0 ? it.csz : await inflatedLength(data, maxBytes - total, env);
+    const n = method === 0 ? it.csz : await inflatedLength(data, maxBytes - total, env);
     total += n;
     if (total > maxBytes) throw fail('zip_too_large');
   }
