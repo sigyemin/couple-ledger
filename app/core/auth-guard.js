@@ -106,8 +106,8 @@ export function createAuthGuard({ auth, db, redirectTo, clear = clearLocalData }
 
       const { data: memberId, error: me } = await db.rpc('my_member_id', {}, { retry: true });
       if (me) {
-        // 권한 거부(42501 등)는 막힌 계정으로 보고 로그아웃·정리. 네트워크 등은 그대로 올린다
-        if (me.code === 'forbidden') await signOut();
+        // 구성원인지 확인할 수 없으면 막는 쪽으로: 로그아웃·정리 후 오류(네트워크 오류 포함, 총괄 결정)
+        await signOut();
         throw me;
       }
       if (!memberId) {

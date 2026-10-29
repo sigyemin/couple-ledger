@@ -33,7 +33,7 @@ function setup({ session = { user: { id: 'u1', email: 'x@example.com' } }, membe
     },
     async select(view, opts) {
       log.push(['select', view, opts]);
-      return { data: rows ?? [{ id: memberId, member_slot: 1, display_name: '민' }], error: null };
+      return { data: rows ?? [{ id: memberId, member_slot: 1, display_name: '사용자A' }], error: null };
     },
   };
   const clear = async () => log.push(['clear']);
@@ -43,7 +43,7 @@ function setup({ session = { user: { id: 'u1', email: 'x@example.com' } }, membe
 test('구성원이면 별칭·슬롯만 준다 (이메일·토큰 없음)', async () => {
   const { guard, log } = setup();
   const m = await guard.requireMember();
-  assert.deepEqual(m, { memberId: MEMBER, memberSlot: 1, displayName: '민' });
+  assert.deepEqual(m, { memberId: MEMBER, memberSlot: 1, displayName: '사용자A' });
   assert.deepEqual(guard.current(), m);
   assert.ok(!JSON.stringify(m).includes('example.com'));
   assert.deepEqual(log[0], ['rpc', 'my_member_id', { retry: true }]);
@@ -70,10 +70,11 @@ test('구성원 행이 안 보이면 not_member', async () => {
   assert.ok(log.some((x) => x[0] === 'clear'));
 });
 
-test('구성원 확인 RPC의 네트워크 오류는 그대로 올리고 로그아웃하지 않는다', async () => {
+test('구성원 확인 RPC가 네트워크 오류여도 로그아웃 + 정리 후 오류 (막는 쪽)', async () => {
   const { guard, log } = setup({ rpcError: new AppError('network', 'x') });
   await assert.rejects(guard.requireMember(), { code: 'network' });
-  assert.ok(!log.some((x) => x[0] === 'signOut'));
+  assert.deepEqual(log.slice(-2), [['signOut'], ['clear']]);
+  assert.equal(guard.current(), null);
 });
 
 test('구성원 확인 RPC가 권한 거부면 로그아웃 + 정리 후 forbidden', async () => {

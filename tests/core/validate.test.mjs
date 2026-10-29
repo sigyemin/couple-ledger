@@ -61,3 +61,10 @@ test('exclusion: C9 규칙 (DB CHECK와 같은 조건)', () => {
   assert.equal(v.exclusion({ kind: 'expense', isExcluded: false, excludeReason: 'other' }).ok, false);
   assert.equal(v.exclusion({ kind: 'expense', isExcluded: true, excludeReason: 'nope' }).ok, false);
 });
+
+test('approvalNo: 승인번호 형식, 빈 값은 null', () => {
+  assert.deepEqual(v.approvalNo('AB12CD34'), { ok: true, value: 'AB12CD34' });
+  assert.deepEqual(v.approvalNo(''), { ok: true, value: null });
+  assert.equal(v.approvalNo(j('12345', '67890')).ok, false);
+  assert.equal(v.approvalNo('12-34').ok, false);
+});

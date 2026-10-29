@@ -24,7 +24,9 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { hasSensitiveNumber, removeDateTime, MIN_SENSITIVE_DIGITS } from '../app/core/sensitive.js';
+import {
+  hasSensitiveNumber, normalizeForCheck, removeKnownPatterns, RUN_SEPARATORS, MIN_SENSITIVE_DIGITS,
+} from '../app/core/sensitive.js';
 
 // ---------------------------------------------------------------------
 // 1) 파일 종류
@@ -72,16 +74,17 @@ export { hasSensitiveNumber };
 // 예: 'c0000000-0000-0000-0000-000000000020'은 하이픈이 구분자라 숫자 덩어리로 보이지만 카테고리 id다.
 // DB 함수에는 없는 단계다(DB의 검사 칸에는 UUID·해시가 들어가지 않는다).
 // 우회 방지: 16진 글자는 숫자만으로도 채워지므로, 식별자와 그 앞뒤로 이어진 숫자·구분자까지 합쳐
-// (날짜·시각은 뺀 뒤) 16진 글자에서 끊은 각 조각의 숫자가 10자리 이상이면 지우지 않는다.
+// (날짜·시각·천 단위 금액은 뺀 뒤) 16진 글자에서 끊은 각 조각의 숫자가 10자리 이상이면 지우지 않는다.
 // 단 0이 아닌 숫자가 4개 이하인 조각은 0으로 채운 고정 id로 보고 지운다
 // (0으로 채운 테스트·시드 id. 10자리 이상 카드·계좌·전화번호에 0 아닌 숫자가 4개 이하일 가능성은 낮음 — 추정).
 // 무작위 UUID·SHA도 드물게 숫자가 10자리 이상 이어져 걸릴 수 있다 → 오탐이면 PR에 사유를 적는다.
 const RE_UUID = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/g;
 const RE_HEX = /(?<![0-9a-zA-Z])[0-9a-fA-F]{32,}(?![0-9a-zA-Z])/g;
-const RE_RUN_CHAR = /[0-9 ./_()-]/;
+const RE_RUN_CHAR = new RegExp(`[0-9${RUN_SEPARATORS}]`);
+const RE_NOT_RUN = new RegExp(`[^0-9${RUN_SEPARATORS}]+`);
 
 function hidesLongNumber(segment) {
-  return removeDateTime(segment).split(/[^0-9 ./_()-]+/).some((piece) => {
+  return removeKnownPatterns(segment).split(RE_NOT_RUN).some((piece) => {
     const d = piece.replace(/[^0-9]/g, '');
     const nonZero = d.replace(/0/g, '').length;
     return d.length >= MIN_SENSITIVE_DIGITS && nonZero > 4;
@@ -99,7 +102,7 @@ function stripWithContext(line, re) {
 }
 
 export function stripIdentifiers(line) {
-  return stripWithContext(stripWithContext(line.normalize('NFKC'), RE_UUID), RE_HEX);
+  return stripWithContext(stripWithContext(normalizeForCheck(line), RE_UUID), RE_HEX);
 }
 
 // ---------------------------------------------------------------------
@@ -188,7 +191,7 @@ export function decodeText(buf) {
 // git 연동
 // ---------------------------------------------------------------------
 function git(args) {
-  return execFileSync('git', args, { maxBuffer: 64 * 1024 * 1024 });
+  return execFileSync('git', args, { maxBuffer: 2 ** 26 }); // 64MB
 }
 function splitZ(buf) {
   return buf.toString('utf8').split('\0').filter(Boolean);

@@ -5,7 +5,7 @@
 //   reason: required | invalid | too_long | sensitive
 // 의존: sensitive.js, format.js (둘 다 의존 없음)
 // =====================================================================
-import { hasSensitiveNumber } from './sensitive.js';
+import { hasSensitiveNumber, approvalNoValid } from './sensitive.js';
 import { parseDateOnly } from './format.js';
 
 const ok = (value) => ({ ok: true, value });
@@ -45,6 +45,13 @@ export function ratio(v) {
   const n = Number(s);
   if (n < 0 || n > 100) return fail('invalid', MESSAGES.ratio);
   return ok(n);
+}
+
+/** 승인번호: 영숫자 4~12자 + 숫자 10개 이상 연속 금지 (DB approval_no_valid). 빈 값은 허용(칸이 null 가능) */
+export function approvalNo(v) {
+  const s = String(v ?? '').trim();
+  if (!s) return ok(null);
+  return approvalNoValid(s) ? ok(s) : fail('invalid', MESSAGES.invalid);
 }
 
 /** 일자(DT): 실제 있는 날짜만 (2026-02-30 거부) */
