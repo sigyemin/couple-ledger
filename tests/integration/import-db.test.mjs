@@ -11,7 +11,7 @@ import { parseFile } from '../../app/import/pipeline.js';
 import { fileHash } from '../../app/import/dedup.js';
 import { ensureBatch, uploadRows, batchFileName } from '../../app/import/upload.js';
 import { toAppError } from '../../app/core/errors.js';
-import { XLSX, SOURCE, FORMAT_A, FORMAT_B, bookBytes, sheetA, sheetB } from '../import/fixtures.mjs';
+import { XLSX, SOURCE, FORMAT_A, FORMAT_B, FAKE, bookBytes, sheetA, sheetB } from '../import/fixtures.mjs';
 
 const CONN = process.env.CL_PG_DB;
 const skip = CONN ? false : 'CL_PG_DB 없음 (로컬 PostgreSQL 통합 시험)';
@@ -145,7 +145,7 @@ test('통합: 업로드·재업로드·겹치는 파일·카드 취소 자동 �
       where r.batch_id = :'b' and r.approval_no = '12345678' and o.kind = 'expense'`, { b: b2.batchId }), '1');
 
   // 6) DB가 거부하는 행은 결과로 돌아오고 파일 줄 번호로 바뀐다(정규화를 거치지 않은 행을 일부러 보냄)
-  const bad = [{ ...a.parsed.rows[0], rowNo: 99, dedup_key: `k2:${'0'.repeat(63)}1`, merchant_raw: ['010', '1234', '5678'].join('-') }];
+  const bad = [{ ...a.parsed.rows[0], rowNo: 99, dedup_key: `k2:${'0'.repeat(63)}1`, merchant_raw: `가짜 ${FAKE.phone}` }];
   const r6 = await uploadRows(pgDb, a.batchId, bad);
   assert.deepEqual(r6.failures, [{ rowNo: 99, result: 'sensitive', sqlState: 'LG002' }]);
 });
