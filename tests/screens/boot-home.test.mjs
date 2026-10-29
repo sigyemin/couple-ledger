@@ -69,7 +69,7 @@ test('홈 모델: 자료 없음·할 일 없음·같은 금액', () => {
   assert.equal(compareText(1000, 1000), '지난달과 같게 썼어요');
   assert.equal(compareText(2000, 1000), '지난달보다 1,000원 많이 썼어요');
   assert.equal(settlementText([{ member_id: 'm2', balance_amount: 10 }], members), '나리가 10원 더 냄');
-  assert.deepEqual([subjectParticle('민'), subjectParticle('뽀'), subjectParticle('A')], ['이', '가', '이']);
+  assert.deepEqual([subjectParticle('갑'), subjectParticle('가'), subjectParticle('A')], ['이', '가', '이']);
   assert.deepEqual(topGroups([{ group_category_id: 'x', total_amount: -5 }], new Map()), []);
 });
 
