@@ -121,5 +121,18 @@ export function createDb(client) {
       }
       return run(() => client.from(table).update(patch).eq('id', id).select(), { retry: false });
     },
+
+    /** 한 행 추가. 재시도 없음(중복 쓰기 방지). 만든 행을 돌려준다 */
+    insert(table, row) {
+      try {
+        assertName('테이블', table);
+        const keys = Object.keys(row ?? {});
+        if (!keys.length || Array.isArray(row)) throw new TypeError('넣을 값이 없습니다');
+        keys.forEach((k) => assertName('컬럼', k));
+      } catch {
+        return misuse();
+      }
+      return run(() => client.from(table).insert(row).select(), { retry: false });
+    },
   };
 }
