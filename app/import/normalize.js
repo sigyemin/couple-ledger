@@ -14,6 +14,9 @@
 // - 모든 글자 칸은 민감번호 규칙으로 가린다('[숫자 가림]', 붙여 쓴 일시 단계는 끈 보수적 검사)
 // - 승인번호가 형식(영숫자 4~12자, 숫자 10개 연속 금지)에 맞지 않으면 행 오류
 // - 검토 상태는 모두 needs_review
+// - 한 파일 안에서 같은 1순위 키(결제수단|승인번호|kind)가 두 번째로 나오면 그 행은 행 오류(duplicate_key)
+//   1순위 키에 n번째·금액을 넣지 않는다(설계 확인 D2). 조용히 버리지 않고 미리보기에 보인다
+// - 2순위 키의 일시는 분 단위(YYYY-MM-DD HH:MI). 초는 키에서 뺀다(저장하는 시각은 그대로, 사용자 결정 D1)
 // 결과에는 셀 원문(가리기 전 값)을 담지 않는다.
 // 의존: core/sensitive.js, ./datetime.js, ./formats.js, ./dedup.js
 // =====================================================================
@@ -139,6 +142,7 @@ export async function normalizeRows(grid, format, header, ctx) {
   let skipped = 0;
   let maskedCells = 0;
   const seen = new Map(); // 2순위 앞부분 → 개수
+  const primarySeen = new Set(); // 이 파일에서 나온 1순위 키
 
   for (let r = header.headerIndex + 1; r < grid.length; r++) {
     const line = grid[r] ?? [];
@@ -243,7 +247,7 @@ export async function normalizeRows(grid, format, header, ctx) {
     if (base.category_id) base.category_source = 'rule';
     if (base.card_kind && !['expense', 'refund'].includes(kind)) base.card_kind = null;
 
-    const occurredAt = when.time ? `${when.date} ${when.time}` : when.date;
+    const occurredAt = when.time ? `${when.date} ${when.time.slice(0, 5)}` : when.date; // 분 단위
     const balance = (() => {
       const b = cell('balance_after');
       if (b === null) return '';
@@ -257,10 +261,18 @@ export async function normalizeRows(grid, format, header, ctx) {
       variants.push({ ...base, kind: 'refund', amount: refundAmount, is_excluded: false, exclude_reason: null, direction: 'in' });
     }
 
+    const usesPrimary = (v) => isCard && approvalNo && (v.kind === 'expense' || v.kind === 'refund');
+    const primaries = variants.filter(usesPrimary).map((v) => primaryKey({ sourceId, approvalNo, kind: v.kind }));
+    if (primaries.some((k) => primarySeen.has(k))) {
+      errors.push({ rowNo, reason: 'duplicate_key' });
+      continue;
+    }
+    primaries.forEach((k) => primarySeen.add(k));
+
     for (const v of variants) {
       const { direction, ...row } = v;
       let keyString;
-      if (isCard && approvalNo && (row.kind === 'expense' || row.kind === 'refund')) {
+      if (usesPrimary(row)) {
         keyString = primaryKey({ sourceId, approvalNo, kind: row.kind });
         row.row_seq = 1;
       } else {
