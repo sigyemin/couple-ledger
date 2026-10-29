@@ -1,0 +1,63 @@
+# PR 검사 (보안 리뷰 v0.1 6장 2층): 유출 검사 + 단위 테스트
+# - 외부 액션을 쓰지 않는다(공급망 위험 제거). 소스는 git으로 직접 받는다
+# - 권한은 읽기만. pull_request_target은 쓰지 않는다
+# - 이벤트 값(${{ }})은 run 안에 직접 넣지 않고 env로만 넘긴다(명령 삽입 방지)
+# 저장소 설정에서 이 검사(job: scan)를 main 브랜치의 필수 상태 검사로 지정한다.
+name: scan
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+    steps:
+      - name: Fetch source (no third-party action)
+        run: |
+          git init -q src
+          cd src
+          git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+          git fetch -q --no-tags origin "$BASE_SHA" "+refs/pull/$PR_NUMBER/head:refs/remotes/pr/head"
+          git checkout -q --detach pr/head
+          git log -1 --format='head %H'
+
+      # 검사기·허용 목록은 base 쪽 것을 쓴다(PR이 검사기나 .scan-allow를 고쳐 스스로 통과하지 못하게).
+      # base에 검사기가 없을 때(이 검사를 처음 넣는 PR)만 PR 쪽 것을 쓴다.
+      # 이 워크플로 파일 자체는 PR 쪽 것이 실행되므로, 검사 장치 변경은 리뷰에서 막는다(아래 경고).
+      - name: Leak scan (changed files, base scanner)
+        working-directory: src
+        run: |
+          if git cat-file -e "$BASE_SHA:scripts/scan.mjs" 2>/dev/null; then
+            git show "$BASE_SHA:scripts/scan.mjs" > "$RUNNER_TEMP/scan-base.mjs"
+            scanner="$RUNNER_TEMP/scan-base.mjs"
+          else
+            echo "base에 scripts/scan.mjs 없음 → PR 쪽 검사기 사용"
+            scanner=scripts/scan.mjs
+          fi
+          git show "$BASE_SHA:.scan-allow" > "$RUNNER_TEMP/scan-allow-base" 2>/dev/null || : > "$RUNNER_TEMP/scan-allow-base"
+          node "$scanner" --range "$BASE_SHA" HEAD --allow-file "$RUNNER_TEMP/scan-allow-base"
+
+      - name: Warn on scan setup changes
+        working-directory: src
+        run: |
+          changed=$(git diff --name-only "$BASE_SHA...HEAD" -- scripts/ .scan-allow .github/ .githooks/ .gitignore)
+          if [ -n "$changed" ]; then
+            echo "::warning::검사 장치가 바뀌었습니다. 리뷰에서 반드시 확인하세요:"
+            echo "$changed"
+          fi
+
+      - name: Unit tests
+        working-directory: src
+        run: |
+          node --version
+          node --test $(find tests -name '*.test.mjs' | sort)

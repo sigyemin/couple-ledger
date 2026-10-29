@@ -1,0 +1,4 @@
+#!/bin/sh
+# 커밋 전 유출 검사 (1층). 설정: git config core.hooksPath .githooks
+# 우회(--no-verify)해도 PR 검사(2층)에서 같은 검사를 다시 한다.
+exec node scripts/scan.mjs --staged
