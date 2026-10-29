@@ -1,0 +1,78 @@
+# keepalive (결정 D6: API 방식, 커밋하지 않음)
+# ① ping: Supabase 무료 플랜은 DB 활동이 1주일 없으면 일시정지된다 → 매일 1회 keepalive RPC 호출
+# ② keep-active: 공개 저장소는 저장소 활동이 60일 없으면 예약 워크플로가 자동 비활성화된다
+#    → GitHub REST API로 이 워크플로를 활성 상태로 다시 설정한다(커밋·push 없음)
+# - 외부 액션을 쓰지 않는다(공급망 위험 제거). checkout도 하지 않는다
+# - 권한은 job마다 최소로. contents 쓰기 권한 없음
+# - 변수·이벤트 값(${{ }})은 run 안에 직접 넣지 않고 env로만 넘긴다(명령 삽입 방지)
+# - publishable 키는 공개값이라 Actions 변수(vars)로 둔다. service_role·secret 키는 어디에도 넣지 않는다
+#   (vars 값은 로그에서 가려지지 않는다. URL·publishable 키 모두 공개값이라 허용)
+name: keepalive
+
+on:
+  schedule:
+    - cron: "17 21 * * *"   # 매일 21:17 UTC (한국 06:17). 정각은 지연이 잦아 피한다
+  workflow_dispatch:
+
+permissions: {}
+
+# shell: bash → bash --noprofile --norc -eo pipefail {0} (파이프 중간 실패도 단계 실패로)
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions: {}
+    env:
+      URL: ${{ vars.SUPABASE_URL }}
+      KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
+      REQUIRED: ${{ vars.KEEPALIVE_REQUIRED }}
+    steps:
+      - name: Call keepalive RPC
+        run: |
+          if [ -z "$URL" ] || [ -z "$KEY" ]; then
+            # 운영 DB 설치 후에는 KEEPALIVE_REQUIRED=1 → 변수가 빠지면 실패(= GitHub 실패 알림)
+            if [ "$REQUIRED" = "1" ]; then
+              echo "::error::SUPABASE_URL 또는 SUPABASE_PUBLISHABLE_KEY 변수가 없음 (KEEPALIVE_REQUIRED=1)"
+              exit 1
+            fi
+            echo "::notice::SUPABASE_URL 또는 SUPABASE_PUBLISHABLE_KEY 변수가 없음 → 건너뜀 (운영 DB 설치 전)"
+            exit 0
+          fi
+          # 응답 본문은 로그에 남기지 않는다(공개 저장소 로그)
+          code=$(curl --fail -sS -o /dev/null -w '%{http_code}' --max-time 30 \
+            -X POST "${URL%/}/rest/v1/rpc/keepalive" \
+            -H "apikey: $KEY" \
+            -H "Content-Type: application/json" \
+            -d '{}')
+          echo "keepalive RPC: HTTP $code"
+
+  keep-active:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      WORKFLOW_FILE: keepalive.yml
+    steps:
+      # PUT /repos/{owner}/{repo}/actions/workflows/{workflow_id}/enable (성공 시 204)
+      # 이 호출이 60일 비활성화 계산의 "저장소 활동"으로 인정되는지는 공식 문서에 없다 → README "첫 60일 관찰"
+      - name: Re-enable this workflow via REST API
+        run: |
+          api="$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/workflows/$WORKFLOW_FILE"
+          state=$(curl --fail -sS --max-time 30 \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$api" | sed -n 's/^ *"state": *"\([a-z_]*\)".*/\1/p' | head -n 1)
+          echo "현재 상태: ${state:-알 수 없음}"
+          code=$(curl --fail -sS -o /dev/null -w '%{http_code}' --max-time 30 -X PUT \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$api/enable")
+          echo "enable: HTTP $code"
