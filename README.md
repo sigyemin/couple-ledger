@@ -47,6 +47,12 @@ node scripts/scan.mjs --all             # 전체 파일 검사 (Node 20 이상)
 node --test $(find tests -name '*.test.mjs')
 ```
 
+## 배포 전 설정 (사용자)
+
+1. `app/config.js`에 Supabase 프로젝트 주소(`https://<프로젝트 ref>.supabase.co`)와 **publishable 키**를 넣는다. secret·service_role 키는 넣지 않는다
+2. `index.html` CSP의 `connect-src` 자리표시자 `https://project-ref.supabase.co`를 같은 주소로 바꾼다(단위 시험이 두 값이 같은지 본다)
+3. 둘이 비어 있으면 앱은 "설정이 필요해요" 화면만 보여 준다
+
 ## 작업 규칙
 
 - 모든 변경은 브랜치 → PR → 보안·코드 리뷰 후 병합. 예외 없음(keepalive 워크플로도 커밋하지 않는다)
@@ -76,8 +82,12 @@ node --test $(find tests -name '*.test.mjs')
 ## 폴더
 
 ```
-index.html            진입점 + CSP meta          (화면 단계에서 추가)
-app/main.js           부팅: 인증 가드 → 라우터    (공통 컴포넌트 단계)
+index.html            진입점 + CSP meta(head 첫 요소), 인라인 스크립트·스타일 없음
+app/main.js           부팅: 클릭재킹 방어 → 설정 확인 → 인증 가드 → 라우터 → 화면
+app/config.js         Supabase 주소·publishable 키(사용자가 넣음)
+app/router.js         해시 라우터(#/home, #/list, #/txn/<id> …)
+app/styles.css        화면 스타일(시스템 글꼴, 인라인 style 대신 클래스)
+app/ui/               화면 요소 도우미(textContent만)
 app/core/             공통 컴포넌트: auth-guard(인증 가드), db(DB 래퍼), errors(오류 처리·기록),
                       format(표시), validate(검증), sensitive(민감번호 규칙), confirm(확인 대화상자)
 app/screens/          화면: 홈·내역·올리기·정산·더보기
