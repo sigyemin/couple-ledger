@@ -6,9 +6,9 @@
 // 의존 없음.
 // =====================================================================
 
-export const SCREENS = Object.freeze(['home', 'list', 'txn', 'add', 'upload', 'settle', 'more', 'categories', 'trash', 'changes', 'change', 'review', 'report', 'rgroup', 'ritem']);
+export const SCREENS = Object.freeze(['home', 'list', 'txn', 'add', 'upload', 'settle', 'more', 'categories', 'trash', 'changes', 'change', 'review', 'report', 'rgroup', 'ritem', 'sources', 'source', 'sourcenew']);
 // id를 받는 화면 → id가 틀리면 갈 목록 화면
-const ID_SCREENS = Object.freeze({ txn: 'list', change: 'changes', rgroup: 'report', ritem: 'report' });
+const ID_SCREENS = Object.freeze({ txn: 'list', change: 'changes', rgroup: 'report', ritem: 'report', source: 'sources' });
 const RE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const RE_KEY = /^[a-z][a-z_]{0,23}$/;
 const MAX_VALUE = 100;
