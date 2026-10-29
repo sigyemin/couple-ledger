@@ -15,9 +15,10 @@ const RE_NAME = /^[a-z_][a-z0-9_]{0,62}$/;
 // insert를 허용하는 표 (앱이 직접 행을 넣는 곳만. 나머지 쓰기는 RPC로). 늘릴 때는 리뷰를 받는다
 // - transactions: 거래 직접 추가(화면 설계 v0.1 4-4 "수동 추가") 한 행만. 넣을 수 있는 칸을 아래 목록으로 묶는다
 // - categories: 카테고리 관리(화면 설계 v0.2 3-9) 항목·그룹 추가
-export const INSERT_TABLES = Object.freeze(['import_batches', 'transactions', 'categories']);
+// - category_rules: 가맹점 규칙 추가(화면 설계 v0.2 3-6). 정규식(regex)은 화면에서 만들지 않는다(결정 C2 — 앱이 막음)
+export const INSERT_TABLES = Object.freeze(['import_batches', 'transactions', 'categories', 'category_rules']);
 // update를 허용하는 표 (지금 앱이 고치는 표만. 실수 방지용 — 실제로 막는 것은 RLS). 늘릴 때는 리뷰를 받는다
-export const UPDATE_TABLES = Object.freeze(['transactions', 'categories']);
+export const UPDATE_TABLES = Object.freeze(['transactions', 'categories', 'category_rules']);
 // delete를 허용하는 표 (거래·업로드 묶음은 실제 삭제 금지 — DB도 막음). 카테고리는 쓰는 곳이 없을 때만 DB가 허용(FK)
 export const DELETE_TABLES = Object.freeze(['categories']);
 // 표별로 넣을 수 있는 칸(없으면 칸 이름 형식만 검사)
@@ -25,10 +26,12 @@ export const INSERT_COLUMNS = Object.freeze({
   transactions: Object.freeze(['source_id', 'origin', 'occurred_on', 'occurred_time', 'merchant_raw', 'merchant_norm', 'amount',
     'kind', 'is_shared', 'review_status', 'memo', 'dedup_key', 'created_by']),
   categories: Object.freeze(['parent_id', 'name', 'sort_order']), // code는 시스템 값 — 앱이 넣지 않음
+  category_rules: Object.freeze(['pattern', 'match_type', 'category_id', 'is_ambiguous', 'priority', 'created_by']),
 });
 // 표별로 고칠 수 있는 칸(없으면 칸 이름 형식만 검사)
 export const UPDATE_COLUMNS = Object.freeze({
   categories: Object.freeze(['name', 'sort_order', 'is_active', 'parent_id']),
+  category_rules: Object.freeze(['pattern', 'match_type', 'category_id', 'is_ambiguous', 'priority', 'is_active']),
 });
 const FILTER_OPS = new Set(['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'in', 'is', 'ilike']);
 const IS_VALUES = new Set([null, true, false]);

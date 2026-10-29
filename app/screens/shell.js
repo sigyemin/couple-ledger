@@ -16,7 +16,7 @@ export const TABS = Object.freeze([
 /** 현재 화면에 맞는 탭 표시 (거래 상세는 내역 탭) */
 export function activeTab(screen) {
   if (screen === 'txn' || screen === 'add') return 'list';
-  return ['categories', 'trash', 'changes', 'change', 'review'].includes(screen) ? 'more' : screen;
+  return ['categories', 'trash', 'changes', 'change', 'review', 'rules', 'rule', 'rulenew', 'reapply'].includes(screen) ? 'more' : screen;
 }
 
 export function tabBar(screen, doc = globalThis.document) {
@@ -42,4 +42,17 @@ export function errorView(message, code, doc = globalThis.document) {
     h('p', { text: message }, [], doc),
     code ? h('p', { class: 'muted small', text: `오류 번호 ${code}` }, [], doc) : null,
   ], doc);
+}
+
+/** 규칙·카테고리 세 칸 전환(각자 주소 — 뒤로 가기가 탭을 되돌림, 설계 v0.2 5장). 아직 없는 칸은 누를 수 없다 */
+export const RULE_TABS = Object.freeze([
+  { screen: 'rules', label: '가맹점 규칙' },
+  { screen: null, label: '이체 상대', sub: '준비 중' },
+  { screen: 'categories', label: '카테고리' },
+]);
+
+export function rulesTabs(current, doc = globalThis.document) {
+  return h('nav', { class: 'rule-tabs', attrs: { 'aria-label': '규칙·카테고리 탭' } }, RULE_TABS.map((t) => (t.screen
+    ? h('a', { class: t.screen === current ? 'on' : '', text: t.label, attrs: { href: `#/${t.screen}`, 'aria-current': t.screen === current ? 'page' : null } }, [], doc)
+    : h('span', { class: 'off', text: t.label, attrs: { title: t.sub, 'aria-disabled': 'true' } }, [], doc))), doc);
 }

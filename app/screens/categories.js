@@ -13,7 +13,7 @@ import { STAGES } from '../core/errors.js';
 import {
   categoryTree, checkName, moveUpdates, moveTargets, nextSortOrder, offTargets, offConfirmText, moveGroupText, deleteErrorText, nameErrorText,
 } from './categories-model.js';
-import { errorView } from './shell.js';
+import { errorView, rulesTabs } from './shell.js';
 
 let catNotice = null;
 
@@ -26,12 +26,13 @@ export async function renderCategories({ db, reload, isCurrent, onError }, doc =
   const head = h('header', { class: 'screen-head' }, [
     h('nav', { class: 'month-nav' }, [
       h('a', { class: 'icon-btn', text: '‹', attrs: { href: buildHash('more'), 'aria-label': '더보기로' } }, [], doc),
-      h('h1', { class: 'title', text: '카테고리' }, [], doc),
+      h('h1', { class: 'title', text: '규칙·카테고리' }, [], doc),
     ], doc),
   ], doc);
+  const tabs = rulesTabs('categories', doc);
   if (r.error) {
     onError?.(r.error);
-    return h('main', { class: 'screen' }, [head, errorView(r.error.message, r.error.detail?.sqlState ?? r.error.code, doc)], doc);
+    return h('main', { class: 'screen' }, [head, tabs, errorView(r.error.message, r.error.detail?.sqlState ?? r.error.code, doc)], doc);
   }
   const rows = r.data ?? [];
   const tree = categoryTree(rows);
@@ -168,7 +169,7 @@ export async function renderCategories({ db, reload, isCurrent, onError }, doc =
   ], doc);
 
   const main = h('main', { class: 'screen' }, [
-    head, status,
+    head, tabs, status,
     h('p', { class: 'muted small', text: '고르기 화면에는 켜진 것만 보여요. 기본 항목은 지우거나 옮길 수 없어요.' }, [], doc),
     h('h2', { class: 'section-title', text: '지출' }, [], doc),
     ...tree.expense.map((g) => groupCard(g, tree.expense)),
