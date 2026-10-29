@@ -27,22 +27,31 @@ export const PAGE_SIZE = 1000;
  * 한 달 거래를 쪽 단위로 끝까지 읽는다(최대 MAX_ROWS + 1건 — 넘는지 알려고 한 건 더).
  * - 서버(PostgREST max-rows)가 요청한 range보다 적게 줄 수 있어, 쪽 크기와 비교하지 않고 빈 쪽이 올 때까지 읽는다
  * - 쪽이 어긋나지 않게 id로 끝 정렬을 고정한다
+ * - 읽는 도중 거래가 추가되면 쪽 경계의 행이 두 번 올 수 있어 id로 거른다(PR #12 재리뷰 ④).
+ *   읽는 도중 지워진 거래 때문에 한 건이 빠지는 경우는 막지 못한다(다시 열면 맞음) [한계]
  * @returns {{ data: { rows, capped } } | { error }}
  */
 export async function readMonthRows(db, monthStart, { pageSize = PAGE_SIZE, max = MAX_ROWS } = {}) {
   const rows = [];
+  const seen = new Set();
+  let offset = 0;
   while (rows.length <= max) {
-    const from = rows.length;
+    const from = offset;
     const r = await db.select('v_transaction_detail', {
       columns: LIST_COLUMNS,
       filters: [eq('period_month', monthStart), { col: 'deleted_at', op: 'is', value: null }, eq('is_test_source', false)],
       order: [{ col: 'occurred_on', ascending: false }, { col: 'id', ascending: true }],
-      range: { from, to: Math.min(from + pageSize, max + 1) - 1 },
+      range: { from, to: from + Math.min(pageSize, max + 1 - rows.length) - 1 },
     });
     if (r.error) return { error: r.error };
     const page = r.data ?? [];
     if (page.length === 0) break;
-    rows.push(...page);
+    offset += page.length;
+    for (const row of page) {
+      if (seen.has(row.id)) continue;
+      seen.add(row.id);
+      rows.push(row);
+    }
   }
   return { data: { rows: rows.slice(0, max), capped: rows.length > max } };
 }
