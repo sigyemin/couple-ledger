@@ -69,6 +69,7 @@ export const TEXT_LIMITS = Object.freeze({
   display_name: 20, // members.display_name
   description: 200, // change_batches.description
   match_text: 100, // counterparty_rules.match_text
+  rule_pattern: 100, // category_rules.pattern (DB 길이 제한 없음 — 앱 제안 값)
 });
 
 /**
