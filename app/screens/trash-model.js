@@ -94,8 +94,11 @@ export function restoreOrder(plan, rows, includeOriginals) {
   return { order: [...all.filter((r) => !isRefund(r)), ...all.filter(isRefund)].map((r) => r.id), skipped };
 }
 
-/** 확인 시트 문구. reviewStates = Map(period_month → review_state) */
-export function restoreConfirmText(rowsToRestore, reviewStates) {
+/**
+ * 확인 시트 문구. reviewStates = Map(period_month → review_state)
+ * statesUnknown = 확인 상태를 읽지 못함 → '확인 후 변경됨' 여부를 알 수 없다고 적는다(PR #19 리뷰 3)
+ */
+export function restoreConfirmText(rowsToRestore, reviewStates, { statesUnknown = false } = {}) {
   const first = rowsToRestore[0];
   const title = rowsToRestore.length === 1
     ? `${first.merchant_raw} ${won(Number(first.amount))}을 되살릴까요?`
@@ -103,7 +106,8 @@ export function restoreConfirmText(rowsToRestore, reviewStates) {
   const months = [...new Set(rowsToRestore.map((r) => r.period_month))].sort();
   const parts = [`${months.map((m) => month(m)).join(', ')} 집계·정산에 다시 들어가요.`];
   const reviewed = months.filter((m) => reviewStates.get(m) === 'reviewed');
-  if (reviewed.length) parts.push(`${reviewed.map((m) => month(m)).join(', ')}이 '확인 후 변경됨'이 돼요.`);
+  if (statesUnknown) parts.push("확인 완료한 달인지 확인하지 못했어요. 확인 완료한 달이면 '확인 후 변경됨'이 돼요.");
+  else if (reviewed.length) parts.push(`${reviewed.map((m) => month(m)).join(', ')}이 '확인 후 변경됨'이 돼요.`);
   if (rowsToRestore.some((r) => r.kind === 'refund' && r.refund_of_txn_id)) parts.push('원거래를 먼저, 환불을 나중에 되살려요.');
   return { title: '되살리기', message: `${title} ${parts.join(' ')}` };
 }
