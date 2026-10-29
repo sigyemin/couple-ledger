@@ -244,3 +244,18 @@ test('나누기: 처음 값과 입력 검사(카테고리·금액·품목 민감
   assert.match(v([]), /1~50줄/);
   assert.match(v(Array.from({ length: MAX_LINES + 1 }, () => ({ categoryId: C_DINING, amountText: '0', note: '' }))), /1~50줄/);
 });
+
+test('일괄 분류: 이체 빼고, 수입·지출 섞이면 거부, 500건 상한, 나눈 거래 알림', async () => {
+  const { bulkPlan, bulkConfirmText, changedTxnCount, selectable, MAX_BULK } = await import('../../app/screens/list-model.js');
+  assert.equal(selectable(rows[3]), false);
+  const p = bulkPlan([rows[0], rows[1], rows[3], { ...rows[1], id: U(9), lines: [{}, {}] }]);
+  assert.deepEqual([p.ok, p.ids.length, p.kind, p.splitCount], [true, 3, 'expense', 1]);
+  assert.match(bulkConfirmText(p, '외식').message, /^거래 3건의 카테고리를 '외식'\(으\)로 바꿔요\. 그중 나눈 거래 1건은/);
+  assert.equal(bulkPlan([rows[5]]).kind, 'income');
+  assert.match(bulkPlan([rows[0], rows[5]]).message, /함께 바꿀 수 없어요/);
+  assert.match(bulkPlan([rows[3]]).message, /골라 주세요/);
+  assert.match(bulkPlan(Array.from({ length: MAX_BULK + 1 }, (_, i) => ({ ...rows[0], id: String(i) }))).message, /500건까지/);
+  assert.equal(changedTxnCount([{ txn_id: 'a', result: 'updated' }, { txn_id: 'a', result: 'created' }, { txn_id: 'b', result: 'unchanged' }, { txn_id: 'c', result: 'created' }]), 2);
+  assert.equal(parseListFilter(q('sel=1')).sel, true);
+  assert.equal(parseHash(buildHash('list', { query: filterQuery('2026-10', parseListFilter(q('sel=1'))) })).query.get('sel'), '1');
+});

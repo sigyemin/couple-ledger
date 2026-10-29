@@ -16,6 +16,7 @@ import { tabBar, comingSoon, errorView } from './screens/shell.js';
 import { renderHome } from './screens/home.js';
 import { renderList } from './screens/list.js';
 import { renderDetail } from './screens/detail.js';
+import { renderAdd } from './screens/add.js';
 
 const doc = globalThis.document;
 const root = doc.getElementById('app');
@@ -105,6 +106,8 @@ async function boot() {
         view = await renderHome({ db, member, monthStart, isCurrent, onError });
       } else if (route.screen === 'list') {
         view = await renderList({ db, monthStart, query: route.query, go, isCurrent, onError });
+      } else if (route.screen === 'add') {
+        view = await renderAdd({ db, member, query: route.query, go, isCurrent, onError });
       } else if (route.screen === 'txn') {
         view = await renderDetail({ db, member, id: route.id, go, reload, isCurrent, onError });
       } else {

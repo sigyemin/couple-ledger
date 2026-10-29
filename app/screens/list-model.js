@@ -27,6 +27,7 @@ export function parseListFilter(query) {
     excluded: get('excluded') === '1',
     changed: get('changed') === '1',
     q: get('q').normalize('NFKC').trim().slice(0, 50),
+    sel: get('sel') === '1',
   };
 }
 
@@ -35,7 +36,7 @@ export function filterQuery(month, f) {
   return {
     month,
     payer: f.payer, status: f.status, kind: f.kind, cat: f.cat, src: f.src, share: f.share,
-    excluded: f.excluded ? '1' : null, changed: f.changed ? '1' : null, q: f.q || null,
+    excluded: f.excluded ? '1' : null, changed: f.changed ? '1' : null, q: f.q || null, sel: f.sel ? '1' : null,
   };
 }
 
@@ -164,4 +165,47 @@ export function capNotice(capped) {
 /** 필터가 하나라도 걸렸는지(검색 제외) — "필터 지우기" 표시용 */
 export function hasFilter(f) {
   return Boolean(f.payer || f.status || f.kind || f.cat || f.src || f.share || f.excluded || f.changed || f.q);
+}
+
+// ---------------------------------------------------------------------
+// 다중 선택 → 일괄 분류 바꾸기 (화면 설계 v0.1 4-3: bulk_set_category, 쪼갠 거래 포함 시 미리 알림)
+// ---------------------------------------------------------------------
+export const MAX_BULK = 500; // bulk_set_category c_max
+
+/** 고를 수 있는 거래인지(이체는 분류 대상 아님) */
+export function selectable(row) {
+  return row.kind !== 'transfer';
+}
+
+/**
+ * 고른 거래 → 일괄 변경 계획
+ * @returns {{ ok: true, ids, kind: 'income'|'expense', splitCount } | { ok: false, message }}
+ */
+export function bulkPlan(rows) {
+  const picked = rows.filter(selectable);
+  if (picked.length === 0) return { ok: false, message: '바꿀 거래를 골라 주세요' };
+  if (picked.length > MAX_BULK) return { ok: false, message: `한 번에 ${MAX_BULK}건까지 바꿀 수 있어요` };
+  const income = picked.filter((r) => r.kind === 'income').length;
+  if (income > 0 && income < picked.length) return { ok: false, message: '수입과 지출·환불은 카테고리가 달라 함께 바꿀 수 없어요' };
+  return {
+    ok: true,
+    ids: picked.map((r) => r.id),
+    kind: income > 0 ? 'income' : 'expense',
+    splitCount: picked.filter((r) => Array.isArray(r.lines) && r.lines.length > 1).length,
+  };
+}
+
+/** 일괄 변경 확인 문구 */
+export function bulkConfirmText(plan, categoryName) {
+  const split = plan.splitCount > 0 ? ` 그중 나눈 거래 ${plan.splitCount}건은 나눈 금액이 모두 '${categoryName}' 하나로 바뀌어요.` : '';
+  return {
+    title: '카테고리 일괄 변경',
+    message: `거래 ${plan.ids.length}건의 카테고리를 '${categoryName}'(으)로 바꿔요.${split}`,
+    undoNote: '더보기 › 변경 기록에서 되돌릴 수 있어요.',
+  };
+}
+
+/** bulk_set_category 결과 행 → 바뀐 거래 수 */
+export function changedTxnCount(results) {
+  return new Set((results ?? []).filter((r) => r.result !== 'unchanged').map((r) => r.txn_id)).size;
 }

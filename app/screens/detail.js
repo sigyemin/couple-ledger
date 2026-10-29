@@ -34,6 +34,11 @@ const eq = (col, value) => ({ col, op: 'eq', value });
 // 다시 읽은 뒤에도 보여 줄 오류 안내(거래 id → 문구). 한 번 보여 주면 지운다
 const carryNotice = new Map();
 
+/** 다른 화면에서 이 거래 상세로 넘어갈 때 보여 줄 오류 안내를 남긴다(직접 추가 뒤 분류 실패 등) */
+export function noteForTxn(id, message) {
+  carryNotice.set(id, message);
+}
+
 export async function loadDetail(db, id) {
   const [txn, members, categories, refunds] = await Promise.all([
     db.select('v_transaction_detail', { columns: DETAIL_COLUMNS, filters: [eq('id', id)] }),
