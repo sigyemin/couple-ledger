@@ -16,7 +16,7 @@ export const TABS = Object.freeze([
 /** 현재 화면에 맞는 탭 표시 (거래 상세는 내역 탭) */
 export function activeTab(screen) {
   if (screen === 'txn' || screen === 'add') return 'list';
-  return screen === 'categories' ? 'more' : screen;
+  return ['categories', 'trash', 'changes', 'change'].includes(screen) ? 'more' : screen;
 }
 
 export function tabBar(screen, doc = globalThis.document) {
