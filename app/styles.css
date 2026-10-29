@@ -12,8 +12,10 @@
   color: var(--text); background: var(--bg);
 }
 * { box-sizing: border-box; }
-/* 클릭재킹 방어: 최상위 창일 때만 main.js가 top-ok를 붙여 보인다 */
+/* hidden 속성은 클래스의 display보다 먼저(.form 등 display를 정한 요소도 숨김) */
 [hidden] { display: none !important; }
+
+/* 클릭재킹 방어: 최상위 창일 때만 main.js가 top-ok를 붙여 보인다 */
 body { margin: 0; background: var(--bg); visibility: hidden; }
 html.top-ok body { visibility: visible; }
 #app { max-width: 560px; margin: 0 auto; min-height: 100vh; display: flex; flex-direction: column; }

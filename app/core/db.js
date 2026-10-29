@@ -43,6 +43,7 @@ export const UPDATE_COLUMNS = Object.freeze({
 // DB는 category_rules.match_type에 regex를 허용한다 → DB 쪽 제한은 v0.18 후보
 export const COLUMN_VALUES = Object.freeze({
   category_rules: Object.freeze({ match_type: Object.freeze(['contains', 'exact']) }),
+  counterparty_rules: Object.freeze({ match_type: Object.freeze(['exact', 'contains']) }), // DB CHECK와 같음
 });
 function assertValues(table, row) {
   for (const [col, allowed] of Object.entries(COLUMN_VALUES[table] ?? {})) {

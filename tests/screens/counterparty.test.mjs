@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {
   categoryIndex, choiceOf, scopeText, cpList, choiceValues, checkNames, cpPatch, cpPreview, cpChangeLine, cpApplyResult, cpErrorText,
 } from '../../app/screens/counterparty-model.js';
-import { INSERT_COLUMNS, UPDATE_COLUMNS, DELETE_TABLES } from '../../app/core/db.js';
+import { createDb, INSERT_COLUMNS, UPDATE_COLUMNS, DELETE_TABLES } from '../../app/core/db.js';
 import { parseHash } from '../../app/router.js';
 import { activeTab } from '../../app/screens/shell.js';
 
@@ -131,4 +131,14 @@ test('주소: 이체 상대 화면들, id가 틀리면 목록, 탭은 더보기'
   assert.equal(parseHash(`#/cprule/${ID(1)}`).screen, 'cprule');
   assert.equal(parseHash('#/cpapply/x').screen, 'cprules');
   assert.deepEqual(['cprules', 'cprule', 'cprulenew', 'cpapply'].map(activeTab), ['more', 'more', 'more', 'more']);
+});
+
+test('insert match_type은 일치·포함만(DB CHECK와 같게) — 아니면 요청을 보내지 않는다', async () => {
+  let called = 0;
+  const db = createDb({ from: () => { called += 1; return {}; }, rpc: () => {} });
+  for (const v of ['regex', null, 'EXACT']) {
+    const r = await db.insert('counterparty_rules', { match_text: '김가짜', match_type: v, alias: 'x' });
+    assert.equal(r.error?.code, 'invalid', String(v));
+  }
+  assert.equal(called, 0);
 });

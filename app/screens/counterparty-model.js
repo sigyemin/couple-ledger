@@ -61,7 +61,7 @@ export function choiceOf(rule, cats) {
   return { key: 'custom', label: parts.length ? parts.join(' · ') : '보일 이름만', tag: null };
 }
 
-/** 범위 글자: "민 시험통장 · 보낼 때" / "모든 통장 · 주고받을 때" */
+/** 범위 글자: "사용자A 시험통장 · 보낼 때" / "모든 통장 · 주고받을 때" */
 export function scopeText(rule, sources) {
   const src = rule.source_id ? (sources.find((s) => s.id === rule.source_id)?.label ?? '알 수 없는 결제수단') : '모든 통장';
   const dir = DIRECTIONS.find((d) => d.key === (rule.direction ?? ''))?.label ?? '';
