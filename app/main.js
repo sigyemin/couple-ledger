@@ -18,6 +18,7 @@ import { renderList } from './screens/list.js';
 import { renderDetail } from './screens/detail.js';
 import { renderAdd } from './screens/add.js';
 import { renderSettle } from './screens/settle.js';
+import { defaultSettleMonth } from './screens/settle-model.js';
 import { renderMore, renderCategories } from './screens/more.js';
 
 const doc = globalThis.document;
@@ -114,7 +115,7 @@ async function boot() {
       } else if (route.screen === 'categories') {
         view = await renderCategories({ db, isCurrent, onError });
       } else if (route.screen === 'settle') {
-        view = await renderSettle({ db, monthStart, reload, isCurrent, onError });
+        view = await renderSettle({ db, monthStart: monthParam(route.query.get('month'), defaultSettleMonth()), reload, isCurrent, onError });
       } else if (route.screen === 'add') {
         view = await renderAdd({ db, member, query: route.query, go, isCurrent, onError });
       } else if (route.screen === 'txn') {

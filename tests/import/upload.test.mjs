@@ -158,6 +158,10 @@ test('db.insert: 허용 목록 밖의 표는 보내지 않는다', async () => {
   for (const k of ['deleted_at', 'is_excluded', 'refund_of_txn_id', 'batch_id', 'raw', 'updated_by', 'settlement_changed_at']) {
     assert.equal((await db.insert('transactions', { amount: 1, [k]: null })).error.code, 'invalid', k);
   }
+  // update도 허용 표만(PR #17 리뷰 L1)
+  for (const t of ['members', 'monthly_reviews', 'categories', 'payment_sources', 'import_batches']) {
+    assert.equal((await db.update(t, 'id1', { a: 1 })).error.code, 'invalid', t);
+  }
   assert.deepEqual(sent, []);
 });
 

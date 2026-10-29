@@ -3,10 +3,16 @@
 // - 숫자: v_monthly_settlement(낸 공동지출 paid · 몫 share · 차이 balance = paid − share)
 // - 확인: v_monthly_review_status(review_state: not_reviewed | reviewed | changed_after_review), confirm_month / unconfirm_month
 // - 검토 대기가 남아도 확인 완료를 누를 수 있다(남은 건수만 안내 — 확정 S2)
-// 의존: core/format.js, screens/home-model.js(subjectParticle)
+// 의존: core/format.js, router.js, screens/home-model.js(subjectParticle)
 // =====================================================================
 import { won, signedWon, month, dateTime } from '../core/format.js';
 import { subjectParticle } from './home-model.js';
+import { addMonths, currentMonth } from '../router.js';
+
+/** 정산 탭 기본 달 = 지난달(사용자 결정 10-29. 홈은 이번 달). 1월이면 전년 12월 */
+export function defaultSettleMonth(now = new Date()) {
+  return addMonths(currentMonth(now), -1);
+}
 
 const shortMonth = (monthStart) => month(monthStart).replace(/^[0-9]+년 /, '');
 const num = (v) => Math.round(Number(v) || 0);
