@@ -276,3 +276,12 @@ ul { list-style: none; margin: 0; padding: 0; }
 @media (max-width: 360px) { .cmp { grid-template-columns: minmax(0, 1fr) auto 96px; } }
 .diff-bar { width: 100%; max-width: 120px; height: 6px; }
 .cmp:hover, .item:hover { color: var(--text); background: var(--bg); }
+
+/* 거래 상세 기록 (화면 설계 v0.3 5-3) */
+.history-list { display: flex; flex-direction: column; margin-top: 6px; }
+.history-line { display: flex; gap: 12px; padding: 10px 0; }
+.history-list li + li { border-top: 1px solid var(--line); }
+.history-when { flex: none; width: 64px; font-size: 12px; color: var(--sub-on-white); }
+.history-what { display: flex; flex-direction: column; gap: 2px; font-size: 14px; min-width: 0; }
+.history-what .sub { font-size: 12px; color: var(--sub-on-white); overflow-wrap: anywhere; }
+.history-link { font-size: 13px; text-decoration: none; }

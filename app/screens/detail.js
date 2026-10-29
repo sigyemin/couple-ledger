@@ -1,6 +1,7 @@
 // =====================================================================
 // 화면 6 거래 상세 (화면 설계 v0.1 4-4, 시안 6·19): 조회, 분류 바꾸기, 메모, 휴지통으로
 // 조회: v_transaction_detail(이 거래, 원거래, 연결된 환불), members, categories
+//       기록(v0.3 5-3): txn_edit_log·v_change_batch_items(이 거래) + v_change_batch_summary + import_batches — 읽기만
 // 쓰기: bulk_set_category([id], …) · set_transaction_lines(나누기·원거래 카테고리로 되돌리기)
 //       transactions update(memo · review_status · is_shared · is_excluded/exclude_reason · deleted_at/deleted_by, 항상 updated_by = 나)
 // - 쓰기는 재시도하지 않는다. 끝나면 다시 읽어 그린다(reload). 0행이 바뀌면 실패로 본다
@@ -19,11 +20,12 @@ import {
   editability, settlementChangeText, sharePatch, excludePatch, confirmPatch, linesDraft, validateLines, MAX_LINES,
 } from './detail-model.js';
 import { errorView } from './shell.js';
+import { historyEntries, HISTORY_NOTE, EDIT_LIMIT, ITEM_LIMIT } from './history-model.js';
 
 export const DETAIL_COLUMNS = [
   'id', 'source_id', 'origin', 'occurred_on', 'occurred_time', 'merchant_raw', 'amount', 'period_month',
   'installment_months', 'kind', 'is_shared', 'share_ratio', 'is_excluded', 'exclude_reason', 'review_status', 'memo',
-  'refund_of_txn_id', 'created_at', 'created_by', 'updated_at', 'updated_by', 'deleted_at', 'source_label',
+  'refund_of_txn_id', 'batch_id', 'created_at', 'created_by', 'updated_at', 'updated_by', 'deleted_at', 'source_label',
   'payer_member_id', 'payer_name', 'lines', 'other_share_amount', 'month_reviewed_at', 'is_changed_after_review',
   'is_uncategorized', 'inherited_category_id',
 ].join(',');
@@ -60,6 +62,37 @@ export async function loadDetail(db, id) {
     original = o.data?.[0] ?? null;
   }
   return { data: { row, members: members.data ?? [], categories: categories.data ?? [], refunds: refunds.data ?? [], original } };
+}
+
+/**
+ * 기록(화면 설계 v0.3 5-3): 수정 기록·변경 묶음 이력·올린 파일. 읽기만
+ * 실패하면 { error } — 상세의 나머지는 그대로 보이고 기록 칸에만 안내한다
+ */
+export async function loadHistory(db, row) {
+  const [edits, items, batch] = await Promise.all([
+    db.select('txn_edit_log', {
+      columns: 'edited_by,edited_at,changed_fields', filters: [eq('txn_id', row.id)],
+      order: [{ col: 'edited_at', ascending: false }], range: { from: 0, to: EDIT_LIMIT - 1 },
+    }),
+    db.select('v_change_batch_items', {
+      columns: 'change_batch_id,target_kind,old_category_id,new_category_id,old_kind,new_kind,old_review_status,new_review_status',
+      filters: [eq('txn_id', row.id)], range: { from: 0, to: ITEM_LIMIT - 1 },
+    }),
+    row.batch_id
+      ? db.select('import_batches', { columns: 'file_name,row_count,uploaded_by,uploaded_at', filters: [eq('id', row.batch_id)] })
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  const error = [edits, items, batch].find((r) => r.error)?.error;
+  if (error) return { error };
+  const ids = [...new Set((items.data ?? []).map((x) => x.change_batch_id))];
+  let batches = { data: [] };
+  if (ids.length) {
+    batches = await db.select('v_change_batch_summary', {
+      columns: 'id,kind,created_by,created_at,reverted_by,reverted_at,is_reverted', filters: [{ col: 'id', op: 'in', value: ids }],
+    });
+    if (batches.error) return { error: batches.error };
+  }
+  return { data: { edits: edits.data ?? [], items: items.data ?? [], batches: batches.data ?? [], batch: (batch.data ?? [])[0] ?? null } };
 }
 
 const rows = (pairs, doc) => h('dl', { class: 'kv' }, pairs.flatMap(([k, v]) => [
@@ -278,7 +311,31 @@ export async function renderDetail({ db, member, id, go, reload, isCurrent, onEr
   });
   const memoCard = h('section', { class: 'card' }, [h('h2', { class: 'card-title', text: '메모' }, [], doc), memo, memoSave], doc);
 
-  const historyCard = h('section', { class: 'card' }, [h('h2', { class: 'card-title', text: '기록' }, [], doc), rows(m.history, doc)], doc);
+  const hist = await loadHistory(db, row);
+  if (!isCurrent()) return null;
+  let historyBody;
+  if (hist.error) {
+    const code = onError?.(hist.error, { txnId: id });
+    historyBody = [rows(m.history, doc), h('p', { class: 'muted small', text: `자세한 기록을 읽지 못했어요.${code ? ` (오류 번호 ${code})` : ''}` }, [], doc)];
+  } else {
+    const nameOf = new Map(members.map((x) => [x.id, x.display_name]));
+    const entries = historyEntries({ row, ...hist.data, cats, nameOf });
+    historyBody = [
+      h('ol', { class: 'history-list' }, entries.map((e) => h('li', { class: 'history-line' }, [
+        h('span', { class: 'history-when' }, [e.day, h('br', {}, [], doc), e.time], doc),
+        h('span', { class: 'history-what' }, [
+          h('span', {}, [e.title, e.tag ? h('span', { class: 'tag', text: e.tag }, [], doc) : null], doc),
+          e.sub ? h('span', { class: 'sub', text: e.sub }, [], doc) : null,
+          e.href ? h('a', { class: 'history-link', text: '변경 기록에서 보기 ›', attrs: { href: e.href } }, [], doc) : null,
+        ], doc),
+      ], doc)), doc),
+      h('p', { class: 'muted small', text: HISTORY_NOTE }, [], doc),
+    ];
+  }
+  const historyCard = h('section', { class: 'card', attrs: { 'aria-label': '기록' } }, [
+    h('div', { class: 'card-head' }, [h('h2', { class: 'card-title', text: '기록' }, [], doc), h('span', { class: 'muted small', text: '최근 순' }, [], doc)], doc),
+    ...historyBody,
+  ], doc);
 
   // 휴지통으로 (환불 먼저)
   const trash = h('button', { class: 'btn danger-text', text: '휴지통으로', attrs: { type: 'button' } }, [], doc);
