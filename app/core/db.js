@@ -33,6 +33,16 @@ export const UPDATE_COLUMNS = Object.freeze({
   categories: Object.freeze(['name', 'sort_order', 'is_active', 'parent_id']),
   category_rules: Object.freeze(['pattern', 'match_type', 'category_id', 'is_ambiguous', 'priority', 'is_active']),
 });
+// 표·칸별로 허용하는 값(insert·update 모두). 정규식 가맹점 규칙은 화면에서 만들거나 바꿀 수 없다(결정 C2).
+// DB는 category_rules.match_type에 regex를 허용한다 → DB 쪽 제한은 v0.18 후보
+export const COLUMN_VALUES = Object.freeze({
+  category_rules: Object.freeze({ match_type: Object.freeze(['contains', 'exact']) }),
+});
+function assertValues(table, row) {
+  for (const [col, allowed] of Object.entries(COLUMN_VALUES[table] ?? {})) {
+    if (col in row && !allowed.includes(row[col])) throw new TypeError('허용하지 않는 값입니다');
+  }
+}
 const FILTER_OPS = new Set(['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'in', 'is', 'ilike']);
 const IS_VALUES = new Set([null, true, false]);
 
@@ -140,6 +150,7 @@ export function createDb(client) {
         keys.forEach((k) => assertName('컬럼', k));
         const allowed = UPDATE_COLUMNS[table];
         if (allowed && keys.some((k) => !allowed.includes(k))) throw new TypeError('고칠 수 없는 칸입니다');
+        assertValues(table, patch);
       } catch {
         return misuse();
       }
@@ -156,6 +167,7 @@ export function createDb(client) {
         keys.forEach((k) => assertName('컬럼', k));
         const allowed = INSERT_COLUMNS[table];
         if (allowed && keys.some((k) => !allowed.includes(k))) throw new TypeError('넣을 수 없는 칸입니다');
+        assertValues(table, row);
       } catch {
         return misuse();
       }

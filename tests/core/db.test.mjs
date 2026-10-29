@@ -129,3 +129,17 @@ test('클라이언트가 없으면 만들지 않는다', () => {
   assert.throws(() => createDb(null));
   assert.throws(() => createDb({ from() {} }));
 });
+
+test('category_rules match_type은 포함·일치만(insert·update) — 정규식은 서버에 보내지 않는다', async () => {
+  const c = fakeClient([{ data: [{ id: 'r1' }], error: null }]);
+  const db = createDb(c);
+  for (const r of await Promise.all([
+    db.insert('category_rules', { pattern: 'a', match_type: 'regex', category_id: 'c1' }),
+    db.update('category_rules', 'r1', { match_type: 'regex' }),
+    db.update('category_rules', 'r1', { match_type: null }),
+  ])) assert.equal(r.error?.code, 'invalid');
+  assert.equal(c.calls.length, 0);
+  const ok = await db.update('category_rules', 'r1', { match_type: 'exact' });
+  assert.equal(ok.error, null);
+  assert.equal(c.calls.length, 1);
+});
