@@ -1,7 +1,9 @@
 // =====================================================================
 // 월 검토 (화면 설계 v0.1 4-5, 시안 7)
 // 조회: v_monthly_summary(그 달), 그 달 거래(list.js readMonthRows), v_possible_duplicates(그 달 이용일), v_line_mismatch, categories
-// 쓰기: 분류 → bulk_set_category(가맹점 묶음) / 둘 다 맞음 → transactions update(review_status = confirmed) 한 건씩
+// 쓰기: 분류 → 확인 대화상자 → bulk_set_category(가맹점 묶음, 500건까지) → 그 거래들을 review_status = confirmed로 한 건씩
+//       (사용자 결정 10-29. bulk_set_category는 검토 상태를 바꾸지 않음 — 스키마 v0.17)
+//       둘 다 맞음 → transactions update(review_status = confirmed) 한 건씩
 // 준비 중: 원거래를 못 찾은 환불(원거래 찾기 — 사용자 결정 U-13 대기), 아직 안 정한 이체 상대(규칙 화면 필요),
 //          분류 뒤 "같은 가맹점 규칙 저장"(규칙 화면 필요)
 // 의존: ui/dom.js, router.js, core/format.js, core/errors.js, screens/list.js, screens/review-model.js, screens/detail-model.js, screens/shell.js
@@ -11,7 +13,10 @@ import { addMonths, buildHash } from '../router.js';
 import { month } from '../core/format.js';
 import { STAGES, ACTIONS } from '../core/errors.js';
 import { readMonthRows } from './list.js';
-import { progress, uncategorizedGroups, duplicateGroups, unlinkedRefundCount, mismatchItems, confirmBothPatch } from './review-model.js';
+import { confirmDialog } from '../core/confirm.js';
+import {
+  progress, uncategorizedGroups, classifyConfirmText, duplicateGroups, unlinkedRefundCount, mismatchItems, confirmBothPatch,
+} from './review-model.js';
 import { categoryOptions } from './detail-model.js';
 import { errorView } from './shell.js';
 
@@ -26,7 +31,12 @@ export async function loadReview(db, monthStart) {
       columns: 'source_id,occurred_on,merchant_norm,amount,kind,txn_count',
       filters: [{ col: 'occurred_on', op: 'gte', value: monthStart }, { col: 'occurred_on', op: 'lt', value: addMonths(monthStart, 1) }],
     }),
-    db.select('v_line_mismatch', { columns: 'id,occurred_on,merchant_raw,amount,lines_amount' }),
+    // 귀속월과 이용일이 다를 수 있어(연결 환불) 앞뒤 한 달까지 읽고, 화면에서 그 달 거래와 맞춘다(PR #20 리뷰 4)
+    db.select('v_line_mismatch', {
+      columns: 'id,occurred_on,merchant_raw,amount,lines_amount',
+      filters: [{ col: 'occurred_on', op: 'gte', value: addMonths(monthStart, -1) }, { col: 'occurred_on', op: 'lt', value: addMonths(monthStart, 2) }],
+      range: { from: 0, to: 499 },
+    }),
     db.select('categories', { columns: 'id,parent_id,name,code,sort_order,is_active' }),
   ]);
   const error = [summary, rows, dups, mismatch, categories].find((r) => r.error)?.error;
@@ -88,8 +98,8 @@ export async function renderReview({ db, member, monthStart, reload, isCurrent, 
 
   // 분류가 필요해요
   const groups = uncategorizedGroups(rows);
-  const classifyCard = card(`분류가 필요해요${groups.length ? ` · ${groups.reduce((s, g) => s + g.count, 0)}건` : ''}`, [
-    groups.length === 0 ? h('p', { class: 'muted', text: '검토 대기 중 분류가 필요한 거래가 없어요' }, [], doc)
+  const classifyCard = card(`분류가 필요해요${groups.length ? ` · ${groups.reduce((s, g) => s + g.total, 0)}건` : ''}`, [
+    groups.length === 0 ? h('p', { class: 'muted', text: '분류가 필요한 거래가 없어요' }, [], doc)
       : h('ul', { class: 'review-groups' }, groups.map((g) => {
         const sel = h('select', { class: 'field', attrs: { 'aria-label': `${g.merchant} 카테고리` } }, [
           h('option', { text: '카테고리 고르기', attrs: { value: '' } }, [], doc),
@@ -100,14 +110,30 @@ export async function renderReview({ db, member, monthStart, reload, isCurrent, 
         go.addEventListener('click', async () => {
           if (!sel.value) { say('카테고리를 골라 주세요', true); return; }
           const name = sel.selectedOptions[0]?.textContent ?? '';
+          if (!(await confirmDialog({ ...classifyConfirmText(g, name), confirmLabel: '분류하기', doc }))) return;
           go.disabled = true;
           const r = await db.rpc('bulk_set_category', { p_txn_ids: g.ids, p_category_id: sel.value, p_description: `월 검토 · ${g.merchant} → ${name}`.slice(0, 200) });
           if (r.error) { go.disabled = false; fail(r.error, { stage: STAGES.db_rpc, action: ACTIONS.bulk_edit }); return; }
-          reviewNotice = { text: `${g.merchant} ${g.count}건을 '${name}'(으)로 분류했어요. 더보기 › 변경 기록에서 되돌릴 수 있어요.`, isError: false };
+          // 분류한 거래를 확인함으로(이미 확인함인 것은 건너뜀). 실패하면 거기서 멈추고 몇 건 됐는지 알림
+          let confirmed = 0;
+          for (const id of g.toConfirm) {
+            const u = await db.update('transactions', id, confirmBothPatch(member.memberId));
+            if (u.error || !u.data?.length) {
+              const code = u.error ? onError?.(u.error, { stage: STAGES.db_update, txnId: id }) : null;
+              reviewNotice = {
+                text: `${g.count}건을 '${name}'(으)로 분류했지만 확인함으로는 ${confirmed}건만 바꿨어요. 나머지는 상세에서 확인해 주세요.${code ? ` (오류 번호 ${code})` : ''}`,
+                isError: true,
+              };
+              reload();
+              return;
+            }
+            confirmed += 1;
+          }
+          reviewNotice = { text: `${g.merchant} ${g.count}건을 '${name}'(으)로 분류하고 확인함으로 바꿨어요. 분류는 더보기 › 변경 기록에서 되돌릴 수 있어요.`, isError: false };
           reload();
         });
         return h('li', { class: 'review-group' }, [
-          h('p', {}, [h('strong', { text: g.merchant }, [], doc), h('span', { class: 'sub', text: ` ${g.count}건 · ${g.amountText}` }, [], doc)], doc),
+          h('p', {}, [h('strong', { text: g.merchant }, [], doc), h('span', { class: 'sub', text: ` ${g.total}건 · ${g.amountText}${g.splitCount ? ` · 나눈 거래 ${g.splitCount}건` : ''}` }, [], doc)], doc),
           h('div', { class: 'review-pick' }, [sel, go], doc),
         ], doc);
       }), doc),
