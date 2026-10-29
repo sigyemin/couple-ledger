@@ -1,7 +1,7 @@
 // 월 검토 모델 (가짜 가맹점만)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { progress, uncategorizedGroups, duplicateGroups, unlinkedRefundCount, mismatchItems, confirmBothPatch } from '../../app/screens/review-model.js';
+import { defaultReviewMonth, progress, uncategorizedGroups, duplicateGroups, unlinkedRefundCount, mismatchItems, confirmBothPatch } from '../../app/screens/review-model.js';
 import { parseHash } from '../../app/router.js';
 import { activeTab } from '../../app/screens/shell.js';
 
@@ -48,4 +48,8 @@ test('미연결 환불 수·나눈 금액 불일치(그 달만)·라우트', () 
   assert.deepEqual(mismatchItems([{ id: 'a', merchant_raw: '가상마트', occurred_on: '2026-10-03', amount: 10000, lines_amount: '9000' }, { id: 'zz', merchant_raw: 'x', occurred_on: '2026-09-01', amount: 1, lines_amount: 0 }], rows),
     [{ id: 'a', text: '가상마트 · 10월 3일 (토)', sub: '거래 10,000원 · 나눈 합계 9,000원' }]);
   assert.deepEqual([parseHash('#/review?month=2026-10').screen, activeTab('review')], ['review', 'more']);
+});
+
+test('월 검토 기본 달: 지금은 이번 달(서울)', () => {
+  assert.equal(defaultReviewMonth(new Date('2026-10-31T15:30:00Z')), '2026-11-01');
 });

@@ -3,9 +3,15 @@
 // 항목: 진행률 · 분류가 필요해요 · 같은 거래일 수도 있어요 · 원거래를 못 찾은 환불(준비 중 — 사용자 결정 U-13 대기)
 //       · 아직 안 정한 이체 상대(준비 중 — 규칙 화면 필요) · 나눈 금액이 안 맞는 거래
 // - 숫자 기준은 DB 뷰(v_monthly_summary·v_possible_duplicates·v_line_mismatch)와 같게, 거래 목록은 그 달 내역(휴지통·테스트 결제수단 제외)
-// 의존: core/format.js
+// 의존: core/format.js, router.js
 // =====================================================================
 import { won, day } from '../core/format.js';
+import { currentMonth } from '../router.js';
+
+/** 월 검토 기본 달 — 지금은 이번 달. 사용자 결정 대기(권장 지난달): 바꾸려면 이 줄을 addMonths(currentMonth(now), -1)로 */
+export function defaultReviewMonth(now = new Date()) {
+  return currentMonth(now);
+}
 
 /** 진행률: 그 달 거래 중 검토 대기가 아닌 비율 (v_monthly_summary.txn_count·needs_review_count) */
 export function progress(summary) {
