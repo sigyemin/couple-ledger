@@ -106,7 +106,7 @@ test('항목 거래: 몫 금액·합계, 나눈 거래, 원거래 따르는 환�
   assert.deepEqual(it.rows[0].view.payer, { initial: '가', name: '가람', slot: 1 });
 });
 
-test('수입: 카테고리별(미분류 끝)·차이, 구성원별(자리 순, 0원 숨김), 비교 문구', () => {
+test('수입: 카테고리별(미분류 끝, 구성원 칸은 합침)·차이, 구성원별 줄 없음(C6), 비교 문구', () => {
   const A = ID(71);
   const B = ID(72);
   const cur = [
@@ -115,10 +115,9 @@ test('수입: 카테고리별(미분류 끝)·차이, 구성원별(자리 순, 0
     { period_month: OCT, category_id: C_PAY, member_id: B, total_amount: '50000' },
   ];
   const prev = [{ period_month: SEP, category_id: C_PAY, member_id: A, total_amount: '110000' }];
-  const members = [{ id: B, member_slot: 2, display_name: '나리' }, { id: A, member_slot: 1, display_name: '가람' }, { id: ID(73), member_slot: 3, display_name: '다솜' }];
-  const v = incomeView(cur, prev, cats, members);
+  const v = incomeView(cur, prev, cats);
   assert.deepEqual(v.byCategory.map((c) => [c.name, c.amountText, c.diff.text]), [['급여', '110,000원', '같음'], ['미분류', '40,000원', '+40,000원']]);
-  assert.deepEqual(v.byMember.map((m) => [m.name, m.amountText]), [['가람', '100,000원'], ['나리', '50,000원']]);
+  assert.deepEqual(Object.keys(v), ['byCategory']);
   assert.deepEqual([incomeCompareText(150 * K, 110 * K), incomeCompareText(1, 2), incomeCompareText(5, 5), incomeCompareText(5, null)],
     ['지난달보다 40,000원 더 들어왔어요', '지난달보다 1원 덜 들어왔어요', '지난달과 같아요', null]);
 });

@@ -2,7 +2,7 @@
 // 리포트 — 화면 없이 계산하는 부분 (화면 설계 v0.2 3-2 시안 11, 3-3 시안 12, 3-4 시안 13, 5장 차트 규칙)
 // - 지출: v_monthly_summary(합계·6개월) + v_monthly_category(그룹·항목) → 합계 = 홈의 그 달 지출
 // - 항목 거래: v_monthly_category_txn(거래별 그 카테고리 몫) + v_transaction_detail(표시) → 합계 = 리포트 숫자
-// - 수입: v_monthly_summary.income_amount + v_monthly_income(카테고리·구성원) — v0.17 S2로 합이 맞다
+// - 수입: v_monthly_summary.income_amount + v_monthly_income(카테고리별만, 결정 C6) — v0.17 S2로 합이 맞다
 // - 행이 없는 달은 0. 지난달 요약 행이 없으면 비교하지 않는다(홈과 같게)
 // - 늘어남 = 주황 "+", 줄어듦 = 파랑 "−", 같음 = 회색 (빨강·초록 안 씀)
 // 의존: core/format.js, router.js(addMonths, buildHash), screens/home-model.js(compareText)
@@ -218,10 +218,10 @@ export function incomeCompareText(cur, prev) {
 }
 
 /**
- * 수입 칸: 카테고리별(미분류 맨 끝) + 구성원별
- * @param cur/prev v_monthly_income 행(그 달/지난달)
+ * 수입 칸: 카테고리별(미분류 맨 끝). 구성원별 줄은 두지 않는다(결정 C6)
+ * @param cur/prev v_monthly_income 행(그 달/지난달) — 구성원 칸은 카테고리로 합친다
  */
-export function incomeView(cur, prev, cats, members, { hasPrev = true } = {}) {
+export function incomeView(cur, prev, cats, { hasPrev = true } = {}) {
   const a = sumBy(cur, (r) => r.category_id ?? NONE);
   const b = sumBy(prev, (r) => r.category_id ?? NONE);
   const keys = [...new Set([...a.keys(), ...b.keys()])].filter((k) => (a.get(k) ?? 0) !== 0 || (b.get(k) ?? 0) !== 0);
@@ -235,10 +235,5 @@ export function incomeView(cur, prev, cats, members, { hasPrev = true } = {}) {
       amount, amountText: won(amount), diff: diffView(amount - (b.get(k) ?? 0), hasPrev),
     };
   }).sort((x, y) => (x.id === null) - (y.id === null) || y.amount - x.amount || x.name.localeCompare(y.name));
-  const m = sumBy(cur, (r) => r.member_id);
-  const byMember = (members ?? [])
-    .slice().sort((x, y) => x.member_slot - y.member_slot)
-    .filter((mb) => (m.get(mb.id) ?? 0) !== 0)
-    .map((mb) => ({ id: mb.id, name: mb.display_name, amountText: won(m.get(mb.id)) }));
-  return { byCategory, byMember };
+  return { byCategory };
 }

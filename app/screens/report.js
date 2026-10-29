@@ -1,6 +1,7 @@
 // =====================================================================
 // 리포트 (화면 설계 v0.2 3-2 시안 11 · 3-3 시안 12 · 3-4 시안 13). 읽기만 한다
-// 11 #/report?month&view=income : v_monthly_summary(6개월), v_monthly_category(그 달·지난달) | v_monthly_income(그 달·지난달), members
+// 11 #/report?month&view=income : v_monthly_summary(6개월), v_monthly_category | v_monthly_income(그 달·지난달)
+// - 수입 칸은 카테고리별만(결정 C6: 구성원별 줄 없음)
 // 12 #/rgroup/<그룹 id>?month   : v_monthly_category(그 그룹, 6개월), v_monthly_summary(그 달·지난달)
 // 13 #/ritem/<카테고리 id>?month : v_monthly_category_txn(그 달·그 카테고리), v_transaction_detail(그 귀속월, 내역과 같은 읽기)
 // - 공동/개인 합친 금액(V6). 테스트 결제수단·휴지통은 뷰가 뺀다
@@ -77,14 +78,13 @@ export async function loadReport(db, monthStart, view) {
     db.select('v_monthly_summary', { columns: 'period_month,expense_amount,income_amount', filters: between(months[0], monthStart) }),
     db.select('categories', { columns: 'id,parent_id,name,is_active' }),
     view === 'income'
-      ? db.select('v_monthly_income', { columns: 'period_month,category_id,member_id,total_amount', filters: between(prevMonth, monthStart) })
+      ? db.select('v_monthly_income', { columns: 'period_month,category_id,total_amount', filters: between(prevMonth, monthStart) })
       : db.select('v_monthly_category', { columns: 'period_month,category_id,group_category_id,total_amount', filters: between(prevMonth, monthStart) }),
   ];
-  if (view === 'income') reads.push(db.select('members', { columns: 'id,member_slot,display_name' }));
   const res = await Promise.all(reads);
   const error = firstError(res);
   if (error) return { error };
-  return { data: { summary: res[0].data ?? [], categories: res[1].data ?? [], rows: res[2].data ?? [], members: res[3]?.data ?? [] } };
+  return { data: { summary: res[0].data ?? [], categories: res[1].data ?? [], rows: res[2].data ?? [] } };
 }
 
 /**
@@ -101,7 +101,7 @@ export async function renderReport({ db, monthStart, view = 'expense', isCurrent
     nav(1, '다음 달', '›'),
   ]);
   if (res.error) return failView(head, res.error, onError, doc);
-  const { summary, categories, rows, members } = res.data;
+  const { summary, categories, rows } = res.data;
   const cats = categoryMap(categories);
   const prevMonth = addMonths(monthStart, -1);
   const sumOf = (m) => summary.find((r) => r.period_month === m) ?? null;
@@ -156,7 +156,7 @@ export async function renderReport({ db, monthStart, view = 'expense', isCurrent
       h('p', { class: 'muted small', text: '합계는 홈의 이번 달 지출과 같아요. 집계 제외는 빼고, 환불은 원거래 달·카테고리에서 뺐어요.' }, [], doc),
     ], doc);
   } else {
-    const iv = incomeView(rows.filter((r) => r.period_month === monthStart), rows.filter((r) => r.period_month === prevMonth), cats, members, { hasPrev });
+    const iv = incomeView(rows.filter((r) => r.period_month === monthStart), rows.filter((r) => r.period_month === prevMonth), cats, { hasPrev });
     body = h('div', { class: 'stack' }, [
       h('section', { class: 'card' }, [
         cardHead('카테고리별'),
@@ -169,13 +169,7 @@ export async function renderReport({ db, monthStart, view = 'expense', isCurrent
             ], doc),
           ], doc)), doc),
       ], doc),
-      iv.byMember.length ? h('section', { class: 'card' }, [
-        h('h2', { class: 'card-title', text: '사람별' }, [], doc),
-        h('ul', { class: 'cmp-list' }, iv.byMember.map((p) => h('li', {}, [
-          h('div', { class: 'cmp two' }, [h('span', { class: 'cmp-name', text: p.name }, [], doc), h('span', { class: 'cmp-amount', text: p.amountText }, [], doc)], doc),
-        ], doc)), doc),
-      ], doc) : null,
-      h('p', { class: 'muted small', text: '집계 제외는 뺐어요. 결제수단 주인 기준으로 사람을 나눴어요.' }, [], doc),
+      h('p', { class: 'muted small', text: '집계 제외는 뺐어요.' }, [], doc),
     ], doc);
   }
   return h('main', { class: 'screen' }, [head, seg, hero, body], doc);
