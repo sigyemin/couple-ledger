@@ -23,6 +23,7 @@ import { renderMore } from './screens/more.js';
 import { renderCategories } from './screens/categories.js';
 import { renderRules, renderRuleEdit, renderReapply } from './screens/rules.js';
 import { renderCounterparties, renderCounterpartyEdit, renderCounterpartyApply } from './screens/counterparty.js';
+import { renderSources, renderSourceEdit } from './screens/sources.js';
 import { renderTrash } from './screens/trash.js';
 import { renderChanges, renderChange } from './screens/changes.js';
 import { renderReview } from './screens/review.js';
@@ -146,6 +147,10 @@ async function boot() {
         view = await renderCounterpartyEdit({ db, member, id: route.id, go, isCurrent, onError });
       } else if (route.screen === 'cpapply') {
         view = await renderCounterpartyApply({ db, id: route.id, isCurrent, onError });
+      } else if (route.screen === 'sources') {
+        view = await renderSources({ db, isCurrent, onError });
+      } else if (route.screen === 'source' || route.screen === 'sourcenew') {
+        view = await renderSourceEdit({ db, id: route.id, go, isCurrent, onError });
       } else if (route.screen === 'categories') {
         view = await renderCategories({ db, reload, isCurrent, onError });
       } else if (route.screen === 'settle') {

@@ -324,3 +324,7 @@ a.btn { display: flex; align-items: center; justify-content: center; text-decora
 .history-what { display: flex; flex-direction: column; gap: 2px; font-size: 14px; min-width: 0; }
 .history-what .sub { font-size: 12px; color: var(--sub-on-white); overflow-wrap: anywhere; }
 .history-link { font-size: 13px; text-decoration: none; }
+
+/* 결제수단 (화면 설계 v0.3 3) */
+.tag.dark { background: var(--text); color: #FFFFFF; }
+.section-title .payer { margin-right: 6px; }

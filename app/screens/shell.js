@@ -17,7 +17,7 @@ export const TABS = Object.freeze([
 export function activeTab(screen) {
   if (screen === 'txn' || screen === 'add') return 'list';
   return ['categories', 'trash', 'changes', 'change', 'review', 'report', 'rgroup', 'ritem', 'rules', 'rule', 'rulenew', 'reapply',
-    'cprules', 'cprule', 'cprulenew', 'cpapply'].includes(screen) ? 'more' : screen;
+    'cprules', 'cprule', 'cprulenew', 'cpapply', 'sources', 'source', 'sourcenew'].includes(screen) ? 'more' : screen;
 }
 
 export function tabBar(screen, doc = globalThis.document) {

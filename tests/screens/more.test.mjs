@@ -12,7 +12,7 @@ test('더보기 메뉴: 설계 순서, 월 검토 수, 없는 화면은 누를 �
   assert.equal(m[0].sub, '가람 · 구글 계정으로 로그인됨');
   assert.deepEqual([m[1].sub, m[1].href], ['10월 · 검토할 것 18건', '#/review?month=2026-10']);
   assert.equal(m[3].href, '#/rules');
-  assert.deepEqual(m.filter((x) => !x.href).map((x) => x.label), ['구성원', '결제수단']);
+  assert.deepEqual(m.filter((x) => !x.href).map((x) => x.label), ['구성원']);
   assert.equal(moreMenu({ member: { displayName: '가람' }, monthStart: '2026-01-01', needsReview: 0 })[1].sub, '1월 · 검토할 것 없음');
   assert.equal(moreMenu({ member: { displayName: '가람' }, monthStart: '2026-01-01' })[1].sub, '1월 · 검토할 것 없음', '숫자를 못 읽어도');
   assert.deepEqual([activeTab('categories'), parseHash('#/categories').screen], ['more', 'categories']);
