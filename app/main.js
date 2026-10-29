@@ -18,6 +18,7 @@ import { renderList } from './screens/list.js';
 import { renderDetail } from './screens/detail.js';
 import { renderAdd } from './screens/add.js';
 import { renderSettle } from './screens/settle.js';
+import { renderMore, renderCategories } from './screens/more.js';
 
 const doc = globalThis.document;
 const root = doc.getElementById('app');
@@ -107,6 +108,11 @@ async function boot() {
         view = await renderHome({ db, member, monthStart, isCurrent, onError });
       } else if (route.screen === 'list') {
         view = await renderList({ db, monthStart, query: route.query, go, isCurrent, onError });
+      } else if (route.screen === 'more') {
+        const signOut = async () => { await guard.signOut(); replaceChildren(root, loginView('로그아웃했어요.')); };
+        view = await renderMore({ db, member, monthStart: currentMonth(), signOut, isCurrent, onError });
+      } else if (route.screen === 'categories') {
+        view = await renderCategories({ db, isCurrent, onError });
       } else if (route.screen === 'settle') {
         view = await renderSettle({ db, monthStart, reload, isCurrent, onError });
       } else if (route.screen === 'add') {
@@ -114,7 +120,7 @@ async function boot() {
       } else if (route.screen === 'txn') {
         view = await renderDetail({ db, member, id: route.id, go, reload, isCurrent, onError });
       } else {
-        const titles = { upload: '올리기', more: '더보기' };
+        const titles = { upload: '올리기' };
         view = comingSoon(titles[route.screen]);
       }
     } catch (err) {
