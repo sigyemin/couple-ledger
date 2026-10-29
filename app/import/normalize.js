@@ -1,0 +1,223 @@
+// =====================================================================
+// 행 정규화: 셀 문자열 → import_transactions RPC 행 (스키마 import_formats 주석 "파서 규칙", 4장 중복 키)
+// - 매핑한 열만 읽는다(P3). sensitive_headers 열·매핑 안 한 열은 읽지 않는다
+// - 날짜(일시) 칸이 형식대로 읽히지 않는 줄(합계 등 꼬리 줄)은 버린다
+// - 금액: 쉼표·공백·'원'을 지우고 정수만. 소수점 등은 행 오류
+// - 방향·금액: amount_sign
+//     split_columns    = 출금(amount_out) > 0 → out, 입금(amount_in) > 0 → in, 둘 다 없으면 행 오류
+//     expense_negative = amount < 0 → out, > 0 → in, 0·빈 값은 행 오류
+//     expense_positive = amount ≥ 0 → out, < 0 → in [추정: 카드 파일은 모두 양수, 음수는 취소로 봄]
+// - 기본 제안: out → expense, in → income(카드 형식은 refund). row_rules(위에서 첫 일치)가 바꾼다
+// - 모든 글자 칸은 민감번호 규칙으로 가린다('[숫자 가림]', 붙여 쓴 일시 단계는 끈 보수적 검사)
+// - 승인번호가 형식(영숫자 4~12자, 숫자 10개 연속 금지)에 맞지 않으면 행 오류
+// - 검토 상태는 모두 needs_review
+// 결과에는 셀 원문(가리기 전 값)을 담지 않는다.
+// 의존: core/sensitive.js, ./datetime.js, ./formats.js, ./dedup.js
+// =====================================================================
+import { maskSensitiveNumbers, approvalNoValid } from '../core/sensitive.js';
+import { compileFormat, parseWith } from './datetime.js';
+import { matchNorm } from './formats.js';
+import { primaryKey, secondaryPrefix, hashKey } from './dedup.js';
+
+// raw에 넣는 표준 키(DB raw_key_list와 같음). balance_after는 키 전용이라 raw에 넣지 않는다
+export const RAW_KEYS = Object.freeze([
+  'occurred_on', 'occurred_time', 'occurred_at', 'merchant', 'amount', 'amount_out', 'amount_in',
+  'direction', 'txn_type', 'approval_no', 'installment', 'counterparty',
+  'status', 'cancel_amount', 'amount_foreign', 'counterparty_bank',
+]);
+const DATE_KEYS = new Set(['occurred_on', 'occurred_time', 'occurred_at']);
+const CARD_KINDS = new Set(['credit_card', 'check_card']);
+const DEFAULT_DATE_FORMAT = 'YYYY-MM-DD[ HH24:MI[:SS]]';
+
+/** 금액 문자열 → 정수 (빈 값 null, 형식 오류 NaN) */
+export function parseAmount(v) {
+  const s = String(v ?? '').normalize('NFKC').replace(/[, \t원]/g, '');
+  if (!s) return null;
+  if (!/^[+-]?[0-9]{1,15}$/.test(s)) return Number.NaN;
+  const n = Number(s);
+  return Number.isSafeInteger(n) ? n : Number.NaN;
+}
+
+/** 할부 개월 수: '3', '3개월'처럼 2 이상 숫자만. 그 밖(일시불 등)은 null [추정: 실제 표기는 QA가 확인] */
+export function parseInstallment(v) {
+  const m = /^([0-9]{1,2})(개월)?$/.exec(String(v ?? '').normalize('NFKC').replace(/[ \t]/g, ''));
+  const n = m ? Number(m[1]) : 0;
+  return n >= 2 ? n : null;
+}
+
+/** row_rules에서 처음 맞는 규칙 (없으면 null) */
+export function matchRowRule(rules, cell, direction) {
+  for (const rule of rules ?? []) {
+    if (rule.direction && rule.direction !== direction) continue;
+    const field = cell(rule.field);
+    if (rule.match === 'any') return rule;
+    if (field === null) continue;
+    const a = matchNorm(field);
+    const b = matchNorm(rule.value);
+    if (rule.match === 'exact' ? a === b : a.includes(b)) return rule;
+  }
+  return null;
+}
+
+function decideAmount(sign, cell) {
+  if (sign === 'split_columns') {
+    const out = parseAmount(cell('amount_out'));
+    const inn = parseAmount(cell('amount_in'));
+    if (Number.isNaN(out) || Number.isNaN(inn)) return null;
+    if (out > 0 && !(inn > 0)) return { direction: 'out', amount: out };
+    if (inn > 0 && !(out > 0)) return { direction: 'in', amount: inn };
+    return null;
+  }
+  const a = parseAmount(cell('amount'));
+  if (a === null || Number.isNaN(a)) return null;
+  if (sign === 'expense_negative') {
+    if (a === 0) return null;
+    return a < 0 ? { direction: 'out', amount: -a } : { direction: 'in', amount: a };
+  }
+  return a < 0 ? { direction: 'in', amount: -a } : { direction: 'out', amount: a };
+}
+
+/**
+ * @param {string[][]} grid
+ * @param {object} format   import_formats 행
+ * @param {{ headerIndex: number, columns: Map<string, number> }} header  findHeader 결과
+ * @param {{ sourceId: string, categories?: Map<string, string> }} ctx  categories: category code → id
+ * @returns {Promise<{ rows: object[], errors: {rowNo:number, reason:string}[], skipped: number, maskedCells: number }>}
+ *   rows: RPC 행 + rowNo(파일 줄 번호, 1부터. RPC에 보낼 때는 뺀다)
+ */
+export async function normalizeRows(grid, format, header, ctx) {
+  const { sourceId, categories = new Map() } = ctx ?? {};
+  if (typeof sourceId !== 'string' || !sourceId) throw new TypeError('결제수단 id가 필요합니다');
+  const dateFmt = compileFormat(format.date_format || DEFAULT_DATE_FORMAT);
+  const timeFmt = format.time_format ? compileFormat(format.time_format) : null;
+  const isCard = CARD_KINDS.has(format.kind);
+  const rules = Array.isArray(format.row_rules) ? format.row_rules : [];
+  const { columns } = header;
+
+  const rows = [];
+  const errors = [];
+  let skipped = 0;
+  let maskedCells = 0;
+  const seen = new Map(); // 2순위 앞부분 → 개수
+
+  for (let r = header.headerIndex + 1; r < grid.length; r++) {
+    const line = grid[r] ?? [];
+    const rowNo = r + 1;
+    const cell = (key) => {
+      const i = columns.get(key);
+      if (i === undefined) return null;
+      const v = String(line[i] ?? '').trim();
+      return v === '' ? null : v;
+    };
+
+    // 일시
+    let when = null;
+    if (columns.has('occurred_at')) {
+      when = parseWith(dateFmt, cell('occurred_at'));
+    } else if (columns.has('occurred_on')) {
+      const d = parseWith(dateFmt, cell('occurred_on'));
+      if (d?.date) {
+        const t = timeFmt && cell('occurred_time') !== null ? parseWith(timeFmt, cell('occurred_time')) : null;
+        when = { date: d.date, time: t?.time ?? d.time ?? null };
+      }
+    }
+    if (!when?.date) {
+      skipped++; // 꼬리 줄(합계 등)·빈 줄
+      continue;
+    }
+
+    const money = decideAmount(format.amount_sign, cell);
+    if (!money) {
+      errors.push({ rowNo, reason: 'amount' });
+      continue;
+    }
+
+    let approvalNo = cell('approval_no');
+    if (approvalNo !== null) {
+      approvalNo = approvalNo.normalize('NFKC');
+      if (!approvalNoValid(approvalNo)) {
+        errors.push({ rowNo, reason: 'approval_no' });
+        continue;
+      }
+    }
+
+    // raw: 매핑한 표준 키만, 글자는 가린 값
+    const raw = {};
+    for (const key of RAW_KEYS) {
+      const v = cell(key);
+      if (v === null) continue;
+      if (key === 'approval_no') {
+        raw[key] = approvalNo;
+        continue;
+      }
+      const masked = maskSensitiveNumbers(v, DATE_KEYS.has(key) ? undefined : { packedDateTime: false });
+      if (masked !== v.normalize('NFKC')) maskedCells++;
+      raw[key] = masked;
+    }
+
+    const merchantRaw = raw.merchant ?? '';
+    const merchantNorm = matchNorm(merchantRaw);
+    const rule = matchRowRule(rules, cell, money.direction);
+
+    const kind = rule?.kind ?? (money.direction === 'out' ? 'expense' : isCard ? 'refund' : 'income');
+    const excludeReason = rule?.exclude_reason ?? null;
+    const base = {
+      occurred_on: when.date,
+      occurred_time: when.time,
+      merchant_raw: merchantRaw,
+      merchant_norm: merchantNorm,
+      amount: money.amount,
+      kind,
+      card_kind: rule?.card_kind ?? (format.kind === 'credit_card' ? 'credit_card' : null),
+      approval_no: approvalNo,
+      installment_months: parseInstallment(cell('installment')),
+      is_shared: rule?.is_shared ?? true,
+      is_excluded: excludeReason !== null,
+      exclude_reason: excludeReason,
+      review_status: 'needs_review',
+      raw,
+      category_id: rule?.category_code ? (categories.get(rule.category_code) ?? null) : null,
+    };
+    if (base.category_id) base.category_source = 'rule';
+    if (base.card_kind && !['expense', 'refund'].includes(kind)) base.card_kind = null;
+
+    const occurredAt = when.time ? `${when.date} ${when.time}` : when.date;
+    const balance = (() => {
+      const b = cell('balance_after');
+      if (b === null) return '';
+      const n = parseAmount(b);
+      return n === null || Number.isNaN(n) ? matchNorm(b) : String(n);
+    })();
+
+    const variants = [{ ...base, direction: money.direction }];
+    // 카드 취소 행: 원거래(지출)와 같은 승인번호의 환불 행 두 개 (원거래를 먼저)
+    if (rule?.also_refund) {
+      const refundAmount = rule.refund_amount_key ? parseAmount(cell(rule.refund_amount_key)) : null;
+      const amt = refundAmount === null || Number.isNaN(refundAmount) ? money.amount : Math.abs(refundAmount);
+      variants.push({ ...base, kind: 'refund', amount: amt, is_excluded: false, exclude_reason: null, direction: 'in' });
+    }
+
+    for (const v of variants) {
+      const { direction, ...row } = v;
+      let keyString;
+      if (isCard && approvalNo && (row.kind === 'expense' || row.kind === 'refund')) {
+        keyString = primaryKey({ sourceId, approvalNo, kind: row.kind });
+        row.row_seq = 1;
+      } else {
+        const prefix = secondaryPrefix({ sourceId, direction, occurredAt, merchantNorm, amount: row.amount, balanceAfter: balance });
+        const n = (seen.get(prefix) ?? 0) + 1;
+        seen.set(prefix, n);
+        keyString = `${prefix}|${n}`;
+        row.row_seq = n;
+      }
+      row.dedup_key = await hashKey(keyString);
+      rows.push({ rowNo, ...row });
+    }
+  }
+  return { rows, errors, skipped, maskedCells };
+}
+
+/** RPC로 보낼 모양(rowNo 제거) */
+export function toRpcRows(rows) {
+  return rows.map(({ rowNo, ...r }) => r);
+}
