@@ -145,7 +145,7 @@ test('구분자마다 그 구분자 하나만 써서 4자리 묶음 넷을 이�
 });
 
 // ---------------------------------------------------------------- 구분자 9자 추가 (설계 문서 v0.17 민감번호 규칙, 최종 26자)
-const ADDED_SEPARATORS = ['∙', '⋅', '⸱', '⸳', '‣', '⁃', '●', '᛫', '⦁'];
+const ADDED_SEPARATORS = [0x2219, 0x22C5, 0x2E31, 0x2E33, 0x2023, 0x2043, 0x25CF, 0x16EB, 0x2981].map((n) => String.fromCodePoint(n));
 const hex = (c) => `U+${c.codePointAt(0).toString(16).toUpperCase()}`;
 
 test('구분자 목록: 26자, 추가 9자 포함, 글자 U+A78F·U+11A2는 없음, 중복 없음', () => {
@@ -153,8 +153,8 @@ test('구분자 목록: 26자, 추가 9자 포함, 글자 U+A78F·U+11A2는 없�
   assert.equal(list.length, 26);
   assert.equal(new Set(list).size, 26);
   for (const c of ADDED_SEPARATORS) assert.ok(list.includes(c), hex(c));
-  assert.ok(!list.includes('ꞏ'));
-  assert.ok(!list.includes('ᆢ'));
+  assert.ok(!list.includes(String.fromCodePoint(0xA78F)));
+  assert.ok(!list.includes(String.fromCodePoint(0x11A2)));
 });
 
 test('추가 구분자: 각 문자 단독으로 4-4-4-4를 이으면 잡히고 가려지며, 9자리 이하 이음은 안 잡힌다', () => {
@@ -169,7 +169,7 @@ test('추가 구분자: 각 문자 단독으로 4-4-4-4를 이으면 잡히고 �
 });
 
 test('글자 U+A78F·U+11A2는 구분자가 아니다: 이를 사이에 둔 숫자는 이어지지 않는다', () => {
-  for (const c of ['ꞏ', 'ᆢ']) {
+  for (const c of [0xA78F, 0x11A2].map((n) => String.fromCodePoint(n))) {
     assert.equal(hasSensitiveNumber(['12345', '67890'].join(c)), false, hex(c));
   }
 });
@@ -196,18 +196,31 @@ for (let cp = 0; cp < 0x30000; cp++) {
 }
 const SEP_INPUTS = [...RUN_SEPARATORS, ...MAPPED_SEPARATORS];
 
-test('SEP-NFKC: 구분자 26자와 정규화 뒤 구분자가 되는 문자로 5+5자리를 이으면 잡힌다', () => {
-  for (const c of ['‐', '―', '−', '．', '／', '（', '　']) assert.ok(MAPPED_SEPARATORS.includes(c), hex(c));
-  assert.ok(SEP_INPUTS.length >= 38);
+// DB 시험 SEP-NFKC의 38자 = 구분자 26자 + 대시류 7자 + 전각 5자
+const DB_SEP_DASHES = [0x2010, 0x2011, 0x2012, 0x2013, 0x2014, 0x2015, 0x2212].map((n) => String.fromCodePoint(n));
+const DB_SEP_FULLWIDTH = [0xFF0C, 0xFF1A, 0xFF0A, 0xFF0B, 0xFF65].map((n) => String.fromCodePoint(n));
+const DB_SEP_38 = [...RUN_SEPARATORS, ...DB_SEP_DASHES, ...DB_SEP_FULLWIDTH];
+
+test('SEP-NFKC: DB 시험과 같은 38자로 5+5자리를 이으면 잡힌다', () => {
+  assert.equal(new Set(DB_SEP_38).size, 38);
+  for (const c of DB_SEP_38) assert.equal(hasSensitiveNumber(`12345${c}67890`), true, hex(c));
+});
+
+test('SEP-4: DB 시험과 같은 38자로 4+5자리(9자리)를 이으면 안 잡힌다', () => {
+  for (const c of DB_SEP_38) assert.equal(hasSensitiveNumber(`1234${c}56789`), false, hex(c));
+});
+
+test('SEP-NFKC(전수): 정규화 뒤 구분자가 되는 모든 문자로 5+5자리를 이으면 잡힌다', () => {
+  for (const c of [...DB_SEP_DASHES, ...DB_SEP_FULLWIDTH]) assert.ok(MAPPED_SEPARATORS.includes(c), hex(c));
   for (const c of SEP_INPUTS) assert.equal(hasSensitiveNumber(`12345${c}67890`), true, hex(c));
 });
 
-test('SEP-4: 같은 문자로 4+5자리(9자리)를 이으면 안 잡힌다', () => {
+test('SEP-4(전수): 같은 문자로 4+5자리(9자리)를 이으면 안 잡힌다', () => {
   for (const c of SEP_INPUTS) assert.equal(hasSensitiveNumber(`1234${c}56789`), false, hex(c));
 });
 
 test('SEP-5: U+A78F·U+11A2는 구분자가 아니다', () => {
-  for (const c of ['ꞏ', 'ᆢ']) {
+  for (const c of [0xA78F, 0x11A2].map((n) => String.fromCodePoint(n))) {
     assert.ok(!SEP_INPUTS.includes(c), hex(c));
     assert.equal(hasSensitiveNumber(`12345${c}67890`), false, hex(c));
   }
