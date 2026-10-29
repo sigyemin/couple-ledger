@@ -15,6 +15,17 @@
 *.pdf
 *.zip
 *.7z
+# 금융 내보내기 형식, 웹 페이지 저장본, 문서 형식
+*.ofx
+*.qif
+*.mhtml
+*.mht
+*.docx
+*.doc
+*.hwp
+*.hwpx
+*.numbers
+*.rtf
 # 은행 HTML 위장 xls 등. 앱 진입점만 허용
 *.html
 *.htm
@@ -38,6 +49,9 @@
 *.backup
 *.bak
 *.enc
+*.db
+*.sqlite
+*.sqlite3
 dumps/
 exports/
 backups/

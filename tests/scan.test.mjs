@@ -3,7 +3,7 @@
 // 10자리 이상 숫자나 키 모양 문자열을 소스에 그대로 쓰지 않는다.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { checkPath, checkContent, hasSensitiveNumber, stripIdentifiers, loadAllowList } from '../scripts/scan.mjs';
+import { checkPath, checkContent, hasSensitiveNumber, stripIdentifiers, loadAllowList, decodeText } from '../scripts/scan.mjs';
 
 const digits = (n, start = 1) => Array.from({ length: n }, (_, i) => String((start + i) % 10)).join('');
 const b64url = (obj) => Buffer.from(JSON.stringify(obj)).toString('base64url');
@@ -13,7 +13,8 @@ const fakeJwt = (role) => `${b64url({ alg: 'HS256', typ: 'JWT' })}.${b64url({ is
 test('막는 파일 종류', () => {
   for (const p of ['a.xlsx', 'x/b.XLS', 'c.csv', 'd.pdf', 'e.png', 'f.html', 'dump.sql', 'db/old.sql',
                    'backup.sql.gz', '.env', '.env.local', 'cert.pem', 'net.har', 'samples/readme.md',
-                   'x/exports/a.json', 'bank.htm']) {
+                   'x/exports/a.json', 'bank.htm', 'ledger.db', 'a.sqlite', 'a.sqlite3', 'page.mhtml',
+                   'page.mht', 'bank.ofx', 'bank.qif', 'a.docx', 'a.doc', 'a.hwp', 'a.hwpx', 'a.numbers', 'a.rtf']) {
     assert.notEqual(checkPath(p), null, p);
   }
 });
@@ -70,11 +71,37 @@ test('날짜 바로 뒤에 붙은 긴 숫자는 날짜가 지워진 뒤에도 �
 
 test('UUID·16진 해시는 저장소 검사에서 제외한다', () => {
   const uuid = 'c0000000-0000-0000-0000-000000000020';
-  const hex = '0'.repeat(40) + '1'.repeat(24);
+  const hex = 'e7e58c8d5e4dc8ec7cd9e38cbac82df818a496e2';  // 커밋 SHA 모양(숫자가 길게 이어지지 않음)
   assert.equal(hasSensitiveNumber(uuid), true);              // DB 규칙 그대로면 걸리지만
   assert.equal(hasSensitiveNumber(stripIdentifiers(uuid)), false);  // 저장소 검사는 식별자를 먼저 지운다
   assert.equal(hasSensitiveNumber(stripIdentifiers(hex)), false);
   assert.equal(checkContent('db/schema.sql', `('${uuid}', '식비')`).length, 0);
+});
+
+test('UUID·16진 모양 안에 숨긴 10자리 이상 숫자는 지우지 않고 걸어낸다', () => {
+  const d = digits(32);
+  const uuidOf = (x) => `${x.slice(0, 8)}-${x.slice(8, 12)}-${x.slice(12, 16)}-${x.slice(16, 20)}-${x.slice(20, 32)}`;
+  const cases = [
+    uuidOf(d),                                        // 숫자로만 채운 UUID 모양
+    `${digits(13)} ${uuidOf(digits(32, 5))}`,         // 13자리 숫자 + 숫자로 채운 UUID 모양
+    digits(40),                                       // 숫자만 32자 이상
+    `abcd${digits(16)}${'ef'.repeat(8)}`,             // 16진 글자 + 16자리 숫자 + 16진 글자
+    `${'ab'.repeat(11)}${digits(11)}${'cd'.repeat(6)}`, // 16진 글자 + 11자리 숫자 + 16진 글자
+  ];
+  for (const s of cases) {
+    assert.equal(checkContent('app/x.js', `const v = '${s}';`).length, 1, s);
+  }
+});
+
+test('BOM 있는 UTF-16 텍스트는 풀어서 검사하고, 그 밖의 NUL 포함 파일은 null', () => {
+  const text = `날짜,금액,메모\n2026-10-06,1000,${digits(16)}\n`;
+  const le = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(text, 'utf16le')]);
+  const be = Buffer.concat([Buffer.from([0xfe, 0xff]), Buffer.from(text, 'utf16le').swap16()]);
+  assert.equal(decodeText(le), text);
+  assert.equal(decodeText(be), text);
+  assert.equal(checkContent('data.txt', decodeText(le)).length, 1);
+  assert.equal(decodeText(Buffer.from('SQLite format 3\0abc', 'latin1')), null);
+  assert.equal(decodeText(Buffer.from('보통 텍스트', 'utf8')), '보통 텍스트');
 });
 
 // ---------------------------------------------------------------- 비밀값

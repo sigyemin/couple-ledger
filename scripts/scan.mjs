@@ -6,6 +6,8 @@
 //   node scripts/scan.mjs --staged            커밋 전: 스테이징된 파일 (.githooks/pre-commit)
 //   node scripts/scan.mjs --range BASE HEAD   PR 검사: BASE..HEAD 사이에 바뀐 파일 (HEAD 시점 내용)
 //   node scripts/scan.mjs --all               저장소의 모든 추적 파일 (작업 트리 내용)
+//   --allow-file PATH                         .scan-allow 대신 이 파일을 허용 목록으로 쓴다
+//                                             (PR 검사는 base 쪽 허용 목록을 넘긴다)
 //
 // 막는 것
 //   1) 파일 종류: 엑셀·CSV·PDF·캡처 이미지·DB 덤프·.env·인증서 등 (.gitignore와 같은 목록)
@@ -31,6 +33,9 @@ const BLOCKED_EXTENSIONS = new Set([
   'html', 'htm', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'heic',
   'sql', 'gz', 'dump', 'backup', 'bak', 'enc',
   'pem', 'key', 'p12', 'pfx', 'har', 'log',
+  // DB 파일, 웹 페이지 저장본, 금융 내보내기 형식, 문서 형식
+  'db', 'sqlite', 'sqlite3', 'mhtml', 'mht', 'ofx', 'qif',
+  'docx', 'doc', 'hwp', 'hwpx', 'numbers', 'rtf',
 ]);
 const BLOCKED_DIRS = new Set(['dumps', 'exports', 'backups', 'samples', 'private', 'tmp', 'node_modules']);
 
@@ -83,11 +88,19 @@ export function hasSensitiveNumber(t) {
 // 저장소 파일에서만 쓰는 사전 처리: 개인정보가 아닌 식별자(UUID, 16진 해시·커밋 SHA)를 먼저 지운다.
 // 예: 'c0000000-0000-0000-0000-000000000020'은 하이픈이 구분자라 숫자 덩어리로 보이지만 카테고리 id다.
 // DB 함수에는 없는 단계다(DB의 검사 칸에는 UUID·해시가 들어가지 않는다).
+// 우회 방지: 16진 글자는 숫자만으로도 채워지므로, 하이픈을 뺀 덩어리 안에 숫자가 10자리 이상
+// 이어지면 지우지 않는다. 단 0이 4개 이상 이어진 곳은 끊긴 것으로 본다(위 예처럼 0으로 채운 고정 id).
+// 무작위 UUID·SHA도 드물게 숫자가 10자리 이상 이어져 걸릴 수 있다 → 오탐이면 PR에 사유를 적는다.
 const RE_UUID = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/g;
 const RE_HEX = /(?<![0-9a-zA-Z])[0-9a-fA-F]{32,}(?![0-9a-zA-Z])/g;
 
+function hidesLongNumber(m) {
+  return m.replace(/-/g, '').replace(/0{4,}/g, ' ').split(/[^0-9]+/).some((run) => run.length >= 10);
+}
+
 export function stripIdentifiers(line) {
-  return line.replace(RE_UUID, ' ').replace(RE_HEX, ' ');
+  const strip = (m) => (hidesLongNumber(m) ? m : ' ');
+  return line.replace(RE_UUID, strip).replace(RE_HEX, strip);
 }
 
 // ---------------------------------------------------------------------
@@ -147,8 +160,19 @@ export function checkContent(path, text, allowList = []) {
   return findings;
 }
 
-function isBinary(buf) {
-  return buf.subarray(0, 8000).includes(0);
+// NUL 바이트가 있는 파일은 내용 검사를 할 수 없으므로 아래 경로 밖에서는 막는다.
+// (ALLOWED_PATHS의 아이콘 PNG, 외부 라이브러리 폴더)
+const BINARY_ALLOWED = [/^icons\/[^/]+\.png$/, /^vendor\//];
+
+/** 내용 검사용 문자열로 바꾼다. UTF-16(BOM 있음)은 풀어서 검사하고, 그 밖의 NUL 포함 파일은 null */
+export function decodeText(buf) {
+  if (buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xfe) return buf.subarray(2).toString('utf16le');
+  if (buf.length >= 2 && buf[0] === 0xfe && buf[1] === 0xff) {
+    const body = buf.subarray(2, buf.length - (buf.length % 2)); // 홀수 길이면 끝 1바이트는 버린다
+    return Buffer.from(body).swap16().toString('utf16le');
+  }
+  if (buf.includes(0)) return null;
+  return buf.toString('utf8');
 }
 
 // ---------------------------------------------------------------------
@@ -184,9 +208,17 @@ function collect(mode, args) {
 }
 
 export function run(argv) {
-  const [mode, ...rest] = argv;
+  const args = [...argv];
+  let allowFile = '.scan-allow';
+  const ai = args.indexOf('--allow-file');
+  if (ai !== -1) {
+    allowFile = args[ai + 1];
+    if (!allowFile) throw new Error('--allow-file PATH 가 필요합니다');
+    args.splice(ai, 2);
+  }
+  const [mode, ...rest] = args;
   const { files, read } = collect(mode, rest);
-  const allowList = existsSync('.scan-allow') ? loadAllowList(readFileSync('.scan-allow', 'utf8')) : [];
+  const allowList = existsSync(allowFile) ? loadAllowList(readFileSync(allowFile, 'utf8')) : [];
   const problems = [];
   for (const f of files) {
     const pathRule = checkPath(f);
@@ -194,9 +226,12 @@ export function run(argv) {
       problems.push(`${f}: ${pathRule}`);
       continue;
     }
-    const buf = read(f);
-    if (isBinary(buf)) continue; // 바이너리는 파일 종류 규칙으로만 판단
-    for (const { line, rule } of checkContent(f, buf.toString('utf8'), allowList)) {
+    const text = decodeText(read(f));
+    if (text === null) {
+      if (!BINARY_ALLOWED.some((re) => re.test(f.replace(/\\/g, '/')))) problems.push(`${f}: binary_file`);
+      continue;
+    }
+    for (const { line, rule } of checkContent(f, text, allowList)) {
       problems.push(`${f}:${line}: ${rule}`);
     }
   }

@@ -31,9 +31,30 @@ jobs:
           git checkout -q --detach pr/head
           git log -1 --format='head %H'
 
-      - name: Leak scan (changed files)
+      # 검사기·허용 목록은 base 쪽 것을 쓴다(PR이 검사기나 .scan-allow를 고쳐 스스로 통과하지 못하게).
+      # base에 검사기가 없을 때(이 검사를 처음 넣는 PR)만 PR 쪽 것을 쓴다.
+      # 이 워크플로 파일 자체는 PR 쪽 것이 실행되므로, 검사 장치 변경은 리뷰에서 막는다(아래 경고).
+      - name: Leak scan (changed files, base scanner)
         working-directory: src
-        run: node scripts/scan.mjs --range "$BASE_SHA" HEAD
+        run: |
+          if git cat-file -e "$BASE_SHA:scripts/scan.mjs" 2>/dev/null; then
+            git show "$BASE_SHA:scripts/scan.mjs" > "$RUNNER_TEMP/scan-base.mjs"
+            scanner="$RUNNER_TEMP/scan-base.mjs"
+          else
+            echo "base에 scripts/scan.mjs 없음 → PR 쪽 검사기 사용"
+            scanner=scripts/scan.mjs
+          fi
+          git show "$BASE_SHA:.scan-allow" > "$RUNNER_TEMP/scan-allow-base" 2>/dev/null || : > "$RUNNER_TEMP/scan-allow-base"
+          node "$scanner" --range "$BASE_SHA" HEAD --allow-file "$RUNNER_TEMP/scan-allow-base"
+
+      - name: Warn on scan setup changes
+        working-directory: src
+        run: |
+          changed=$(git diff --name-only "$BASE_SHA...HEAD" -- scripts/ .scan-allow .github/ .githooks/ .gitignore)
+          if [ -n "$changed" ]; then
+            echo "::warning::검사 장치가 바뀌었습니다. 리뷰에서 반드시 확인하세요:"
+            echo "$changed"
+          fi
 
       - name: Unit tests
         working-directory: src
