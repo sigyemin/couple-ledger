@@ -220,3 +220,18 @@ ul { list-style: none; margin: 0; padding: 0; }
 .review-groups .sub { font-size: 13px; color: var(--sub-on-white); }
 .review-pick { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 8px; align-items: center; }
 .review-pick .btn { margin: 0; }
+
+/* 카테고리 관리 (v0.2 3-9) */
+.cat-line { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; min-height: 44px; }
+.cat-line.off .cat-name { color: var(--sub-on-white); }
+.cat-name { display: flex; align-items: center; gap: 6px; }
+.cat-name .tag { margin-left: 0; }
+.cat-controls { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.btn.mini { min-height: 36px; padding: 0 10px; font-size: 13px; font-weight: 400; border-radius: 10px; background: var(--bg); color: var(--text); margin: 0; }
+.btn.mini.primary { background: var(--blue); color: #FFFFFF; }
+.btn.mini.danger-text { background: transparent; color: var(--orange); }
+.btn.mini:disabled { opacity: .35; }
+.mini-select { width: auto; min-height: 36px; font-size: 13px; padding: 0 8px; }
+.cat-items > li { border-top: 1px solid var(--line); padding: 2px 0 2px 12px; }
+.cat-add { display: grid; grid-template-columns: 1fr auto; gap: 6px; margin-top: 10px; }
+.cat-line .field { width: auto; flex: 1; min-width: 120px; }

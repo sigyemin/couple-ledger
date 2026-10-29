@@ -107,7 +107,13 @@ export async function renderChange({ db, id, reload, isCurrent, onError }, doc =
     if (r.error) {
       btn.disabled = false;
       const code = onError?.(r.error, { stage: STAGES.db_rpc, action: ACTIONS.revert, changeBatchId: id });
-      status.textContent = `${r.error.message}${code ? ` (오류 번호 ${code})` : ''}`;
+      const text = `${r.error.message}${code ? ` (오류 번호 ${code})` : ''}`;
+      if (r.error.code === 'revert_invalid') { // LG006: 그사이 누가 되돌렸음 → 다시 읽어 지금 상태를 보인다(PR #19 리뷰 1)
+        changeNotice = { id, text, isError: true };
+        reload();
+        return;
+      }
+      status.textContent = text;
       status.className = 'status-line error';
       return;
     }

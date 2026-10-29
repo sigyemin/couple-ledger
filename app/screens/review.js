@@ -116,7 +116,9 @@ export async function renderReview({ db, member, monthStart, reload, isCurrent, 
           if (r.error) { go.disabled = false; fail(r.error, { stage: STAGES.db_rpc, action: ACTIONS.bulk_edit }); return; }
           // 분류한 거래를 확인함으로(이미 확인함인 것은 건너뜀). 실패하면 거기서 멈추고 몇 건 됐는지 알림
           let confirmed = 0;
+          const total = g.toConfirm.length;
           for (const id of g.toConfirm) {
+            if (total > 1) say(`확인함으로 바꾸는 중 ${confirmed + 1}/${total}`);
             const u = await db.update('transactions', id, confirmBothPatch(member.memberId));
             if (u.error || !u.data?.length) {
               const code = u.error ? onError?.(u.error, { stage: STAGES.db_update, txnId: id }) : null;

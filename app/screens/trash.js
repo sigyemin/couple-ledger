@@ -100,6 +100,8 @@ export async function renderTrash({ db, member, reload, isCurrent, onError }, do
     ], doc)), doc);
 
   apply.addEventListener('click', async () => {
+    apply.disabled = true; // 누르자마자 끈다 — 대화상자가 두 번 뜨지 않게(PR #19 리뷰 2). 그만두면 다시 켠다
+    const stop = () => { apply.disabled = picked.size === 0; };
     const plan = restorePlan([...picked], rows);
     let include = [];
     if (plan.askOriginals.length) {
@@ -111,15 +113,15 @@ export async function renderTrash({ db, member, reload, isCurrent, onError }, do
       include = yes ? plan.askOriginals.map((o) => o.id) : [];
     }
     const { order, skipped } = restoreOrder(plan, rows, include);
-    if (order.length === 0) { say(restoreResultText([], skipped.length), true); return; }
+    if (order.length === 0) { say(restoreResultText([], skipped.length), true); stop(); return; }
     const byId = new Map(rows.map((r) => [r.id, r]));
     const toRestore = order.map((id) => byId.get(id));
     const months = [...new Set(toRestore.map((r) => r.period_month))];
     const rs = await db.select('v_monthly_review_status', { columns: 'period_month,review_state', filters: [{ col: 'period_month', op: 'in', value: months }] });
     const states = new Map((rs.data ?? []).map((r) => [r.period_month, r.review_state]));
-    if (!(await confirmDialog({ ...restoreConfirmText(toRestore, states), confirmLabel: '되살리기', doc }))) return;
+    const text = restoreConfirmText(toRestore, states, { statesUnknown: Boolean(rs.error) });
+    if (!(await confirmDialog({ ...text, confirmLabel: '되살리기', doc }))) { stop(); return; }
 
-    apply.disabled = true;
     const patch = restorePatch(member.memberId);
     const results = [];
     for (const id of order) {
