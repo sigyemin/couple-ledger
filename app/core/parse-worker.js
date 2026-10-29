@@ -46,6 +46,7 @@ export function runParseWorker(message, { env = globalThis, timeoutMs = TIMEOUT_
       else done(reject, new Error(e.data.code ?? 'parse_failed'));
     };
     worker.onerror = () => done(reject, new Error('worker_error'));
+    worker.onmessageerror = () => done(reject, new Error('worker_error')); // 응답 복제 실패: 기다리지 않고 바로 실패
     worker.postMessage({ ...message, id });
   });
 }
