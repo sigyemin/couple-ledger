@@ -173,3 +173,49 @@ test('글자 U+A78F·U+11A2는 구분자가 아니다: 이를 사이에 둔 숫�
     assert.equal(hasSensitiveNumber(['12345', '67890'].join(c)), false, hex(c));
   }
 });
+
+// ---------------------------------------------------------------- DB 9단계와 같은 입력 (SEP-NFKC, SEP-4, SEP-5, SEP-6)
+// DB 원문 정규식의 문자 집합. JS 구분자 집합과 정확히 같아야 한다
+const DB_RUN_CLASS = '[0-9 ./_()*+,:·•‧・ㆍᆞ∙⋅⸱⸳‣⁃●᛫⦁-]';
+
+test('구분자 집합이 DB 9단계 정규식의 문자 집합과 정확히 같다', () => {
+  const db = new Set([...DB_RUN_CLASS.slice('[0-9'.length, -1)]);
+  assert.equal(db.size, 26);
+  assert.deepEqual([...RUN_SEPARATORS].sort(), [...db].sort());
+});
+
+// 1~4단계(NFKC·서식 문자·대시류) 뒤 구분자만 남는 문자를 U+0000~U+2FFFF에서 기계적으로 모은다
+// (대시류 U+2010~U+2015·U+2212, 전각 ．／（）등, 공백류 포함). DB 시험의 대시류·전각 12자도 이 안에 든다
+const MAPPED_SEPARATORS = [];
+for (let cp = 0; cp < 0x30000; cp++) {
+  if (cp >= 0xd800 && cp <= 0xdfff) continue;
+  const c = String.fromCodePoint(cp);
+  if (RUN_SEPARATORS.includes(c) || /[0-9]/.test(c)) continue;
+  const n = normalizeForCheck(c);
+  if (n.length > 0 && [...n].every((x) => RUN_SEPARATORS.includes(x))) MAPPED_SEPARATORS.push(c);
+}
+const SEP_INPUTS = [...RUN_SEPARATORS, ...MAPPED_SEPARATORS];
+
+test('SEP-NFKC: 구분자 26자와 정규화 뒤 구분자가 되는 문자로 5+5자리를 이으면 잡힌다', () => {
+  for (const c of ['‐', '―', '−', '．', '／', '（', '　']) assert.ok(MAPPED_SEPARATORS.includes(c), hex(c));
+  assert.ok(SEP_INPUTS.length >= 38);
+  for (const c of SEP_INPUTS) assert.equal(hasSensitiveNumber(`12345${c}67890`), true, hex(c));
+});
+
+test('SEP-4: 같은 문자로 4+5자리(9자리)를 이으면 안 잡힌다', () => {
+  for (const c of SEP_INPUTS) assert.equal(hasSensitiveNumber(`1234${c}56789`), false, hex(c));
+});
+
+test('SEP-5: U+A78F·U+11A2는 구분자가 아니다', () => {
+  for (const c of ['ꞏ', 'ᆢ']) {
+    assert.ok(!SEP_INPUTS.includes(c), hex(c));
+    assert.equal(hasSensitiveNumber(`12345${c}67890`), false, hex(c));
+  }
+});
+
+test('SEP-6: ∙ 또는 ●로 끊은 카드번호 모양은 잡힌다', () => {
+  const groups = ['1234', '5678', '9012', '3456']; // 파일에 숫자 덩어리를 쓰지 않으려고 실행 중에 잇는다
+  assert.equal(hasSensitiveNumber(`결제 ${groups.join('∙')}`), true);
+  assert.equal(hasSensitiveNumber(`결제 ${groups.join('●')}`), true);
+  assert.equal(hasSensitiveNumber(`결제 1234${'●'.repeat(8)}3456`), false); // 가운데를 가린 번호는 숫자 8자리뿐
+});
