@@ -1,0 +1,26 @@
+{
+  "supabase-js-2.118.0/supabase.js": {
+    "sha256": "ee3be8de192b97cb1d73d1e95d6b82bb1f6b658c0f97c4ef757fc331996ed3d3",
+    "sri": "sha384-TcHRA3zBbn+Lexh5n+Oil4guNPOS3rjNDpGRAN46u/s/mB2IZ50ceC6TYDU2yvgK"
+  },
+  "supabase-js-2.118.0/LICENSE": {
+    "sha256": "334dd6820e2eaeab2064e7c59001b810566728a28a41a7c1dbf69bbee17d0936",
+    "sri": "sha384-1OoeMQHJk9w9LYfOTwEiTwvWY9LxP7/4eNz3eO4qdWKnTc7vouDoy6mMkhxBz4oo"
+  },
+  "xlsx-0.20.3/xlsx.mjs": {
+    "sha256": "1a0fb062ee9781b13f6687371b202aaefc53b6ce55b530c027e01f9c087b77db",
+    "sri": "sha384-Z4EKe5a5DXkOl0inZS9gbLhWC3oWGsUGEe39GJ62+77NMKyfNjPWtP1Ilgb1Jzzy"
+  },
+  "xlsx-0.20.3/LICENSE": {
+    "sha256": "4d2a38ac35cda06a555c84074a819d413339cd3691b822cae50f8f322fe01f64",
+    "sri": "sha384-30G/AGRWEIVx9Mtzfj1lO3zubLmzSAkwPz8H0EXwPYrk/kW3zEv26lZxqR5s9x7S"
+  },
+  "supabase-js-2.118.0/LICENSE-phoenix-0.4.5.md": {
+    "sha256": "41a686069f0199ff369d7e5277d5267385cc54d9199f1efc960bacbe2e799255",
+    "sri": "sha384-kc97t1sx3LNIx9NIC6MTXWAoc2IB/hbrWpVbqMcSPit3aeEmZTXRHeOsMp4yurPp"
+  },
+  "supabase-js-2.118.0/LICENSE-iceberg-js-0.8.1": {
+    "sha256": "e6e972dba808fb9d80863fe90ca222a47710cb850f6e6e2af95cdc0d022f79bd",
+    "sri": "sha384-bqiLk6cFS66un8V/4IvgYhRZZCzq1LWqtsvlPIE9Gh0AlWw/nne7DZf6OtDINU6W"
+  }
+}
