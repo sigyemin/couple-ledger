@@ -4,6 +4,18 @@ import * as XLSX from '../../vendor/xlsx-0.20.3/xlsx.mjs';
 
 export { XLSX };
 export const j = (...parts) => parts.join('');
+
+/** 1~9로만 된 무작위 숫자열 (실제 번호 체계의 앞자리·0을 쓰지 않는다) */
+export function randDigits(n) {
+  return Array.from(globalThis.crypto.getRandomValues(new Uint8Array(n)), (b) => String((b % 9) + 1)).join('');
+}
+// 실행할 때마다 새로 만드는 가짜 번호들 (기대값은 "가려졌는가"만 본다)
+export const FAKE = Object.freeze({
+  acct: `${randDigits(4)}-${randDigits(4)}-${randDigits(5)}`,
+  phone: `${randDigits(4)}-${randDigits(3)}-${randDigits(4)}`,
+  card: `${randDigits(4)}-${randDigits(4)}-${randDigits(4)}-${randDigits(4)}`,
+  longApproval: randDigits(10),
+});
 export const SOURCE = 'a0000000-0000-4000-8000-0000000000a1';
 export const CAT_ID = 'c0000000-0000-4000-8000-0000000000c1';
 
@@ -65,8 +77,7 @@ export function bookBytes(rows, bookType = 'xlsx') {
 
 // 형식 A 합성 시트: 메타 줄(가짜 계좌번호) → 헤더(공백·줄바꿈 표기 차이) → 데이터 → 합계 꼬리 줄
 export function sheetA() {
-  const acct = j('110', '-123', '-456789');
-  const phone = j('010-1234', '-5678');
+  const { acct, phone } = FAKE;
   return [
     ['조회 계좌', acct],
     ['조회 기간', '2026.10.01 ~ 2026.10.31'],
@@ -84,14 +95,14 @@ export function sheetA() {
 }
 
 export function sheetB() {
-  const card = j('1234-5678', '-9012-3456');
+  const { card } = FAKE;
   return [
     ['가상 카드 이용내역'],
     ['카드 번호', '쓴 날', '쓴 시각', '가게', '금액', '할부', '승인', '상태', '취소금액'],
     [card, '2026-10-03', '18:20', '가짜식당', '32,000', '일시불', '12345678', '정상', ''],
     [card, '2026-10-04', '09:10', '가짜전자', '600,000', '3개월', 'AB12CD34', '취소', '600,000'],
     [card, '2026-10-05', '10:00', '부분취소상점', '20,000', '', '87654321', '취소', '5,000'],
-    [card, '2026-10-06', '11:00', '승인번호이상', '1,000', '', j('12345', '67890'), '정상', ''],
+    [card, '2026-10-06', '11:00', '승인번호이상', '1,000', '', FAKE.longApproval, '정상', ''],
     ['', '', '', '', '', '', '', '', ''],
   ];
 }

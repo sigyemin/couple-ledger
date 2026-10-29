@@ -11,8 +11,11 @@ import { detectFileType, decodeUtf8Strict } from './detect.js';
 import { matchFormats } from './formats.js';
 import { normalizeRows } from './normalize.js';
 
-const READ_OPTS = Object.freeze({ cellFormula: false, cellHTML: false, cellStyles: false, cellDates: false, dense: true });
 export const MAX_ROWS = 20000;
+// 압축 폭탄 대비: 시트당 MAX_ROWS + 1줄까지만 읽는다(넘으면 too_many_rows). xlsx·xls는 첫 시트만 푼다(sheets: 0)
+const READ_OPTS = Object.freeze({
+  cellFormula: false, cellHTML: false, cellStyles: false, cellDates: false, dense: true, sheetRows: MAX_ROWS + 1,
+});
 
 function sheetRows(XLSX, ws) {
   return XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '', blankrows: false })
@@ -28,7 +31,7 @@ export function readGrid(XLSX, bytes) {
     const text = decodeUtf8Strict(bytes);
     wb = XLSX.read(text.replace(/^﻿/, ''), { ...READ_OPTS, type: 'string' });
   } else {
-    wb = XLSX.read(bytes, { ...READ_OPTS, type: 'array' });
+    wb = XLSX.read(bytes, { ...READ_OPTS, type: 'array', sheets: 0 });
   }
   const names = fileType === 'html' ? wb.SheetNames : wb.SheetNames.slice(0, 1);
   const grid = names.flatMap((n) => sheetRows(XLSX, wb.Sheets[n]));

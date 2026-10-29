@@ -9,7 +9,11 @@ import { normalizeRows, parseAmount, parseInstallment, matchRowRule, toRpcRows }
 import { hashKey, fileHash } from '../../app/import/dedup.js';
 import { readGrid, detectFormats, parseFile } from '../../app/import/pipeline.js';
 import { hasSensitiveNumber } from '../../app/core/sensitive.js';
-import { XLSX, j, SOURCE, CAT_ID, FORMAT_A, FORMAT_B, FORMAT_C, bookBytes, sheetA, sheetB } from './fixtures.mjs';
+import { XLSX, j, SOURCE, CAT_ID, FORMAT_A, FORMAT_B, FORMAT_C, FAKE, bookBytes, sheetA, sheetB } from './fixtures.mjs';
+
+// 결과 JSON(중복 키 해시는 뺌)에 가짜 번호가 원문으로 남았는지
+const plain = (r) => JSON.stringify(r, (k, v) => (k === 'dedup_key' ? undefined : v));
+const hasRaw = (r, fake) => plain(r).includes(fake) || plain(r).includes(fake.replace(/-/g, ''));
 
 const sha = (s) => createHash('sha256').update(s, 'utf8').digest('hex');
 
@@ -124,7 +128,8 @@ test('형식 A: 민감번호는 가리고, 매핑 금지·매핑 안 한 열·�
     }
   }
   const all = JSON.stringify(r);
-  assert.ok(!all.includes('456789'), '매핑 금지 열(가짜 계좌번호) 없음');
+  assert.ok(!hasRaw(r, FAKE.acct), '매핑 금지 열·메타 줄(가짜 계좌번호) 없음');
+  assert.ok(!hasRaw(r, FAKE.phone), '가린 전화번호 원문 없음');
   assert.ok(!all.includes('조회 계좌'));
   for (const row of r.rows) {
     assert.deepEqual(Object.keys(row.raw).sort().filter((k) => !['occurred_at', 'amount_out', 'amount_in', 'merchant', 'txn_type'].includes(k)), []);
@@ -164,7 +169,7 @@ test('형식 B: 승인번호 1순위 키, 취소 → 원거래 + 환불 행, 승
   assert.equal(refund.dedup_key, `k2:${sha(`${SOURCE}|AB12CD34|refund`)}`);
   assert.deepEqual([pOrig.amount, pRefund.amount], [20000, 5000]); // 부분취소: 취소금액
   assert.ok(r.rows.indexOf(orig) < r.rows.indexOf(refund)); // 원거래가 먼저
-  assert.ok(!JSON.stringify(r).includes('9012')); // 카드 번호 열은 읽지 않음
+  assert.ok(!hasRaw(r, FAKE.card)); // 카드 번호 열은 읽지 않음
 });
 
 test('toRpcRows: rowNo를 빼고 RPC 칸만', async () => {
@@ -193,7 +198,7 @@ test('파이프라인: xlsx·xls 합성 파일 → 형식 판별 → 정규화',
 });
 
 test('파이프라인: html은 모든 표의 행을 이어 본다, 부호 금액', async () => {
-  const html = `<html><body><p>${j('조회 ', '계좌 ', '110-123', '-456789')}</p>
+  const html = `<html><body><p>${`조회 계좌 ${FAKE.acct}`}</p>
     <table><tr><td>일시</td><td>적요</td><td>금액</td></tr>
     <tr><td>2026-10-06 12:30:00</td><td>가짜상점</td><td>-15,000원</td></tr></table>
     <table><tr><td>2026-10-07 09:00:00</td><td>가짜급여</td><td>2,000,000원</td></tr>
@@ -295,4 +300,34 @@ test('파이프라인: 이체 상대 규칙을 넘기면 적용된다', async ()
   const rules = [{ match_field: 'merchant', match_text: '이시험', suggested_kind: 'transfer', suggested_exclude_reason: 'personal_transfer' }];
   const r = await parseFile(XLSX, bookBytes(sheetA(), 'xlsx'), { format: FORMAT_A, sourceId: SOURCE, counterpartyRules: rules });
   assert.deepEqual(r.rows.filter((x) => x.merchant_raw === '이시험').map((x) => x.exclude_reason), ['personal_transfer', 'personal_transfer']);
+});
+
+// ---------------------------------------------------------------- 리뷰 반영 (PR #6)
+import { readGrid as readGridAgain, MAX_ROWS } from '../../app/import/pipeline.js';
+import { mapsSensitiveHeader } from '../../app/import/formats.js';
+
+test('압축 폭탄: 쓰지 않는 둘째 시트(대량 행)는 풀지 않는다', () => {
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['일시', '금액', '적요'], ['2026-10-06 12:30:00', '-1,000', '가짜']]), 'A');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(Array.from({ length: 60000 }, () => ['2026-10-06 12:30:00', '-1,000', '가짜상점'])), 'B');
+  const bytes = new Uint8Array(XLSX.write(wb, { type: 'array', bookType: 'xlsx', compression: true }));
+  const t = Date.now();
+  const { grid } = readGridAgain(XLSX, bytes);
+  const ms = Date.now() - t;
+  assert.equal(grid.length, 2);
+  assert.ok(ms < 500, `${ms}ms`); // 고치기 전에는 둘째 시트까지 풀어 수백 ms~초 단위
+});
+
+test('첫 시트가 MAX_ROWS를 넘으면 too_many_rows (넘는 줄은 읽지 않음)', () => {
+  const rows = Array.from({ length: MAX_ROWS + 5 }, (_, i) => [`2026-10-06 12:30:00`, '-1,000', `가짜${i % 7}`]);
+  const bytes = bookBytes([['일시', '금액', '적요'], ...rows], 'xlsx');
+  assert.throws(() => readGridAgain(XLSX, bytes), { message: 'too_many_rows' });
+});
+
+test('column_map이 매핑 금지 헤더와 겹치는 형식은 거부한다', () => {
+  const bad = { ...FORMAT_A, sensitive_headers: ['상대 번호', ' 내 용 '] }; // merchant ← '내용'과 겹침(공백 차이)
+  assert.equal(mapsSensitiveHeader(bad), true);
+  assert.equal(mapsSensitiveHeader(FORMAT_A), false);
+  assert.equal(findHeader(sheetA(), bad), null);
+  assert.deepEqual(matchFormats(sheetA(), [bad], 'xlsx'), []);
 });

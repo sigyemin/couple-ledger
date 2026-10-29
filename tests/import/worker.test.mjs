@@ -72,3 +72,14 @@ test('runParseWorker: 시간이 지나면 terminate하고 timeout', async () => 
   await assert.rejects(m.runParseWorker({ op: 'parse' }, { env: { Worker: FakeWorker }, timeoutMs: 20 }), { message: 'timeout' });
   assert.equal(FakeWorker.last.terminated, true);
 });
+
+test('runParseWorker: 응답 복제 실패(messageerror)면 기다리지 않고 바로 실패 + terminate', async () => {
+  const m = await load();
+  class BadClone extends FakeWorker {
+    postMessage(msg) { this.msg = msg; queueMicrotask(() => this.onmessageerror?.({})); }
+  }
+  const t = Date.now();
+  await assert.rejects(m.runParseWorker({ op: 'parse' }, { env: { Worker: BadClone }, timeoutMs: 5000 }), { message: 'worker_error' });
+  assert.ok(Date.now() - t < 1000);
+  assert.equal(FakeWorker.last.terminated, true);
+});
