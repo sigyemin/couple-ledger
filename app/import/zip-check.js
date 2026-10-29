@@ -158,8 +158,11 @@ export async function checkZipSize(bytes, { maxEntries = MAX_ZIP_ENTRIES, maxByt
     }
     const extraLen = dv.getUint16(o + 28, true);
     if (o + 30 + nameLen + extraLen > dv.byteLength || hasZip64Extra(dv, o + 30 + nameLen, extraLen)) throw fail('unsupported_file');
-    // 데이터 디스크립터(플래그 8)가 아니면 로컬 크기도 중앙과 같아야 한다
-    if (!(flags & 8) && (dv.getUint32(o + 18, true) !== it.csz || dv.getUint32(o + 22, true) !== it.usz)) throw fail('unsupported_file');
+    // 로컬 크기는 중앙과 같아야 한다. 데이터 디스크립터(플래그 8)면 0(뒤에 적음)도 받는다(CL-039 — 그 밖의 값은 애매하므로 거부)
+    const lcsz = dv.getUint32(o + 18, true);
+    const lusz = dv.getUint32(o + 22, true);
+    const sizeOk = (local, central) => local === central || ((flags & 8) !== 0 && local === 0);
+    if (!sizeOk(lcsz, it.csz) || !sizeOk(lusz, it.usz)) throw fail('unsupported_file');
     const start = o + 30 + nameLen + extraLen;
     const end = start + it.csz;
     if (end > dv.byteLength) throw fail('unsupported_file');

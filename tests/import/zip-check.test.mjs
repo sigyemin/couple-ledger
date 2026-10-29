@@ -10,7 +10,8 @@ const MB = 2 ** 20;
 
 /**
  * 작은 ZIP 작성기. 항목: { name, data(Uint8Array), method = 8, cenUsz?, locUsz?, flags = 0, dd = false, cenCsz?,
- *   cenMethod?(중앙만 다른 방식), cenName?(중앙만 다른 이름), locFlags?(로컬에만 더할 플래그), locExtra?·cenExtra?(extra 영역) }
+ *   cenMethod?(중앙만 다른 방식), cenName?(중앙만 다른 이름), locFlags?(로컬에만 더할 플래그), locExtra?·cenExtra?(extra 영역),
+ *   locCsz?·locUsz?(로컬 머리 크기를 직접 정함) }
  * comment: 끝 레코드 주석(Uint8Array)
  * dd = true면 로컬 머리의 크기를 0으로 두고 데이터 디스크립터를 붙인다
  */
@@ -25,7 +26,7 @@ function zip(items, { zip64Count = false, comment = new Uint8Array(0) } = {}) {
     const flags = (it.flags ?? 0) | (it.dd ? 8 : 0);
     const loc = Buffer.alloc(30);
     loc.writeUInt32LE(0x04034b50, 0); loc.writeUInt16LE(20, 4); loc.writeUInt16LE(flags | (it.locFlags ?? 0), 6); loc.writeUInt16LE(method, 8);
-    loc.writeUInt32LE(it.dd ? 0 : comp.length, 18); loc.writeUInt32LE(it.dd ? 0 : (it.locUsz ?? it.data.length), 22);
+    loc.writeUInt32LE(it.locCsz ?? (it.dd ? 0 : comp.length), 18); loc.writeUInt32LE(it.locUsz ?? (it.dd ? 0 : it.data.length), 22);
     loc.writeUInt16LE(name.length, 26);
     const lx = it.locExtra ?? Buffer.alloc(0);
     loc.writeUInt16LE(lx.length, 28);
@@ -124,6 +125,15 @@ test('검사와 SheetJS가 다른 자료를 보게 하는 우회는 거부(리�
   assert.equal(await checkZipSize(zip([{ name: 'a.xml', data: text('<a/>'), locExtra: ut, cenExtra: ut }])), 4);
   // 주석이 있어도 시그니처가 없으면 정상
   assert.equal(await checkZipSize(zip([{ name: 'a.xml', data: text('<a/>') }], { comment: text('plain comment') })), 4);
+});
+
+test('데이터 디스크립터 항목: 로컬 크기는 0이거나 중앙과 같아야 함(CL-039)', async () => {
+  const d = text('<a>데이터 디스크립터</a>'.repeat(20));
+  assert.equal(await checkZipSize(zip([{ name: 'a.xml', data: d, dd: true }])), d.length, '로컬 0');
+  assert.equal(await checkZipSize(zip([{ name: 'a.xml', data: d, dd: true, locUsz: d.length }])), d.length, '로컬 = 중앙');
+  await assert.rejects(checkZipSize(zip([{ name: 'a.xml', data: d, dd: true, locUsz: 7 }])), { message: 'unsupported_file' }, '로컬 usz 다름');
+  await assert.rejects(checkZipSize(zip([{ name: 'a.xml', data: d, dd: true, locCsz: 3 }])), { message: 'unsupported_file' }, '로컬 csz 다름');
+  await assert.rejects(checkZipSize(zip([{ name: 'a.xml', data: d, locUsz: 0 }])), { message: 'unsupported_file' }, '플래그 8 아니면 0도 거부');
 });
 
 test('DecompressionStream이 없으면 통과시키지 않는다', async () => {
