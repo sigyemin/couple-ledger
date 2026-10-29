@@ -190,9 +190,10 @@ test('keep-active는 이 워크플로의 enable API를 PUT으로 호출한다', 
 // 가짜 curl: 받은 인자를 기록하고, 메서드별로 정해진 값을 출력한다.
 // CURL_FAIL=GET|PUT|POST 이면 그 요청에서 curl --fail처럼 22로 끝난다.
 // 가짜 git: 받은 인자를 기록하고 바로 실패한다(커밋·push가 실제로 일어나지 않게).
+// 로그 위치(@LOG@)는 스크립트를 만들 때 절대 경로로 박는다. 환경 변수에서 읽지 않는다(본문이 바꿀 수 없게)
 const FAKE_CURL = [
   '#!/bin/sh',
-  'echo "$*" >> "$CURL_LOG"',
+  "echo \"$*\" >> '@LOG@'",
   'method=GET',
   'case " $* " in *" -X PUT "*) method=PUT ;; *" -X POST "*) method=POST ;; esac',
   'if [ "$CURL_FAIL" = "$method" ]; then echo "curl: (22) error" >&2; exit 22; fi',
@@ -202,7 +203,7 @@ const FAKE_CURL = [
   '  POST) printf 200 ;;',
   'esac',
 ].join('\n');
-const FAKE_GIT = ['#!/bin/sh', 'echo "$*" >> "$GIT_LOG"', 'echo "fake git: blocked" >&2', 'exit 97'].join('\n');
+const FAKE_GIT = ['#!/bin/sh', "echo \"$*\" >> '@LOG@'", 'echo "fake git: blocked" >&2', 'exit 97'].join('\n');
 
 const which = (t) => execFileSync('sh', ['-c', `command -v ${t}`], { encoding: 'utf8' }).trim();
 const BASH = which('bash');
@@ -212,7 +213,7 @@ const BASH = which('bash');
 const SED_SCRIPT = 's/^ *"state": *"\\([a-z_]*\\)".*/\\1/p';
 const guardedTool = (name, cond, realArgs) => [
   '#!/bin/sh',
-  'echo "$*" >> "$TOOL_LOG"',
+  "echo \"$*\" >> '@LOG@'",
   `if ${cond}; then exec ${which(name)} ${realArgs}; fi`,
   `echo "fake ${name}: 허용되지 않은 인자" >&2`,
   'exit 98',
@@ -226,8 +227,10 @@ function withFakeCurl(fn) {
     const bin = join(dir, 'bin');
     mkdirSync(bin);
     mkdirSync(join(dir, 'work'));
-    for (const [t, text] of [['curl', FAKE_CURL], ['git', FAKE_GIT], ['sed', FAKE_SED], ['head', FAKE_HEAD]]) {
-      writeFileSync(join(bin, t), text);
+    const tools = [['curl', FAKE_CURL, 'curl.log'], ['git', FAKE_GIT, 'git.log'], ['sed', FAKE_SED, 'tool.log'], ['head', FAKE_HEAD, 'tool.log']];
+    for (const [t, text, log] of tools) {
+      assert.ok(!join(dir, log).includes("'"));
+      writeFileSync(join(bin, t), text.replaceAll('@LOG@', join(dir, log)));
       chmodSync(join(bin, t), 0o755);
     }
     return fn(dir);
@@ -240,7 +243,8 @@ function withFakeCurl(fn) {
 // - 따옴표 안 내용은 지우고 본다. 단 큰따옴표 안의 $( 와 백틱, ${! 간접 참조는 금지
 // - 어디서든 금지: /proc, PPID, $$, BASHPID, 백틱
 // - 리다이렉트(<, >) 금지. 절대 경로 인자는 /dev/null만
-// - 명령 위치의 첫 단어는 허용 목록만 (if/then/else/fi 와 VAR=값 대입은 건너뜀)
+// - 명령 위치의 첫 단어는 허용 목록만 (if/then/else/fi 는 건너뜀)
+// - VAR=값 대입은 단독(code=$(…) 등)만 허용. 명령 앞 대입(VAR=x curl …)은 금지
 const SAFE_COMMANDS = new Set(['echo', 'exit', 'curl', 'sed', 'head', '[', 'fi']);
 function assertSafeBody(body) {
   const fail = (why) => { throw new Error(`실행 거부(${why})`); };
@@ -269,7 +273,11 @@ function assertSafeBody(body) {
   for (const w of t.split(/\s+/)) if (w.startsWith('/') && w !== '/dev/null') fail(`절대 경로 ${w}`);
   for (let seg of t.split(/\n|;|&&|\|\||\||\$\(|\(|\)/)) {
     const words = seg.trim().split(/\s+/).filter(Boolean);
-    while (words.length && (/^(if|then|else|elif|!)$/.test(words[0]) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0]))) words.shift();
+    while (words.length && /^(if|then|else|elif|!)$/.test(words[0])) words.shift();
+    if (words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0])) {
+      if (words.length > 1) fail(`명령 앞 변수 대입 ${words[0]}`);
+      continue;
+    }
     if (words.length && !SAFE_COMMANDS.has(words[0])) fail(`허용되지 않은 명령 ${words[0]}`);
   }
 }
@@ -289,7 +297,7 @@ function runIsolated(body, env, dir) {
   const r = spawnSync(BASH, ['--noprofile', '--norc', '-eo', 'pipefail', '-c', body], {
     encoding: 'utf8',
     cwd: join(dir, 'work'),
-    env: { PATH: join(dir, 'bin'), CURL_LOG: curlLog, GIT_LOG: gitLog, TOOL_LOG: toolLog, ...env }, // process.env는 넘기지 않는다
+    env: { PATH: join(dir, 'bin'), ...env }, // process.env는 넘기지 않는다
   });
   const read = (f) => readFileSync(f, 'utf8').trim().split('\n').filter(Boolean);
   return { code: r.status, out: r.stdout + r.stderr, calls: read(curlLog), gitCalls: read(gitLog), toolCalls: read(toolLog) };
@@ -366,7 +374,7 @@ test('격리: 작업 폴더는 임시 폴더, 환경 변수는 시험 값만 (HO
   const [cwd, ...names] = r.out.trim().split('\n');
   assert.equal(cwd, join(dir, 'work'));
   const auto = new Set(['PWD', 'OLDPWD', 'SHLVL', '_']); // bash가 스스로 만드는 것
-  assert.deepEqual(names.filter((n) => !auto.has(n)).sort(), ['CURL_LOG', 'GIT_LOG', 'PATH', 'TOOL_LOG']);
+  assert.deepEqual(names.filter((n) => !auto.has(n)).sort(), ['PATH']);
 }));
 
 test('격리: curl·git은 가짜, 그 밖의 네트워크·실행 도구는 PATH에 없다', () => withFakeCurl((dir) => {
@@ -406,6 +414,8 @@ const ESCAPES = {
   '파일 쓰기 리다이렉트': 'echo x > ../../leak',
   '함수 정의 뒤 실행': 'f() { :; }; f',
   'bash 재실행': 'bash -c true',
+  'R2 명령 앞 대입으로 로그 위치 변경': 'CURL_LOG=../../leak curl -sS x',
+  'R2 대입 여러 개 뒤 명령': 'A=1 B=2 echo x',
 };
 
 test('관문: 워크플로의 실제 본문 두 개는 통과한다', () => {
@@ -457,3 +467,12 @@ for (const [name, line] of Object.entries(ARG_ESCAPES)) {
     if (before) assert.deepEqual(repoState(), before);
   }));
 }
+
+test('가짜 도구의 로그 위치는 고정이라 환경 변수로 바꿀 수 없다 (재검토 R2)', () => withFakeCurl((dir) => {
+  const r = runIsolated('curl -sS x >/dev/null; git x || true; sed x || true', {
+    CURL_LOG: join(dir, 'leak'), GIT_LOG: join(dir, 'leak'), TOOL_LOG: join(dir, 'leak'),
+  }, dir);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual([r.calls, r.gitCalls, r.toolCalls], [['-sS x'], ['x'], ['x']]);
+  assert.ok(!existsSync(join(dir, 'leak')));
+}));
