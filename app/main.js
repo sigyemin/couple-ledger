@@ -22,6 +22,7 @@ import { defaultSettleMonth } from './screens/settle-model.js';
 import { renderMore } from './screens/more.js';
 import { renderCategories } from './screens/categories.js';
 import { renderRules, renderRuleEdit, renderReapply } from './screens/rules.js';
+import { renderCounterparties, renderCounterpartyEdit, renderCounterpartyApply } from './screens/counterparty.js';
 import { renderTrash } from './screens/trash.js';
 import { renderChanges, renderChange } from './screens/changes.js';
 import { renderReview } from './screens/review.js';
@@ -132,6 +133,12 @@ async function boot() {
         view = await renderRuleEdit({ db, member, id: route.id, go, isCurrent, onError });
       } else if (route.screen === 'reapply') {
         view = await renderReapply({ db, id: route.id, query: route.query, go, isCurrent, onError });
+      } else if (route.screen === 'cprules') {
+        view = await renderCounterparties({ db, isCurrent, onError });
+      } else if (route.screen === 'cprule' || route.screen === 'cprulenew') {
+        view = await renderCounterpartyEdit({ db, member, id: route.id, go, isCurrent, onError });
+      } else if (route.screen === 'cpapply') {
+        view = await renderCounterpartyApply({ db, id: route.id, isCurrent, onError });
       } else if (route.screen === 'categories') {
         view = await renderCategories({ db, reload, isCurrent, onError });
       } else if (route.screen === 'settle') {

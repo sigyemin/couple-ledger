@@ -15,7 +15,7 @@ export function moreMenu({ member, monthStart, needsReview }) {
     { label: '구성원', sub: `${member.displayName} · 구글 계정으로 로그인됨`, href: null },
     { label: '월 검토', sub: n > 0 ? `${m}월 · 검토할 것 ${n}건` : `${m}월 · 검토할 것 없음`, href: buildHash('review', { query: { month: ym } }) },
     { label: '리포트', sub: '준비 중', href: null },
-    { label: '규칙·카테고리', sub: '가맹점 규칙 · 카테고리 (이체 상대는 준비 중)', href: buildHash('rules') },
+    { label: '규칙·카테고리', sub: '가맹점 규칙 · 이체 상대 · 카테고리', href: buildHash('rules') },
     { label: '결제수단', sub: '준비 중', href: null },
     { label: '휴지통', sub: '지운 거래 보기 · 되살리기', href: buildHash('trash') },
     { label: '변경 기록', sub: '한 번에 바꾼 기록 · 되돌리기', href: buildHash('changes') },
