@@ -3,7 +3,8 @@
 // 파일은 브라우저 밖으로 나가지 않는다. 메인 스레드에는 정규화한 행·건수만 돌려준다.
 // 메시지
 //   { id, op: 'detect', bytes, formats }                         → { id, ok, fileType, formatIds }
-//   { id, op: 'parse',  bytes, format, sourceId, categories }    → { id, ok, fileType, rows, errors, skipped, maskedCells }
+//   { id, op: 'parse',  bytes, format, sourceId, categories, counterpartyRules }
+//                                                              → { id, ok, fileType, rows, errors, skipped, maskedCells }
 //   실패: { id, ok: false, code }  (code만. 셀 값·원본 메시지는 보내지 않는다)
 // =====================================================================
 import * as XLSX from '../../vendor/xlsx-0.20.3/xlsx.mjs';
@@ -19,7 +20,8 @@ self.onmessage = async (e) => {
       self.postMessage({ id, ok: true, ...detectFormats(XLSX, bytes, e.data.formats) });
     } else if (op === 'parse') {
       const categories = new Map(Array.isArray(e.data.categories) ? e.data.categories : []);
-      const r = await parseFile(XLSX, bytes, { format: e.data.format, sourceId: e.data.sourceId, categories });
+      const counterpartyRules = Array.isArray(e.data.counterpartyRules) ? e.data.counterpartyRules : [];
+      const r = await parseFile(XLSX, bytes, { format: e.data.format, sourceId: e.data.sourceId, categories, counterpartyRules });
       self.postMessage({ id, ok: true, ...r });
     } else {
       self.postMessage({ id, ok: false, code: 'bad_request' });

@@ -6,8 +6,11 @@
 // - 방향·금액: amount_sign
 //     split_columns    = 출금(amount_out) > 0 → out, 입금(amount_in) > 0 → in, 둘 다 없으면 행 오류
 //     expense_negative = amount < 0 → out, > 0 → in, 0·빈 값은 행 오류
-//     expense_positive = amount ≥ 0 → out, < 0 → in [추정: 카드 파일은 모두 양수, 음수는 취소로 봄]
-// - 기본 제안: out → expense, in → income(카드 형식은 refund). row_rules(위에서 첫 일치)가 바꾼다
+//     expense_positive = amount > 0 → out. 음수·0원은 행 오류(카드는 모두 양수가 정의, 취소는 상태 열 규칙으로만)
+//   direction(입금/출금 구분) 열이 매핑돼 있으면 정한 방향과 대조해 다르면 행 오류
+// - 제안 순서: row_rules(위에서 첫 일치) → 통장이면 이체 상대 규칙(counterparty_rules, priority 작은 것부터)
+//   → 기본값(out → expense, in → income)
+// - 카드 취소(also_refund): 환불 금액 칸(refund_amount_key)이 정해져 있는데 비었거나 0이면 행 오류
 // - 모든 글자 칸은 민감번호 규칙으로 가린다('[숫자 가림]', 붙여 쓴 일시 단계는 끈 보수적 검사)
 // - 승인번호가 형식(영숫자 4~12자, 숫자 10개 연속 금지)에 맞지 않으면 행 오류
 // - 검토 상태는 모두 needs_review
@@ -59,6 +62,41 @@ export function matchRowRule(rules, cell, direction) {
   return null;
 }
 
+const DIRECTION_WORDS = new Map([['출금', 'out'], ['입금', 'in']]);
+
+/** 방향 열 값 → out / in (모르는 값은 null) */
+export function parseDirection(v) {
+  return DIRECTION_WORDS.get(matchNorm(v)) ?? null;
+}
+
+/**
+ * 이체 상대 규칙에서 처음 맞는 규칙 (DB counterparty_rule_matches와 같은 조건).
+ * rules는 priority 오름차순·같으면 먼저 만든 순으로 정렬돼 있어야 한다(sortCounterpartyRules)
+ * 제안 종류가 방향과 안 맞는 규칙(출금 → 수입, 입금 → 지출, 환불 제안)은 건너뛴다(apply_counterparty_rule과 같은 판단)
+ */
+export function matchCounterpartyRule(rules, { sourceId, direction, txnType, merchantRaw, counterparty }) {
+  for (const r of rules ?? []) {
+    if (r.is_active === false) continue;
+    const text = matchNorm(r.match_text);
+    if (!text) continue;
+    if (r.source_id && r.source_id !== sourceId) continue;
+    if (r.direction && r.direction !== direction) continue;
+    if (r.txn_type && matchNorm(r.txn_type) !== matchNorm(txnType)) continue;
+    const target = matchNorm(r.match_field === 'counterparty' ? counterparty : merchantRaw);
+    if (r.match_type === 'contains' ? !target.includes(text) : target !== text) continue;
+    const k = r.suggested_kind;
+    if (k === 'refund' || (k === 'income' && direction === 'out') || (k === 'expense' && direction === 'in')) continue;
+    return r;
+  }
+  return null;
+}
+
+/** priority 오름차순, 같으면 created_at 오름차순 */
+export function sortCounterpartyRules(rules) {
+  return [...(rules ?? [])].sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100)
+    || String(a.created_at ?? '').localeCompare(String(b.created_at ?? '')));
+}
+
 function decideAmount(sign, cell) {
   if (sign === 'split_columns') {
     const out = parseAmount(cell('amount_out'));
@@ -74,19 +112,21 @@ function decideAmount(sign, cell) {
     if (a === 0) return null;
     return a < 0 ? { direction: 'out', amount: -a } : { direction: 'in', amount: a };
   }
-  return a < 0 ? { direction: 'in', amount: -a } : { direction: 'out', amount: a };
+  return a > 0 ? { direction: 'out', amount: a } : null; // expense_positive: 음수·0원은 정의 밖
 }
 
 /**
  * @param {string[][]} grid
  * @param {object} format   import_formats 행
  * @param {{ headerIndex: number, columns: Map<string, number> }} header  findHeader 결과
- * @param {{ sourceId: string, categories?: Map<string, string> }} ctx  categories: category code → id
+ * @param {{ sourceId: string, categories?: Map<string, string>, counterpartyRules?: object[] }} ctx
+ *   categories: category code → id, counterpartyRules: 활성 이체 상대 규칙 행(통장 형식에만 적용)
  * @returns {Promise<{ rows: object[], errors: {rowNo:number, reason:string}[], skipped: number, maskedCells: number }>}
  *   rows: RPC 행 + rowNo(파일 줄 번호, 1부터. RPC에 보낼 때는 뺀다)
  */
 export async function normalizeRows(grid, format, header, ctx) {
   const { sourceId, categories = new Map() } = ctx ?? {};
+  const cpRules = format.kind === 'bank_account' ? sortCounterpartyRules(ctx?.counterpartyRules) : [];
   if (typeof sourceId !== 'string' || !sourceId) throw new TypeError('결제수단 id가 필요합니다');
   const dateFmt = compileFormat(format.date_format || DEFAULT_DATE_FORMAT);
   const timeFmt = format.time_format ? compileFormat(format.time_format) : null;
@@ -131,6 +171,10 @@ export async function normalizeRows(grid, format, header, ctx) {
       errors.push({ rowNo, reason: 'amount' });
       continue;
     }
+    if (columns.has('direction') && parseDirection(cell('direction')) !== money.direction) {
+      errors.push({ rowNo, reason: 'direction' });
+      continue;
+    }
 
     let approvalNo = cell('approval_no');
     if (approvalNo !== null) {
@@ -158,9 +202,26 @@ export async function normalizeRows(grid, format, header, ctx) {
     const merchantRaw = raw.merchant ?? '';
     const merchantNorm = matchNorm(merchantRaw);
     const rule = matchRowRule(rules, cell, money.direction);
+    // 카드 취소: 환불 금액 칸이 정해져 있는데 비었거나 0·형식 오류면 행 오류(부분취소를 전액 환불로 잡지 않게)
+    let refundAmount = null;
+    if (rule?.also_refund) {
+      if (rule.refund_amount_key) {
+        const v = parseAmount(cell(rule.refund_amount_key));
+        if (v === null || Number.isNaN(v) || v === 0) {
+          errors.push({ rowNo, reason: 'refund_amount' });
+          continue;
+        }
+        refundAmount = Math.abs(v);
+      } else {
+        refundAmount = money.amount;
+      }
+    }
+    const cp = rule ? null : matchCounterpartyRule(cpRules, {
+      sourceId, direction: money.direction, txnType: cell('txn_type'), merchantRaw, counterparty: raw.counterparty ?? '',
+    });
 
-    const kind = rule?.kind ?? (money.direction === 'out' ? 'expense' : isCard ? 'refund' : 'income');
-    const excludeReason = rule?.exclude_reason ?? null;
+    const kind = rule?.kind ?? cp?.suggested_kind ?? (money.direction === 'out' ? 'expense' : 'income');
+    const excludeReason = rule ? (rule.exclude_reason ?? null) : kind === 'transfer' ? (cp?.suggested_exclude_reason ?? null) : null;
     const base = {
       occurred_on: when.date,
       occurred_time: when.time,
@@ -171,12 +232,13 @@ export async function normalizeRows(grid, format, header, ctx) {
       card_kind: rule?.card_kind ?? (format.kind === 'credit_card' ? 'credit_card' : null),
       approval_no: approvalNo,
       installment_months: parseInstallment(cell('installment')),
-      is_shared: rule?.is_shared ?? true,
+      is_shared: rule?.is_shared ?? (kind === 'expense' ? cp?.suggested_is_shared : null) ?? true,
       is_excluded: excludeReason !== null,
       exclude_reason: excludeReason,
       review_status: 'needs_review',
       raw,
-      category_id: rule?.category_code ? (categories.get(rule.category_code) ?? null) : null,
+      category_id: rule?.category_code ? (categories.get(rule.category_code) ?? null)
+        : cp?.suggested_category_id && (kind === 'expense' || kind === 'income') ? cp.suggested_category_id : null,
     };
     if (base.category_id) base.category_source = 'rule';
     if (base.card_kind && !['expense', 'refund'].includes(kind)) base.card_kind = null;
@@ -192,9 +254,7 @@ export async function normalizeRows(grid, format, header, ctx) {
     const variants = [{ ...base, direction: money.direction }];
     // 카드 취소 행: 원거래(지출)와 같은 승인번호의 환불 행 두 개 (원거래를 먼저)
     if (rule?.also_refund) {
-      const refundAmount = rule.refund_amount_key ? parseAmount(cell(rule.refund_amount_key)) : null;
-      const amt = refundAmount === null || Number.isNaN(refundAmount) ? money.amount : Math.abs(refundAmount);
-      variants.push({ ...base, kind: 'refund', amount: amt, is_excluded: false, exclude_reason: null, direction: 'in' });
+      variants.push({ ...base, kind: 'refund', amount: refundAmount, is_excluded: false, exclude_reason: null, direction: 'in' });
     }
 
     for (const v of variants) {

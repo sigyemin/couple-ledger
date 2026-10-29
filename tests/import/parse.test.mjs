@@ -204,3 +204,95 @@ test('파이프라인: html은 모든 표의 행을 이어 본다, 부호 금액
   assert.deepEqual(r.rows.map((x) => [x.kind, x.amount, x.merchant_raw]), [['expense', 15000, '가짜상점'], ['income', 2000000, '가짜급여']]);
   assert.equal(r.skipped, 1);
 });
+
+// ---------------------------------------------------------------- 설계 확인(가져오기 판단) 반영
+import { matchCounterpartyRule, sortCounterpartyRules, parseDirection } from '../../app/import/normalize.js';
+
+const gridOf = (header, ...rows) => [header, ...rows];
+
+test('카드형(모두 양수) 금액이 음수·0원이면 행 오류, 카드 형식의 입금 → 환불 규칙 없음', async () => {
+  const grid = gridOf(['쓴 날', '가게', '금액'], ['2026-10-03', '가짜식당', '-32,000'], ['2026-10-04', '가짜해외', '0'], ['2026-10-05', '가짜카페', '4,500']);
+  const f = { ...FORMAT_B, column_map: { occurred_on: '쓴 날', merchant: '가게', amount: '금액' }, time_format: null, row_rules: [] };
+  const r = await normalizeRows(grid, f, findHeader(grid, f), { sourceId: SOURCE });
+  assert.deepEqual(r.errors, [{ rowNo: 2, reason: 'amount' }, { rowNo: 3, reason: 'amount' }]);
+  assert.deepEqual(r.rows.map((x) => [x.kind, x.amount]), [['expense', 4500]]);
+});
+
+test('방향(입금/출금) 열이 매핑돼 있으면 부호와 대조해 다르면 행 오류', async () => {
+  const f = { ...FORMAT_C, column_map: { ...FORMAT_C.column_map, direction: '구분' } };
+  const grid = gridOf(['일시', '구분', '금액', '적요'],
+    ['2026-10-06 12:30:00', '출금', '-15,000', '가짜상점'],
+    ['2026-10-06 13:00:00', '입금', '-1,000', '가짜상점'],
+    ['2026-10-07 09:00:00', '입금', '2,000', '가짜급여'],
+    ['2026-10-07 10:00:00', '기타', '3,000', '가짜'],
+  );
+  const r = await normalizeRows(grid, f, findHeader(grid, f), { sourceId: SOURCE });
+  assert.deepEqual(r.errors, [{ rowNo: 3, reason: 'direction' }, { rowNo: 5, reason: 'direction' }]);
+  assert.deepEqual(r.rows.map((x) => x.kind), ['expense', 'income']);
+  assert.equal(parseDirection(' 출 금 '), 'out');
+  assert.equal(parseDirection('x'), null);
+});
+
+test('카드 취소: 환불 금액 칸이 정해져 있는데 비었거나 0이면 행 오류 (원금액으로 대신하지 않음)', async () => {
+  const grid = sheetB().map((row) => (row[6] === '87654321' ? row.map((c, i) => (i === 8 ? '' : c)) : row));
+  grid.push(['', '2026-10-07', '12:00', '전액취소상점', '9,000', '', 'ZZ990011', '취소', '0']);
+  const r = await normalizeRows(grid, FORMAT_B, findHeader(grid, FORMAT_B), { sourceId: SOURCE });
+  assert.deepEqual(r.errors, [{ rowNo: 5, reason: 'refund_amount' }, { rowNo: 6, reason: 'approval_no' }, { rowNo: 8, reason: 'refund_amount' }]);
+  // 환불 금액 칸을 쓰지 않는 취소 규칙은 원금액
+  const f = { ...FORMAT_B, row_rules: [{ field: 'status', match: 'exact', value: '취소', also_refund: true }] };
+  const r2 = await normalizeRows(sheetB(), f, findHeader(sheetB(), f), { sourceId: SOURCE });
+  assert.deepEqual(r2.rows.filter((x) => x.kind === 'refund').map((x) => x.amount), [6e5, 2e4]);
+});
+
+test('이체 상대 규칙: row_rules 다음, priority 순, 조건(결제수단·방향·구분·칸), 방향과 안 맞는 제안은 건너뜀', async () => {
+  const other = 'a0000000-0000-4000-8000-0000000000a9';
+  const cat = 'c0000000-0000-4000-8000-0000000000c2';
+  const rules = [
+    { id: 'r-late', match_field: 'merchant', match_text: '이 시험', match_type: 'exact', priority: 100, created_at: '2026-10-02',
+      suggested_kind: 'expense', suggested_category_id: cat, suggested_is_shared: false },
+    { id: 'r-first', match_field: 'merchant', match_text: '이시험', match_type: 'exact', priority: 100, created_at: '2026-10-01',
+      suggested_kind: 'transfer', suggested_exclude_reason: 'personal_transfer', direction: 'out' },
+    { id: 'r-other-src', match_field: 'merchant', match_text: '박샘플', source_id: other, priority: 1, suggested_kind: 'transfer', suggested_exclude_reason: 'internal_transfer' },
+    { id: 'r-income-out', match_field: 'merchant', match_text: '박샘플', priority: 2, suggested_kind: 'income' },
+    { id: 'r-contains', match_field: 'merchant', match_text: '샘플', match_type: 'contains', priority: 3, suggested_kind: 'expense', suggested_category_id: cat, suggested_is_shared: false },
+    { id: 'r-cardbill', match_field: 'merchant', match_text: '가짜카드대금', match_type: 'contains', priority: 0, suggested_kind: 'expense' },
+    { id: 'r-off', match_field: 'merchant', match_text: '가짜마트', priority: 0, is_active: false, suggested_kind: 'transfer', suggested_exclude_reason: 'internal_transfer' },
+    { id: 'r-type', match_field: 'merchant', match_text: '김가짜', match_type: 'contains', txn_type: '자동이체', priority: 0, suggested_kind: 'transfer', suggested_exclude_reason: 'internal_transfer' },
+  ];
+  const grid = sheetA();
+  grid.splice(9, 0, ['2026.10.20 08:00', '이체', '박샘플', '7,000', '', '641,000', '']);
+  const r = await normalizeRows(grid, FORMAT_A, findHeader(grid, FORMAT_A), { sourceId: SOURCE, counterpartyRules: rules });
+  const by = (m) => r.rows.find((x) => x.merchant_raw === m);
+  // 같은 priority → 먼저 만든 규칙
+  assert.deepEqual([by('이시험').kind, by('이시험').exclude_reason, by('이시험').is_excluded], ['transfer', 'personal_transfer', true]);
+  // 다른 결제수단 규칙·출금에 수입 제안은 건너뛰고 contains 규칙
+  assert.deepEqual([by('박샘플').kind, by('박샘플').category_id, by('박샘플').is_shared, by('박샘플').category_source], ['expense', cat, false, 'rule']);
+  // row_rules가 먼저 맞으면 이체 상대 규칙은 보지 않음
+  assert.deepEqual([by('가짜카드대금 10월').kind, by('가짜카드대금 10월').exclude_reason], ['transfer', 'card_bill']);
+  // 꺼진 규칙·구분 조건 불일치는 무시 → row_rules(체크카드) 또는 기본값
+  assert.equal(r.rows.filter((x) => x.merchant_raw === '가짜마트')[0].card_kind, 'check_card');
+  assert.equal(by('김가짜 [숫자 가림]').kind, 'expense');
+  // 모두 검토 대기
+  assert.ok(r.rows.every((x) => x.review_status === 'needs_review'));
+  // 카드 형식에는 이체 상대 규칙을 쓰지 않는다
+  const b = await normalizeRows(sheetB(), FORMAT_B, findHeader(sheetB(), FORMAT_B), {
+    sourceId: SOURCE, counterpartyRules: [{ match_field: 'merchant', match_text: '가짜식당', suggested_kind: 'transfer', suggested_exclude_reason: 'internal_transfer' }],
+  });
+  assert.equal(b.rows[0].kind, 'expense');
+});
+
+test('이체 상대 규칙: 상대 예금주명 칸·정렬', () => {
+  const rules = sortCounterpartyRules([{ id: 'b', priority: 5, created_at: '2026-01-02' }, { id: 'a', priority: 5, created_at: '2026-01-01' }, { id: 'c' }]);
+  assert.deepEqual(rules.map((x) => x.id), ['a', 'b', 'c']);
+  const hit = matchCounterpartyRule([{ match_field: 'counterparty', match_text: '최 가짜', suggested_kind: 'income' }],
+    { sourceId: SOURCE, direction: 'in', txnType: null, merchantRaw: '타행입금', counterparty: '최가짜' });
+  assert.equal(hit.suggested_kind, 'income');
+  assert.equal(matchCounterpartyRule([{ match_field: 'merchant', match_text: '  ', suggested_kind: 'income' }],
+    { sourceId: SOURCE, direction: 'in', merchantRaw: '' }), null);
+});
+
+test('파이프라인: 이체 상대 규칙을 넘기면 적용된다', async () => {
+  const rules = [{ match_field: 'merchant', match_text: '이시험', suggested_kind: 'transfer', suggested_exclude_reason: 'personal_transfer' }];
+  const r = await parseFile(XLSX, bookBytes(sheetA(), 'xlsx'), { format: FORMAT_A, sourceId: SOURCE, counterpartyRules: rules });
+  assert.deepEqual(r.rows.filter((x) => x.merchant_raw === '이시험').map((x) => x.exclude_reason), ['personal_transfer', 'personal_transfer']);
+});
