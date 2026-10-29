@@ -24,6 +24,7 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { hasSensitiveNumber, removeDateTime, MIN_SENSITIVE_DIGITS } from '../app/core/sensitive.js';
 
 // ---------------------------------------------------------------------
 // 1) 파일 종류
@@ -62,45 +63,42 @@ export function checkPath(path) {
 }
 
 // ---------------------------------------------------------------------
-// 3) 민감번호 — schema.sql has_sensitive_number(t)를 그대로 옮긴 것
-//   0) NFKC 정규화
-//   1) 날짜(2026-10-06 / 2026.10.06 / 2026/10/06), 시각(12:30, 12:30:45), 붙여 쓴 일시(12·14자리)를 지운다
-//   2) 숫자와 구분자(공백 - . / _ ( ))로 이어진 덩어리의 숫자 개수가 10 이상이면 true
-//   \d, \s 같은 약칭은 쓰지 않는다(엔진마다 뜻이 다름). DB 규칙이 바뀌면 여기도 같이 바꾼다.
-//   (공통 컴포넌트 단계에서 app/core의 검증 모듈로 옮겨 이 스크립트가 그 모듈을 쓰게 한다)
+// 3) 민감번호 — 규칙은 app/core/sensitive.js 하나(DB has_sensitive_number와 같은 규칙).
+//    앱 입력 검증과 이 검사가 같은 구현을 쓴다(구현 이중화 방지)
 // ---------------------------------------------------------------------
-const RE_DATE = /(?<![0-9])(19|20)[0-9]{2}[-./][0-9]{1,2}[-./][0-9]{1,2}(?![0-9])/g;
-const RE_TIME = /(?<![0-9])[0-9]{1,2}:[0-9]{2}(:[0-9]{2})?(?![0-9])/g;
-const RE_PACKED_DATETIME =
-  /(?<![0-9])(19|20)[0-9]{2}(0[1-9]|1[0-2])(0[1-9]|[12][0-9]|3[01])([01][0-9]|2[0-3])[0-5][0-9]([0-5][0-9])?(?![0-9])/g;
-const RE_DIGIT_RUN = /[0-9](?:[0-9 ./_()-]*[0-9])?/g;
-
-export function hasSensitiveNumber(t) {
-  if (t == null) return false;
-  let s = String(t).normalize('NFKC');
-  s = s.replace(RE_DATE, ' ').replace(RE_TIME, ' ').replace(RE_PACKED_DATETIME, ' ');
-  for (const tok of s.match(RE_DIGIT_RUN) ?? []) {
-    if (tok.replace(/[^0-9]/g, '').length >= 10) return true;
-  }
-  return false;
-}
+export { hasSensitiveNumber };
 
 // 저장소 파일에서만 쓰는 사전 처리: 개인정보가 아닌 식별자(UUID, 16진 해시·커밋 SHA)를 먼저 지운다.
 // 예: 'c0000000-0000-0000-0000-000000000020'은 하이픈이 구분자라 숫자 덩어리로 보이지만 카테고리 id다.
 // DB 함수에는 없는 단계다(DB의 검사 칸에는 UUID·해시가 들어가지 않는다).
-// 우회 방지: 16진 글자는 숫자만으로도 채워지므로, 하이픈을 뺀 덩어리 안에 숫자가 10자리 이상
-// 이어지면 지우지 않는다. 단 0이 4개 이상 이어진 곳은 끊긴 것으로 본다(위 예처럼 0으로 채운 고정 id).
+// 우회 방지: 16진 글자는 숫자만으로도 채워지므로, 식별자와 그 앞뒤로 이어진 숫자·구분자까지 합쳐
+// (날짜·시각은 뺀 뒤) 16진 글자에서 끊은 각 조각의 숫자가 10자리 이상이면 지우지 않는다.
+// 단 숫자의 절반 넘게 0인 조각은 0으로 채운 고정 id로 보고 지운다(카드·계좌번호가 그런 모양일 가능성은 낮음 — 추정).
 // 무작위 UUID·SHA도 드물게 숫자가 10자리 이상 이어져 걸릴 수 있다 → 오탐이면 PR에 사유를 적는다.
 const RE_UUID = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/g;
 const RE_HEX = /(?<![0-9a-zA-Z])[0-9a-fA-F]{32,}(?![0-9a-zA-Z])/g;
+const RE_RUN_CHAR = /[0-9 ./_()-]/;
 
-function hidesLongNumber(m) {
-  return m.replace(/-/g, '').replace(/0{4,}/g, ' ').split(/[^0-9]+/).some((run) => run.length >= 10);
+function hidesLongNumber(segment) {
+  return removeDateTime(segment).split(/[^0-9 ./_()-]+/).some((piece) => {
+    const d = piece.replace(/[^0-9]/g, '');
+    const zeros = d.replace(/[^0]/g, '').length;
+    return d.length >= MIN_SENSITIVE_DIGITS && zeros * 2 <= d.length;
+  });
+}
+
+function stripWithContext(line, re) {
+  return line.replace(re, (m, offset, str) => {
+    let s = offset;
+    let e = offset + m.length;
+    while (s > 0 && RE_RUN_CHAR.test(str[s - 1])) s--;
+    while (e < str.length && RE_RUN_CHAR.test(str[e])) e++;
+    return hidesLongNumber(str.slice(s, e)) ? m : ' ';
+  });
 }
 
 export function stripIdentifiers(line) {
-  const strip = (m) => (hidesLongNumber(m) ? m : ' ');
-  return line.replace(RE_UUID, strip).replace(RE_HEX, strip);
+  return stripWithContext(stripWithContext(line.normalize('NFKC'), RE_UUID), RE_HEX);
 }
 
 // ---------------------------------------------------------------------
@@ -164,15 +162,25 @@ export function checkContent(path, text, allowList = []) {
 // (ALLOWED_PATHS의 아이콘 PNG, 외부 라이브러리 폴더)
 const BINARY_ALLOWED = [/^icons\/[^/]+\.png$/, /^vendor\//];
 
-/** 내용 검사용 문자열로 바꾼다. UTF-16(BOM 있음)은 풀어서 검사하고, 그 밖의 NUL 포함 파일은 null */
-export function decodeText(buf) {
-  if (buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xfe) return buf.subarray(2).toString('utf16le');
-  if (buf.length >= 2 && buf[0] === 0xfe && buf[1] === 0xff) {
-    const body = buf.subarray(2, buf.length - (buf.length % 2)); // 홀수 길이면 끝 1바이트는 버린다
-    return Buffer.from(body).swap16().toString('utf16le');
+/**
+ * 내용 검사용 문자열 목록으로 바꾼다. NUL 포함 파일(BOM 없음)은 null.
+ * UTF-16 BOM(FF FE / FE FF)으로 시작하면 UTF-16으로 푼 것과 바이트 그대로(UTF-8) 읽은 것을 둘 다 검사한다
+ * (BOM처럼 보이지만 UTF-16이 아닌 파일에서 숫자가 깨져 빠지지 않게).
+ */
+export function decodeTexts(buf) {
+  const bom = buf.length >= 2 && ((buf[0] === 0xff && buf[1] === 0xfe) || (buf[0] === 0xfe && buf[1] === 0xff));
+  if (bom) {
+    const body = Buffer.from(buf.subarray(2, buf.length - (buf.length % 2))); // 홀수 길이면 끝 1바이트는 버린다
+    if (buf[0] === 0xfe) body.swap16();
+    return [body.toString('utf16le'), buf.subarray(2).toString('utf8').replace(/\0/g, '')];
   }
   if (buf.includes(0)) return null;
-  return buf.toString('utf8');
+  return [buf.toString('utf8')];
+}
+
+/** 이전 이름 호환: 첫 번째 해석만 */
+export function decodeText(buf) {
+  return decodeTexts(buf)?.[0] ?? null;
 }
 
 // ---------------------------------------------------------------------
@@ -226,13 +234,18 @@ export function run(argv) {
       problems.push(`${f}: ${pathRule}`);
       continue;
     }
-    const text = decodeText(read(f));
-    if (text === null) {
+    const texts = decodeTexts(read(f));
+    if (texts === null) {
       if (!BINARY_ALLOWED.some((re) => re.test(f.replace(/\\/g, '/')))) problems.push(`${f}: binary_file`);
       continue;
     }
-    for (const { line, rule } of checkContent(f, text, allowList)) {
-      problems.push(`${f}:${line}: ${rule}`);
+    const seen = new Set();
+    for (const text of texts) {
+      for (const { line, rule } of checkContent(f, text, allowList)) {
+        const p = `${f}:${line}: ${rule}`;
+        if (!seen.has(p)) problems.push(p);
+        seen.add(p);
+      }
     }
   }
   if (problems.length) {

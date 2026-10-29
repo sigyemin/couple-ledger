@@ -3,7 +3,7 @@
 // 10자리 이상 숫자나 키 모양 문자열을 소스에 그대로 쓰지 않는다.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { checkPath, checkContent, hasSensitiveNumber, stripIdentifiers, loadAllowList, decodeText } from '../scripts/scan.mjs';
+import { checkPath, checkContent, hasSensitiveNumber, stripIdentifiers, loadAllowList, decodeText, decodeTexts } from '../scripts/scan.mjs';
 
 const digits = (n, start = 1) => Array.from({ length: n }, (_, i) => String((start + i) % 10)).join('');
 const b64url = (obj) => Buffer.from(JSON.stringify(obj)).toString('base64url');
@@ -152,4 +152,31 @@ test('.scan-allow 경로는 숫자 검사만 건너뛴다', () => {
   assert.equal(checkContent('tests/other.json', digits(16), allow).length, 1);
   // 비밀값 검사는 허용 목록과 무관
   assert.equal(checkContent('vendor/x.mjs', `sb_${'secret'}_${'a'.repeat(30)}`, allow).length, 1);
+});
+
+// ---------------------------------------------------------------- 리뷰 후속 (CL-012 A·B)
+test('0000이 든 숫자나 식별자 경계에 걸친 숫자도 지우지 않는다 (A)', () => {
+  const uuidOf = (x) => `${x.slice(0, 8)}-${x.slice(8, 12)}-${x.slice(12, 16)}-${x.slice(16, 20)}-${x.slice(20, 32)}`;
+  const card = `1234${'0'.repeat(4)}${digits(8, 5)}`; // 16자리, 가운데 0000
+  const cases = [
+    uuidOf(`${card}${'a'.repeat(16)}`),                 // 0000 든 카드번호를 UUID 모양 안에
+    `${'ab'.repeat(4)}${card}${'cd'.repeat(8)}`,         // 0000 든 카드번호를 16진 덩어리 안에
+    `${digits(6)} ${digits(6, 3)}${'ef'.repeat(15)}`,   // 공백 앞은 밖, 뒤는 16진 덩어리 안
+    `${digits(6)}-${uuidOf(`${digits(6, 3)}${'a'.repeat(26)}`)}`, // 하이픈 앞은 밖, 뒤는 UUID 안
+  ];
+  for (const s of cases) assert.equal(checkContent('app/x.js', `v = '${s}';`).length, 1, s);
+  // 0으로 채운 고정 id·평범한 SHA·날짜 옆 SHA는 여전히 제외
+  for (const s of ['c0000000-0000-0000-0000-000000000020', 'e7e58c8d5e4dc8ec7cd9e38cbac82df818a496e2',
+                   '2026-10-29 e7e58c8d5e4dc8ec7cd9e38cbac82df818a496e2']) {
+    assert.equal(checkContent('app/x.js', `v = '${s}';`).length, 0, s);
+  }
+});
+
+test('FF FE로 시작하지만 UTF-16이 아닌 파일도 숫자를 찾는다 (B)', () => {
+  const buf = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(`memo ${digits(16)}\n`, 'utf8')]);
+  const texts = decodeTexts(buf);
+  assert.equal(texts.length, 2);
+  assert.ok(texts.some((t) => checkContent('a.txt', t).length === 1));
+  assert.equal(decodeTexts(Buffer.from('SQLite format 3\0', 'latin1')), null);
+  assert.deepEqual(decodeTexts(Buffer.from('abc')), ['abc']);
 });
