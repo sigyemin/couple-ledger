@@ -22,10 +22,11 @@ import { isPhone } from '../import/env.js';
 import { ensureBatch, uploadRows, batchFileName } from '../import/upload.js';
 import { fileHash } from '../import/dedup.js';
 import {
-  MAX_FILES, KEY_CHUNK, TEST_SOURCE_WARNING, applySourceChoice, counterpartyGroups, counterpartyRule, draftRule, matchSources, previewOf, previewLines, readErrorText, resultLines, failedRows, monthTitle,
+  MAX_FILES, KEY_CHUNK, TEST_SOURCE_WARNING, checkCancelMonths, suggestLineText, applySourceChoice, counterpartyGroups, counterpartyRule, draftRule, matchSources, previewOf, previewLines, readErrorText, resultLines, failedRows, monthTitle,
 } from './upload-model.js';
 import { errorView } from './shell.js';
 import { choiceCard } from './counterparty-card.js';
+import { suggestionCount } from './refund.js';
 import { categoryIndex, choiceValues, checkNames } from './counterparty-model.js';
 
 const FORMAT_COLUMNS = [
@@ -331,6 +332,23 @@ export async function renderUpload({ db, guard, member, monthStart, isCurrent, o
     say(okCount === ready.length ? `${okCount}개 파일을 저장했어요.` : `${okCount}/${ready.length}개 파일을 저장했어요. 멈춘 파일은 다시 올리면 이어서 넣어요.`, okCount !== ready.length);
     draw();
     done.hidden = okCount === 0;
+    // 체크카드 취소가 들어갔으면 그 달들의 연결 제안 수(실패하면 줄을 보이지 않음 — 결과에는 영향 없음)
+    const months = checkCancelMonths(files.filter((f) => f.state === 'saved'));
+    if (months.length) {
+      const counts = [];
+      for (const m of months) {
+        const c = await suggestionCount(db, m);
+        if (!c.error) counts.push({ month: m, count: c.data.count });
+      }
+      const t = suggestLineText(counts);
+      if (t) {
+        suggestLine.replaceChildren(h('a', { class: 'todo', attrs: { href: buildHash('review', { query: { month: ym(t.month) } }) } }, [
+          h('span', { class: 'todo-text' }, [h('span', { text: t.text }, [], doc)], doc),
+          h('span', { class: 'chev', text: '›', attrs: { 'aria-hidden': 'true' } }, [], doc),
+        ], doc));
+        suggestLine.hidden = false;
+      }
+    }
   }
   save.addEventListener('click', saveAll);
 
@@ -338,6 +356,8 @@ export async function renderUpload({ db, guard, member, monthStart, isCurrent, o
   input.addEventListener('change', () => { const fl = input.files; if (fl?.length) addFiles(fl); input.value = ''; });
   const picker = h('button', { class: 'btn secondary', text: '+ 파일 고르기', attrs: { type: 'button' } }, [], doc);
   picker.addEventListener('click', () => input.click());
+  const suggestLine = h('div', { class: 'card', attrs: { role: 'status' } }, [], doc);
+  suggestLine.hidden = true;
   const done = h('a', { class: 'btn secondary', text: '내역에서 보기', attrs: { href: buildHash('list', { query: { month: ym(monthStart), status: 'needs_review' } }) } }, [], doc);
   done.hidden = true;
 
@@ -354,6 +374,6 @@ export async function renderUpload({ db, guard, member, monthStart, isCurrent, o
       h('p', { class: 'muted small', text: '파일은 이 기기 밖으로 나가지 않아요. 읽은 거래만 저장해요.' }, [], doc),
       picker, input,
     ], doc),
-    missingCard, list, save, done,
+    missingCard, list, save, suggestLine, done,
   ], doc);
 }

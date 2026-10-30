@@ -112,3 +112,44 @@ test('제안·일괄 연결 직전 다시 읽기: 이미 연결됐거나 휴지�
 test('일괄 결과 문장: 건너뛴 수', () => {
   assert.equal(bulkResultText(2, 2, null, 1), '2건 연결했어요. 1건은 다른 사람이 먼저 연결했거나 휴지통으로 옮겨 건너뛰었어요.');
 });
+
+import { suggestionCount } from '../../app/screens/refund.js';
+import { buildHomeModel } from '../../app/screens/home-model.js';
+import { checkCancelMonths, suggestLineText } from '../../app/screens/upload-model.js';
+
+function countDb(refunds, cands) {
+  const calls = [];
+  return {
+    calls,
+    async select(view, o) { calls.push(['select', view, o.filters.map((f) => f.col).join(',')]); return { data: refunds, error: null }; },
+    async rpc(name, a) { calls.push(['rpc', name]); return { data: cands[a.p_refund_id] ?? [], error: null }; },
+  };
+}
+
+test('연결 제안 수(홈·올리기): 미연결 체크카드 취소가 없으면 후보 RPC 0번, 있으면 그 수만큼, 조건 3·4 적용', async () => {
+  const none = countDb([], {});
+  assert.deepEqual(await suggestionCount(none, '2026-09-01'), { data: { count: 0, refunds: 0 } });
+  assert.deepEqual(none.calls.map((c) => c[0]), ['select']);
+  assert.match(none.calls[0][2], /period_month.*kind.*card_kind.*review_status.*refund_of_txn_id.*deleted_at.*is_test_source/);
+  const db = countDb([R(1), R(2), R(3), R(4)], { [ID(1)]: [C(11)], [ID(2)]: [C(12), C(13)], [ID(3)]: [C(14)], [ID(4)]: [C(14)] });
+  assert.deepEqual(await suggestionCount(db, '2026-09-01'), { data: { count: 1, refunds: 4 } }); // 1만 제안(2 여럿, 3·4 겹침)
+  assert.equal(db.calls.filter((c) => c[0] === 'rpc').length, 4);
+});
+
+test('홈 할 일: 지난달 연결 제안이 있으면 그 달 월 검토로', () => {
+  const m = buildHomeModel('2026-10-01', { summary: null, suggest: { month: '2026-09-01', count: 2 } });
+  const t = m.todos.find((x) => x.key === 'refund-suggest');
+  assert.deepEqual([t.text, t.href], ['9월 환불 연결 제안 2건', '#/review?month=2026-09']);
+  assert.equal(buildHomeModel('2026-10-01', { summary: null, suggest: { month: '2026-09-01', count: 0 } }).todos.length, 0);
+  assert.equal(buildHomeModel('2026-10-01', { summary: null, suggest: null }).todos.length, 0);
+});
+
+test('올리기 결과: 저장한 파일의 체크카드 취소 달(최대 3), 제안 줄', () => {
+  const f = (rows) => ({ parsed: { rows } });
+  const r = (occurred_on, o = {}) => ({ kind: 'refund', card_kind: 'check_card', occurred_on, ...o });
+  assert.deepEqual(checkCancelMonths([f([r('2026-09-08'), r('2026-08-30'), r('2026-09-12'), r('2026-09-01', { card_kind: 'credit_card' }), { kind: 'expense', card_kind: 'check_card', occurred_on: '2026-07-01' }])]),
+    ['2026-08-01', '2026-09-01']);
+  assert.deepEqual(checkCancelMonths([f([r('2026-01-01'), r('2026-02-01'), r('2026-03-01'), r('2026-04-01')])]).length, 3);
+  assert.deepEqual(suggestLineText([{ month: '2026-08-01', count: 0 }, { month: '2026-09-01', count: 2 }]), { text: '체크카드 취소 연결 제안 2건이 있어요. 월 검토에서 연결해요.', month: '2026-09-01' });
+  assert.equal(suggestLineText([{ month: '2026-09-01', count: 0 }]), null);
+});
