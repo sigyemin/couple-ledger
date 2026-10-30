@@ -1,45 +1,80 @@
 // =====================================================================
-// 화면 9 정산 (화면 설계 v0.1 4-7, 시안 9): 요약 · 사람별 표 · 월 확인 · 지난 달
-// 조회: v_monthly_settlement(모든 달), v_monthly_review_status(모든 달), members
+// 화면 9 정산 → 명의별 사용 (CL-058, 사용자 결정 10-30: 연말정산용. 5:5 몫·차이·누가 더 냈는지는 표시하지 않는다)
+//   사람(결제수단 주인)마다 신용카드 · 체크카드 · 그 밖 사용액, 그 달 + 올해 1월~그 달 누계 · 월 확인 · 지난 달
+// 조회: transactions(올해 1월~그 달, 휴지통·집계 제외 빼고 지출·환불만, 쪽 단위), payment_sources, members, v_monthly_review_status(모든 달)
 // 쓰기: confirm_month(p_month) / unconfirm_month(p_month) — 기록 값은 서버가 정한다(v0.16 Q4)
-// - 누적 차이는 표시하지 않는다(결정사항 10-29 "정산은 월별만 표시")
 // - 확인 후 변경됨이면 "바뀐 거래 보기" → 내역(changed=1)
 // 의존: ui/dom.js, router.js, core/confirm.js, core/errors.js, screens/settle-model.js, screens/shell.js
 // =====================================================================
 import { h } from '../ui/dom.js';
 import { addMonths, buildHash } from '../router.js';
-import { month } from '../core/format.js';
+import { month, won } from '../core/format.js';
 import { confirmDialog } from '../core/confirm.js';
 import { STAGES, ACTIONS } from '../core/errors.js';
-import { settleSummary, reviewView, confirmMonthText, unconfirmMonthText, pastMonths } from './settle-model.js';
+import { ownerSpend, unlinkedNote, reviewView, confirmMonthText, unconfirmMonthText, pastMonths } from './settle-model.js';
 import { errorView } from './shell.js';
 
-export async function loadSettle(db) {
-  const [settle, status, members] = await Promise.all([
-    db.select('v_monthly_settlement', { columns: 'period_month,member_id,paid_amount,share_amount,balance_amount' }),
+const PAGE_SIZE = 1000;
+const MAX_ROWS = 20000;
+
+/**
+ * 올해 1월 ~ 그 달 지출·환불 거래를 쪽 단위로 끝까지(list.js readMonthRows와 같은 방식 — 빈 쪽까지, id로 중복 거름)
+ * @returns {{ data: { rows, capped } } | { error }}
+ */
+export async function readSpendRows(db, monthStart, { pageSize = PAGE_SIZE, max = MAX_ROWS } = {}) {
+  const rows = [];
+  const seen = new Set();
+  let offset = 0;
+  while (rows.length <= max) {
+    const r = await db.select('transactions', {
+      columns: 'id,source_id,kind,amount,card_kind,period_month,refund_of_txn_id',
+      filters: [
+        { col: 'period_month', op: 'gte', value: `${monthStart.slice(0, 4)}-01-01` }, { col: 'period_month', op: 'lte', value: monthStart },
+        { col: 'deleted_at', op: 'is', value: null }, { col: 'is_excluded', op: 'eq', value: false }, { col: 'kind', op: 'in', value: ['expense', 'refund'] },
+      ],
+      order: [{ col: 'id', ascending: true }],
+      range: { from: offset, to: offset + Math.min(pageSize, max + 1 - rows.length) - 1 },
+    });
+    if (r.error) return { error: r.error };
+    const page = r.data ?? [];
+    if (page.length === 0) break;
+    offset += page.length;
+    for (const row of page) {
+      if (seen.has(row.id)) continue;
+      seen.add(row.id);
+      rows.push(row);
+    }
+  }
+  return { data: { rows: rows.slice(0, max), capped: rows.length > max } };
+}
+
+export async function loadSettle(db, monthStart) {
+  const [spend, sources, status, members] = await Promise.all([
+    readSpendRows(db, monthStart),
+    db.select('payment_sources', { columns: 'id,owner_member_id,kind,is_test' }),
     db.select('v_monthly_review_status', {
       columns: 'period_month,review_state,reviewed_by,reviewed_at,needs_review_count,changed_txn_count',
       order: [{ col: 'period_month', ascending: false }],
     }),
     db.select('members', { columns: 'id,member_slot,display_name' }),
   ]);
-  const error = [settle, status, members].find((r) => r.error)?.error;
+  const error = [spend, sources, status, members].find((r) => r.error)?.error;
   if (error) return { error };
-  return { data: { settle: settle.data ?? [], status: status.data ?? [], members: members.data ?? [] } };
+  return { data: { spend: spend.data, sources: sources.data ?? [], status: status.data ?? [], members: members.data ?? [] } };
 }
 
 /**
  * @param {{ db, monthStart, reload(), isCurrent(), onError(err, extra) → string }} ctx
  */
 export async function renderSettle({ db, monthStart, reload, isCurrent, onError }, doc = globalThis.document) {
-  const res = await loadSettle(db);
+  const res = await loadSettle(db, monthStart);
   if (!isCurrent()) return null;
   const ym = (m) => m.slice(0, 7);
   const nav = (n, label, text) => h('a', { class: 'icon-btn', text, attrs: { href: buildHash('settle', { query: { month: ym(addMonths(monthStart, n)) } }), 'aria-label': label } }, [], doc);
   const head = h('header', { class: 'screen-head' }, [
     h('nav', { class: 'month-nav', attrs: { 'aria-label': '달 선택' } }, [
       nav(-1, '이전 달', '‹'),
-      h('h1', { class: 'title', text: `${month(monthStart).replace(/^[0-9]+년 /, '')} 정산` }, [], doc),
+      h('h1', { class: 'title', text: `${month(monthStart).replace(/^[0-9]+년 /, '')} 명의별 사용` }, [], doc),
       nav(1, '다음 달', '›'),
     ], doc),
   ], doc);
@@ -47,8 +82,8 @@ export async function renderSettle({ db, monthStart, reload, isCurrent, onError 
     onError?.(res.error);
     return h('main', { class: 'screen' }, [head, errorView(res.error.message, res.error.detail?.sqlState ?? res.error.code, doc)], doc);
   }
-  const { settle, status, members } = res.data;
-  const sum = settleSummary(settle.filter((r) => r.period_month === monthStart), members);
+  const { spend, sources, status, members } = res.data;
+  const sum = ownerSpend(spend.rows, sources, members, monthStart);
   const st = status.find((r) => r.period_month === monthStart) ?? null;
   const rv = reviewView(monthStart, st, members);
 
@@ -59,22 +94,23 @@ export async function renderSettle({ db, monthStart, reload, isCurrent, onError 
     statusLine.className = 'status-line error';
   };
 
-  const hero = h('section', { class: 'card hero' }, [
-    h('p', { class: 'label', text: `공동지출 ${sum.total} · 5:5` }, [], doc),
-    h('p', { class: 'amount-l', text: sum.empty ? '이 달은 공동지출이 없어요' : sum.headline }, [], doc),
-    h('p', { class: 'muted', text: '주고받지 않아요. 기록만 해요.' }, [], doc),
-  ], doc);
-
-  const table = h('section', { class: 'card' }, [
-    h('h2', { class: 'card-title', text: '사람별' }, [], doc),
+  const mLabel = month(monthStart).replace(/^[0-9]+년 /, '');
+  const people = sum.people.map((p) => h('section', { class: 'card' }, [
+    h('h2', { class: 'card-title', text: `${p.name} 명의` }, [], doc),
     h('table', { class: 'settle-table' }, [
-      h('thead', {}, [h('tr', {}, ['', '낸 공동지출', '몫', '차이'].map((t) => h('th', { text: t, attrs: { scope: 'col' } }, [], doc)), doc)], doc),
-      h('tbody', {}, sum.table.map((r) => h('tr', {}, [
-        h('th', { text: r.name, attrs: { scope: 'row' } }, [], doc),
-        h('td', { text: r.paid }, [], doc), h('td', { text: r.share }, [], doc),
-        h('td', { class: r.balanceValue > 0 ? 'plus' : (r.balanceValue < 0 ? 'minus' : ''), text: r.balance }, [], doc),
+      h('thead', {}, [h('tr', {}, ['', mLabel, sum.ytdLabel].map((t) => h('th', { text: t, attrs: { scope: 'col' } }, [], doc)), doc)], doc),
+      h('tbody', {}, p.lines.map((l) => h('tr', l.key === 'total' ? { class: 'total' } : {}, [
+        h('th', { text: l.label, attrs: { scope: 'row' } }, [], doc),
+        h('td', { text: won(l.month) }, [], doc), h('td', { text: won(l.ytd) }, [], doc),
       ], doc)), doc),
     ], doc),
+  ], doc));
+  const note = unlinkedNote(sum.unlinked);
+  const info = h('section', { class: 'card' }, [
+    h('p', { class: 'muted', text: '명의 = 결제수단 주인. 공동·개인 구분 없이, 지출에서 원거래에 연결된 환불을 뺀 금액이에요. 집계 제외·휴지통·시험 결제수단은 빼요. 그 밖 = 통장 출금·현금.' }, [], doc),
+    note ? h('p', { class: 'notice small', text: note }, [], doc) : null,
+    spend.capped ? h('p', { class: 'notice small', text: '거래가 너무 많아 일부만 더했어요.' }, [], doc) : null,
+    h('p', { class: 'muted small', text: '연말정산 공제 현황은 준비 중이에요.' }, [], doc),
   ], doc);
 
   const btn = (text, cls, onClick) => h('button', { class: `btn ${cls}`, text, attrs: { type: 'button' }, on: { click: onClick } }, [], doc);
@@ -97,20 +133,17 @@ export async function renderSettle({ db, monthStart, reload, isCurrent, onError 
     rv.canUnconfirm ? btn('확인 취소', 'secondary', () => run('unconfirm_month', unconfirmMonthText(monthStart))) : null,
   ], doc);
 
-  const past = pastMonths(settle, status, members, { exclude: monthStart });
+  const past = pastMonths(status, { exclude: monthStart });
   const pastCard = h('section', { class: 'card' }, [
     h('h2', { class: 'card-title', text: '지난 달' }, [], doc),
     past.length === 0 ? h('p', { class: 'muted', text: '다른 달 기록이 없어요' }, [], doc)
       : h('ul', { class: 'todo-list' }, past.map((p) => h('li', {}, [
         h('a', { class: 'todo', attrs: { href: buildHash('settle', { query: { month: ym(p.month) } }) } }, [
-          h('span', { class: 'todo-text' }, [
-            h('span', { text: `${p.label} · ${p.state}` }, [], doc),
-            h('span', { class: 'sub', text: p.diff }, [], doc),
-          ], doc),
+          h('span', { class: 'todo-text' }, [h('span', { text: `${p.label} · ${p.state}` }, [], doc)], doc),
           h('span', { class: 'chev', text: '›', attrs: { 'aria-hidden': 'true' } }, [], doc),
         ], doc),
       ], doc)), doc),
   ], doc);
 
-  return h('main', { class: 'screen' }, [head, statusLine, hero, table, review, pastCard], doc);
+  return h('main', { class: 'screen' }, [head, statusLine, ...people, info, review, pastCard], doc);
 }

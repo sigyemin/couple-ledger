@@ -1,6 +1,6 @@
 // =====================================================================
-// 화면 1 홈 (화면 설계 v0.1 4-1, 시안 1): 달 선택, 이번 달 지출, 정산 차이, 할 일, 많이 쓴 곳
-// 조회: v_monthly_summary(그 달·지난달), v_monthly_settlement, members,
+// 화면 1 홈 (화면 설계 v0.1 4-1, 시안 1): 달 선택, 이번 달 지출, 할 일, 많이 쓴 곳
+// 조회: v_monthly_summary(그 달·지난달),
 //       업로드 현황(uploads.js — 지난 달들의 missing_uploads, CL-056: 함께 시작하되 기다리지 않음. 오면 할 일만 다시 그림, 실패해도 홈은 그대로),
 //       v_monthly_review_status(확인 후 변경됨), v_monthly_category(그 달), categories(그룹 이름)
 //       지난달 체크카드 취소 연결 제안 수(refund.js suggestionCount — 미연결 체크카드 취소가 있을 때만 후보 RPC, 실패해도 홈은 그대로)
@@ -17,11 +17,9 @@ import { loadUploadStatus } from './uploads.js';
 export async function loadHome(db, monthStart) {
   const prev = addMonths(monthStart, -1);
   const eq = (col, value) => ({ col, op: 'eq', value });
-  const [summary, prevSummary, settlement, members, changed, categories, names, suggest] = await Promise.all([
+  const [summary, prevSummary, changed, categories, names, suggest] = await Promise.all([
     db.select('v_monthly_summary', { filters: [eq('period_month', monthStart)] }),
     db.select('v_monthly_summary', { filters: [eq('period_month', prev)] }),
-    db.select('v_monthly_settlement', { filters: [eq('period_month', monthStart)] }),
-    db.select('members', { columns: 'id,member_slot,display_name' }),
     db.select('v_monthly_review_status', {
       columns: 'period_month,changed_txn_count',
       filters: [eq('review_state', 'changed_after_review')],
@@ -31,14 +29,12 @@ export async function loadHome(db, monthStart) {
     db.select('categories', { columns: 'id,name', filters: [{ col: 'parent_id', op: 'is', value: null }] }),
     suggestionCount(db, prev),
   ]);
-  const error = [summary, prevSummary, settlement, members, changed, categories, names].find((r) => r.error)?.error;
+  const error = [summary, prevSummary, changed, categories, names].find((r) => r.error)?.error;
   if (error) return { error };
   return {
     data: {
       summary: summary.data?.[0] ?? null,
       prevSummary: prevSummary.data?.[0] ?? null,
-      settlement: settlement.data ?? [],
-      members: members.data ?? [],
       changedMonths: changed.data ?? [],
       categories: categories.data ?? [],
       suggest: suggest.error ? null : { month: prev, count: suggest.data.count },
@@ -81,10 +77,6 @@ export async function renderHome({ db, member, monthStart, isCurrent, onError },
     h('p', { class: 'label', text: '이번 달 지출' }, [], doc),
     h('p', { class: 'amount-xl', text: m.expense }, [], doc),
     m.compare ? h('p', { class: 'muted', text: m.compare }, [], doc) : null,
-    h('a', { class: 'row-link soft', attrs: { href: buildHash('settle', { query: { month: ym(monthStart) } }) } }, [
-      h('span', { text: '정산 차이' }, [], doc),
-      h('strong', { text: `${m.settlement} ›` }, [], doc),
-    ], doc),
   ], doc);
 
   const todosKids = (hm) => [

@@ -213,8 +213,8 @@ ul { list-style: none; margin: 0; padding: 0; }
 .settle-table th, .settle-table td { padding: 10px 4px; text-align: right; border-bottom: 1px solid var(--line); }
 .settle-table th[scope=row], .settle-table thead th:first-child { text-align: left; }
 .settle-table thead th { font-weight: 400; font-size: 12px; color: var(--sub-on-white); }
-.settle-table .plus { color: var(--blue); font-weight: 700; }
-.settle-table .minus { color: var(--orange); font-weight: 700; }
+.settle-table tbody th { font-weight: 400; }
+.settle-table tr.total th, .settle-table tr.total td { font-weight: 700; border-bottom: 0; }
 .card.review.changed_after_review { border: 1px solid var(--orange); }
 
 /* 업로드 현황 (CL-056): 칸은 색 + 글자(올림/안 올림). 좁은 화면은 표만 옆으로 밀림 */
