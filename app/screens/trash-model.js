@@ -123,8 +123,10 @@ export function restoreResultText(results, skippedCount) {
   const parts = [ok > 0 ? `${ok}건 되살렸어요.` : '되살리지 못했어요.'];
   if (failed.length) {
     const refundBlocked = failed.filter((r) => r.code === 'refund_invalid').length;
+    const locked = failed.filter((r) => r.code === 'immutable').length; // v0.18 LG005: 되살리기 말고 다른 값까지 바꾸려 함
     if (refundBlocked) parts.push(`${refundBlocked}건은 원거래가 휴지통에 있어 되살리지 못했어요.`);
-    if (failed.length - refundBlocked) parts.push(`${failed.length - refundBlocked}건은 오류로 되살리지 못했어요.`);
+    if (locked) parts.push(`${locked}건은 휴지통에서 바꿀 수 없는 값이 있어 되살리지 못했어요. 새로고침해 주세요.`);
+    if (failed.length - refundBlocked - locked) parts.push(`${failed.length - refundBlocked - locked}건은 오류로 되살리지 못했어요.`);
   }
   if (skippedCount) parts.push(`환불 ${skippedCount}건은 원거래가 휴지통에 있어 건너뛰었어요.`);
   return parts.join(' ');

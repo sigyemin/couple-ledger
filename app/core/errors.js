@@ -33,17 +33,20 @@ export class AppError extends Error {
   /**
    * @param {string} code    분류 (sensitive, forbidden, network, unknown …)
    * @param {string} message 사용자에게 보여 줄 문장
-   * @param {{ sqlState?: string }} [detail] 개발용. SQLSTATE만
+   * @param {{ sqlState?: string, hint?: string }} [detail] 개발용. SQLSTATE와 DB가 정한 짧은 hint 식별자(예: already_linked)만
    */
   constructor(code, message, detail = {}) {
     super(message);
     this.name = 'AppError';
     this.code = code;
-    this.detail = detail.sqlState ? { sqlState: detail.sqlState } : {};
+    this.detail = {};
+    if (detail.sqlState) this.detail.sqlState = detail.sqlState;
+    if (detail.hint) this.detail.hint = detail.hint;
   }
 }
 
 const RE_SQLSTATE = /^[0-9A-Z]{5}$/;
+const RE_HINT = /^[a-z][a-z_]{0,39}$/;
 
 /**
  * supabase-js의 error 객체(또는 throw된 예외)를 AppError로 바꾼다.
@@ -63,7 +66,9 @@ export function toAppError(err) {
   }
   const sqlState = RE_SQLSTATE.test(raw) ? raw : undefined;
   const [code, message] = (sqlState && BY_SQLSTATE[sqlState]) || UNKNOWN;
-  return new AppError(code, message, { sqlState });
+  // hint는 DB가 정한 식별자 모양일 때만 남긴다(글자·값이 섞인 hint는 버림 — v0.18 link_refund 'already_linked')
+  const hint = typeof err?.hint === 'string' && RE_HINT.test(err.hint) ? err.hint : undefined;
+  return new AppError(code, message, { sqlState, hint });
 }
 
 /** 네트워크 오류인지 (읽기 재시도 판단용) */

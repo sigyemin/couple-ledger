@@ -171,7 +171,7 @@ export async function renderSourceEdit({ db, id = null, go, isCurrent, onError }
     if (!original) {
       const r = await db.insert('payment_sources', v.value);
       lock(false);
-      if (r.error) { failed(r.error); return; }
+      if (r.error) { failed(r.error, lockErrorText(r.error)); return; }
       sourcesNotice = `'${v.value.label}'을(를) 더했어요.`;
       go(back);
       return;

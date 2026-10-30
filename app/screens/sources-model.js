@@ -124,7 +124,9 @@ export function deleteSourceErrorText(err) {
   return err?.detail?.sqlState === '23503' ? '쓰는 거래·규칙이 있어 지울 수 없어요. 꺼 주세요.' : null;
 }
 
-/** 잠금 안내(DB LG005) */
+/** 잠금 안내(DB LG005): 거래가 있는 결제수단의 결제자·종류, 또는 시험용 여부(v0.18 — 관리자만) */
 export function lockErrorText(err) {
-  return err?.detail?.sqlState === 'LG005' ? '거래가 있어서 결제자·종류는 못 바꿔요. 새 결제수단을 만들고 이것은 꺼 주세요.' : null;
+  return err?.detail?.sqlState === 'LG005'
+    ? '바꿀 수 없는 값이에요. 거래가 있으면 결제자·종류는 못 바꾸고(새 결제수단을 만들고 이것은 꺼 주세요), 시험용 여부는 관리자만 정해요.'
+    : null;
 }

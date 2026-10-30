@@ -11,7 +11,7 @@ import { buildHash } from '../router.js';
 import { confirmDialog } from '../core/confirm.js';
 import { STAGES } from '../core/errors.js';
 import {
-  categoryTree, checkName, moveUpdates, moveTargets, nextSortOrder, offTargets, offConfirmText, moveGroupText, deleteErrorText, nameErrorText,
+  categoryTree, checkName, moveUpdates, moveTargets, nextSortOrder, offTargets, offConfirmText, moveGroupText, deleteErrorText, nameErrorText, categoryErrorText,
 } from './categories-model.js';
 import { errorView, rulesTabs } from './shell.js';
 
@@ -45,7 +45,7 @@ export async function renderCategories({ db, reload, isCurrent, onError }, doc =
   };
   if (catNotice) { say(catNotice.text, catNotice.isError); catNotice = null; }
   const done = (text) => { catNotice = { text, isError: false }; reload(); };
-  const failed = (err, special) => {
+  const failed = (err, special = categoryErrorText(err)) => {
     const code = onError?.(err, { stage: STAGES.db_update });
     say(special ?? `${err.message}${code ? ` (오류 번호 ${code})` : ''}`, true);
   };

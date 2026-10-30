@@ -1,7 +1,8 @@
 // =====================================================================
 // 거래 직접 추가 — 화면 없이 계산하는 부분 (화면 설계 v0.1 4-4 "수동 추가는 같은 양식, 결제수단은 현금·카드·통장 중 선택(결제자 = 결제수단 주인)")
-// - transactions 한 행 insert(origin manual, dedup_key 'manual|<uuid>' — 스키마 ck_txn_dedup_key_format)
-// - 카테고리를 고르면 insert 뒤 set_transaction_lines로 한 줄(두 요청. 둘째가 실패하면 미분류 거래로 남고 상세에서 고친다)
+// - add_manual_transaction(p_row, p_lines) 한 번(v0.18 A1): 거래 + 카테고리 라인이 한꺼번에 들어가거나 하나도 안 들어간다
+//   p_row 키는 정해진 것만(entry_key·source_id·occurred_on·occurred_time·merchant_raw·amount·kind·is_shared·memo — 다른 키면 LG007).
+//   dedup_key는 DB가 'manual|<entry_key>'로 만들고, merchant_norm도 DB가 match_norm으로 만든다(앱 matchNorm과 같은 정의)
 // - 사람이 직접 넣은 거래라 검토 상태는 확인함(confirmed)으로 넣는다 [판단]
 // 의존: core/validate.js, import/formats.js(matchNorm — 업로드와 같은 가맹점 정리값)
 // =====================================================================
@@ -13,10 +14,10 @@ const SOURCE_KIND = { credit_card: '신용카드', check_card: '체크카드', b
 const RE_TIME = /^([01][0-9]|2[0-3]):[0-5][0-9]$/;
 const RE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-/** 고를 수 있는 결제수단(켜진 것). 이름 = 라벨 · 종류 · 주인(결제자) */
+/** 고를 수 있는 결제수단(켜진 것, 시험용 제외 — v0.18 add_manual_transaction이 시험용을 거부). 이름 = 라벨 · 종류 · 주인(결제자) */
 export function sourceOptions(sources, members) {
   const nameOf = new Map(members.map((m) => [m.id, m.display_name]));
-  return sources.filter((s) => s.is_active)
+  return sources.filter((s) => s.is_active && !s.is_test)
     .map((s) => ({
       id: s.id,
       text: `${s.label} · ${SOURCE_KIND[s.kind] ?? ''} · ${nameOf.get(s.owner_member_id) ?? '?'}${s.is_test ? ' · 시험' : ''}`,
@@ -70,6 +71,24 @@ export function buildManualRow(form, ctx) {
       created_by: ctx.memberId,
     },
   };
+}
+
+/** buildManualRow 결과 → add_manual_transaction 인자(v0.18 A1). entryKey = 화면이 만든 uuid(다시 눌러도 같은 거래) */
+export function manualRpcArgs(b, entryKey) {
+  const r = b.row;
+  return {
+    p_row: {
+      entry_key: entryKey, source_id: r.source_id, occurred_on: r.occurred_on, occurred_time: r.occurred_time,
+      merchant_raw: r.merchant_raw, amount: r.amount, kind: r.kind, is_shared: r.is_shared, memo: r.memo,
+    },
+    p_lines: b.categoryId ? [{ category_id: b.categoryId, amount: b.amount, item_note: null }] : [],
+  };
+}
+
+/** RPC 결과(transactions 한 행 — 객체 또는 한 줄 배열) → id */
+export function rpcRowId(data) {
+  const row = Array.isArray(data) ? data[0] : data;
+  return typeof row?.id === 'string' ? row.id : null;
 }
 
 /** 'YYYY-MM-DD' → 그 달 'YYYY-MM-01' */

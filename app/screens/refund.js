@@ -57,8 +57,9 @@ export async function readReviewStates(db) {
 
 /**
  * 연결 한 건: link_refund → 확인함. 두 번째가 실패하면 연결은 된 채 검토 대기로 남는다(해 없음 — 설계 4장)
- * onlyIfUnlinked(제안 연결·일괄 연결): 직전에 그 환불을 다시 읽어 아직 연결 없고 휴지통도 아닐 때만 연결한다.
- *   link_refund는 이미 연결된 환불도 덮어쓰므로(스키마) 그사이 다른 사람이 연결했으면 건너뛴다(PR #31 리뷰)
+ * onlyIfUnlinked(제안 연결·일괄 연결): 직전에 그 환불을 다시 읽어 아직 연결 없고 휴지통도 아닐 때만 연결하고,
+ *   link_refund(p_only_unlinked: true — v0.18 A3)로 DB도 '아직 연결 안 된 환불만' 연결한다. 그사이 다른 사람이 연결했으면
+ *   DB가 LG003 + hint already_linked → 건너뜀(skipped). '원거래 바꾸기'는 덮어쓰기라 인자 없이 부른다
  * @returns {{ ok: boolean, linked: boolean, skipped?: boolean, error?: AppError }}
  */
 export async function linkOne(db, memberId, refundId, originalId, { onlyIfUnlinked = false } = {}) {
@@ -68,7 +69,10 @@ export async function linkOne(db, memberId, refundId, originalId, { onlyIfUnlink
     const r = now.data?.[0];
     if (!r || r.refund_of_txn_id || r.deleted_at) return { ok: false, linked: false, skipped: true };
   }
-  const l = await db.rpc('link_refund', { p_refund_id: refundId, p_original_id: originalId });
+  const args = { p_refund_id: refundId, p_original_id: originalId };
+  if (onlyIfUnlinked) args.p_only_unlinked = true;
+  const l = await db.rpc('link_refund', args);
+  if (l.error?.detail?.hint === 'already_linked') return { ok: false, linked: false, skipped: true };
   if (l.error) return { ok: false, linked: false, error: l.error };
   const u = await db.update('transactions', refundId, confirmPatch(memberId));
   if (u.error || !u.data?.length) return { ok: false, linked: true, error: u.error ?? null };

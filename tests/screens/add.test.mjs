@@ -15,8 +15,8 @@ const sources = [
 const ctx = { sourceIds: new Set([U(1), U(2)]), categoryIds: new Set([U(9)]), memberId: 'm1', newId: () => U(77) };
 const form = { sourceId: U(2), kind: 'expense', date: '2026-10-29', time: '', merchant: ' 동네 시장 ', amountText: '12,300', categoryId: U(9), isShared: true, memo: '' };
 
-test('결제수단: 켜진 것만, 결제자(주인) 이름 붙임, 시험 결제수단은 뒤에 표시', () => {
-  assert.deepEqual(sourceOptions(sources, members).map((o) => o.text), ['시험카드 · 신용카드 · 가람', '현금 · 현금 · 나리', 'QA 카드 · 신용카드 · 가람 · 시험']);
+test('결제수단: 켜진 것만, 결제자(주인) 이름 붙임, 시험용은 빼기(v0.18 직접 추가 RPC가 거부)', () => {
+  assert.deepEqual(sourceOptions(sources, members).map((o) => o.text), ['시험카드 · 신용카드 · 가람', '현금 · 현금 · 나리']);
 });
 
 test('buildManualRow: 허용 칸만으로 한 행, 수동·확인함·manual|uuid 중복 키', () => {

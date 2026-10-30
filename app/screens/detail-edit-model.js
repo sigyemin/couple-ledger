@@ -136,6 +136,7 @@ export function valuesErrorText(err, row) {
       : '연결된 환불 합계보다 작은 금액으로는 바꿀 수 없어요. 환불을 먼저 정리해 주세요.';
   }
   if (code === 'LG002') return '가맹점에 카드·계좌·전화번호로 보이는 숫자가 있어 저장하지 않았어요.';
+  if (code === 'LG005') return '휴지통에 있는 거래라 바꿀 수 없어요. 새로고침해 확인해 주세요.'; // v0.18
   return null;
 }
 
