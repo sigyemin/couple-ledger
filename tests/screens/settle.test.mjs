@@ -1,7 +1,7 @@
 // 정산 화면 모델 (DB·브라우저 없이, 가짜 이름만)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ownerSpend, spendKind, unlinkedNote, reviewView, confirmMonthText, unconfirmMonthText, pastMonths, defaultSettleMonth } from '../../app/screens/settle-model.js';
+import { ownerSpend, spendKind, reviewView, confirmMonthText, unconfirmMonthText, pastMonths, defaultSettleMonth } from '../../app/screens/settle-model.js';
 import { readSpendRows, loadSettle } from '../../app/screens/settle.js';
 
 const members = [{ id: 'm2', member_slot: 2, display_name: '나리' }, { id: 'm1', member_slot: 1, display_name: '가람' }];
@@ -12,6 +12,8 @@ const SOURCES = [
   { id: 'h2', owner_member_id: 'm2', kind: 'cash', is_test: false },
   { id: 't1', owner_member_id: 'm1', kind: 'credit_card', is_test: true },
 ];
+// 한 줄 = '종류 이달N 누계N'(숫자가 이어져 민감번호 검사에 걸리지 않게 글자로 비교)
+const show = (p) => p.lines.map((l) => `${l.key} 이달${l.month} 누계${l.ytd}`);
 const tx = (source_id, kind, amount, period_month = '2026-10-01', o = {}) => ({ source_id, kind, amount, card_kind: null, period_month, refund_of_txn_id: null, ...o });
 
 test('종류: 신용카드 결제수단 / 체크카드 결제수단·통장의 체크카드 행 / 나머지', () => {
@@ -35,21 +37,18 @@ test('명의별 사용액: 종류별 합계, 연결 환불 차감, 시험 수단
   const s = ownerSpend(rows, SOURCES, members, '2026-10-01');
   assert.equal(s.ytdLabel, '1~10월');
   assert.deepEqual(s.people.map((p) => p.name), ['가람', '나리']);
-  // 한 줄 = '종류 이달N 누계N'(숫자가 이어져 민감번호 검사에 걸리지 않게 글자로 비교)
-  const show = (p) => p.lines.map((l) => `${l.key} 이달${l.month} 누계${l.ytd}`);
   assert.deepEqual(show(s.people[0]), ['credit 이달80000 누계130000', 'check 이달30000 누계30000', 'other 이달0 누계700000', 'total 이달110000 누계860000']);
   assert.deepEqual(show(s.people[1]), ['credit 이달0 누계0', 'check 이달12000 누계12000', 'other 이달0 누계8000', 'total 이달12000 누계20000']);
   assert.equal(ownerSpend([], SOURCES, members, '2026-01-01').ytdLabel, '1월');
   assert.deepEqual(ownerSpend([], SOURCES, members, '2026-01-01').people[0].lines.at(-1), { key: 'total', label: '합계', month: 0, ytd: 0 });
 });
 
-test('원거래를 못 찾은 환불: 빼지 않고 건수·금액만(그 달·올해)', () => {
+test('원거래를 못 찾은 환불도 그 결제수단·그 귀속월에서 뺀다(홈 지출과 같은 기준, 총괄 결정 10-30)', () => {
   const rows = [tx('c1', 'expense', 50000), tx('c1', 'refund', 7000), tx('k2', 'refund', 3000, '2026-02-01')];
   const s = ownerSpend(rows, SOURCES, members, '2026-10-01');
-  assert.equal(s.people[0].lines.at(-1).month, 50000);
-  assert.deepEqual(s.unlinked, { month: { count: 1, amount: 7000 }, ytd: { count: 2, amount: 10000 } });
-  assert.equal(unlinkedNote(s.unlinked), '원거래를 못 찾은 환불은 빼지 않았어요 — 이 달 1건 7,000원, 올해 2건 10,000원. 원거래에 연결하면 빠져요.');
-  assert.equal(unlinkedNote(ownerSpend([], SOURCES, members, '2026-10-01').unlinked), null);
+  assert.deepEqual(show(s.people[0])[0], 'credit 이달43000 누계43000');
+  assert.deepEqual(show(s.people[1])[1], 'check 이달0 누계-3000'); // 체크카드 2월 환불: 누계에서만
+  assert.equal('unlinked' in s, false);
 });
 
 test('조회: 올해 1월~그 달, 휴지통·집계 제외 빼고 지출·환불만, 빈 쪽까지 읽음', async () => {

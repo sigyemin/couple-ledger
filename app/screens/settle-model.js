@@ -29,27 +29,22 @@ export function spendKind(row, source) {
 /**
  * 명의별 사용액(CL-058, 사용자 결정 10-30 — 연말정산용, 5:5 정산 표시 대신)
  * - 명의 = 결제수단 주인(owner_member_id). 공동·개인 구분 없이 전부
- * - 사용액 = 지출 − 원거래에 연결된 환불. 달은 period_month(연결 환불은 원거래 달 — DB 트리거)
+ * - 사용액 = 지출 − 환불(원거래를 못 찾은 환불도 그 결제수단·그 귀속월에서 뺀다 — 총괄 결정 10-30, 홈 지출과 같은 기준)
+ *   달은 period_month(연결 환불은 원거래 달 — DB 트리거)
  * - 시험 결제수단 제외. 집계 제외·휴지통·수입·이체는 조회에서 이미 뺐다(loadSettle)
- * - 원거래를 못 찾은 환불은 빼지 않고 건수·금액만 따로 알린다
- * @param rows transactions { source_id, kind, amount, card_kind, period_month, refund_of_txn_id } (올해 1월 ~ 그 달)
- * @returns {{ people: { id, name, lines: { key, label, month, ytd }[] }[], unlinked: { month: {count, amount}, ytd: {count, amount} }, ytdLabel }}
+ * @param rows transactions { source_id, kind, amount, card_kind, period_month } (올해 1월 ~ 그 달)
+ * @returns {{ people: { id, name, lines: { key, label, month, ytd }[] }[], ytdLabel }}
  *   lines 끝 줄은 합계(key 'total'), 금액은 숫자(원)
  */
 export function ownerSpend(rows, sources, members, monthStart) {
   const src = new Map((sources ?? []).map((s) => [s.id, s]));
   const zero = () => Object.fromEntries(SPEND_KINDS.map(([k]) => [k, { month: 0, ytd: 0 }]));
   const byOwner = new Map();
-  const unlinked = { month: { count: 0, amount: 0 }, ytd: { count: 0, amount: 0 } };
   for (const r of rows ?? []) {
     const s = src.get(r.source_id);
     if (!s || s.is_test) continue;
     const amount = num(r.amount);
     const inMonth = r.period_month === monthStart;
-    if (r.kind === 'refund' && r.refund_of_txn_id == null) {
-      for (const k of inMonth ? ['month', 'ytd'] : ['ytd']) { unlinked[k].count += 1; unlinked[k].amount += amount; }
-      continue;
-    }
     const signed = r.kind === 'refund' ? -amount : (r.kind === 'expense' ? amount : 0);
     if (!signed) continue;
     if (!byOwner.has(s.owner_member_id)) byOwner.set(s.owner_member_id, zero());
@@ -64,13 +59,7 @@ export function ownerSpend(rows, sources, members, monthStart) {
     return { id: m.id, name: m.display_name, lines };
   });
   const mm = Number(monthStart.slice(5, 7));
-  return { people, unlinked, ytdLabel: mm === 1 ? '1월' : `1~${mm}월` };
-}
-
-/** 원거래를 못 찾은 환불 안내(없으면 null) */
-export function unlinkedNote(unlinked) {
-  if (!unlinked.ytd.count) return null;
-  return `원거래를 못 찾은 환불은 빼지 않았어요 — 이 달 ${unlinked.month.count}건 ${won(unlinked.month.amount)}, 올해 ${unlinked.ytd.count}건 ${won(unlinked.ytd.amount)}. 원거래에 연결하면 빠져요.`;
+  return { people, ytdLabel: mm === 1 ? '1월' : `1~${mm}월` };
 }
 
 /**

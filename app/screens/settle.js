@@ -11,7 +11,7 @@ import { addMonths, buildHash } from '../router.js';
 import { month, won } from '../core/format.js';
 import { confirmDialog } from '../core/confirm.js';
 import { STAGES, ACTIONS } from '../core/errors.js';
-import { ownerSpend, unlinkedNote, reviewView, confirmMonthText, unconfirmMonthText, pastMonths } from './settle-model.js';
+import { ownerSpend, reviewView, confirmMonthText, unconfirmMonthText, pastMonths } from './settle-model.js';
 import { errorView } from './shell.js';
 
 const PAGE_SIZE = 1000;
@@ -27,7 +27,7 @@ export async function readSpendRows(db, monthStart, { pageSize = PAGE_SIZE, max 
   let offset = 0;
   while (rows.length <= max) {
     const r = await db.select('transactions', {
-      columns: 'id,source_id,kind,amount,card_kind,period_month,refund_of_txn_id',
+      columns: 'id,source_id,kind,amount,card_kind,period_month',
       filters: [
         { col: 'period_month', op: 'gte', value: `${monthStart.slice(0, 4)}-01-01` }, { col: 'period_month', op: 'lte', value: monthStart },
         { col: 'deleted_at', op: 'is', value: null }, { col: 'is_excluded', op: 'eq', value: false }, { col: 'kind', op: 'in', value: ['expense', 'refund'] },
@@ -105,10 +105,8 @@ export async function renderSettle({ db, monthStart, reload, isCurrent, onError 
       ], doc)), doc),
     ], doc),
   ], doc));
-  const note = unlinkedNote(sum.unlinked);
   const info = h('section', { class: 'card' }, [
-    h('p', { class: 'muted', text: '명의 = 결제수단 주인. 공동·개인 구분 없이, 지출에서 원거래에 연결된 환불을 뺀 금액이에요. 집계 제외·휴지통·시험 결제수단은 빼요. 그 밖 = 통장 출금·현금.' }, [], doc),
-    note ? h('p', { class: 'notice small', text: note }, [], doc) : null,
+    h('p', { class: 'muted', text: '명의 = 결제수단 주인. 공동·개인 구분 없이, 지출에서 환불을 뺀 금액이에요(홈 지출과 같은 기준). 집계 제외·휴지통·시험 결제수단은 빼요. 그 밖 = 통장 출금·현금.' }, [], doc),
     spend.capped ? h('p', { class: 'notice small', text: '거래가 너무 많아 일부만 더했어요.' }, [], doc) : null,
     h('p', { class: 'muted small', text: '연말정산 공제 현황은 준비 중이에요.' }, [], doc),
   ], doc);
