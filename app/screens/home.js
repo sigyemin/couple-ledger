@@ -1,23 +1,24 @@
 // =====================================================================
-// 화면 1 홈 (화면 설계 v0.1 4-1, 시안 1): 달 선택, 이번 달 지출, 할 일, 많이 쓴 곳
+// 화면 1 홈 (화면 설계 v0.1 4-1, 시안 1): 달 선택, 이번 달 지출, 할 일, 지금 누구 카드가 유리(CL-062 — '많이 쓴 곳'은 사용자 결정 10-30으로 없앰)
 // 조회: v_monthly_summary(그 달·지난달),
 //       업로드 현황(uploads.js — 지난 달들의 missing_uploads, CL-056: 함께 시작하되 기다리지 않음. 오면 할 일만 다시 그림, 실패해도 홈은 그대로),
-//       v_monthly_review_status(확인 후 변경됨), v_monthly_category(그 달), categories(그룹 이름)
+//       v_monthly_review_status(확인 후 변경됨), 공제 추천(home-deduction.js — v_deduction_status 올해, 실패해도 홈은 그대로)
 //       지난달 체크카드 취소 연결 제안 수(refund.js suggestionCount — 미연결 체크카드 취소가 있을 때만 후보 RPC, 실패해도 홈은 그대로)
 // 의존: ui/dom.js, router.js, screens/home-model.js, screens/shell.js
 // =====================================================================
-import { h, widthClass } from '../ui/dom.js';
+import { h } from '../ui/dom.js';
 import { addMonths, buildHash, currentMonth } from '../router.js';
 import { buildHomeModel } from './home-model.js';
 import { suggestionCount } from './refund.js';
 import { errorView } from './shell.js';
 import { loadUploadStatus } from './uploads.js';
+import { renderHomeDeduction } from './home-deduction.js';
 
 /** 홈에 필요한 조회를 한 번에 (실패한 조회가 있으면 첫 오류를 돌려준다) */
 export async function loadHome(db, monthStart) {
   const prev = addMonths(monthStart, -1);
   const eq = (col, value) => ({ col, op: 'eq', value });
-  const [summary, prevSummary, changed, categories, names, suggest] = await Promise.all([
+  const [summary, prevSummary, changed, suggest] = await Promise.all([
     db.select('v_monthly_summary', { filters: [eq('period_month', monthStart)] }),
     db.select('v_monthly_summary', { filters: [eq('period_month', prev)] }),
     db.select('v_monthly_review_status', {
@@ -25,20 +26,16 @@ export async function loadHome(db, monthStart) {
       filters: [eq('review_state', 'changed_after_review')],
       order: [{ col: 'period_month', ascending: false }],
     }),
-    db.select('v_monthly_category', { filters: [eq('period_month', monthStart)] }),
-    db.select('categories', { columns: 'id,name', filters: [{ col: 'parent_id', op: 'is', value: null }] }),
     suggestionCount(db, prev),
   ]);
-  const error = [summary, prevSummary, changed, categories, names].find((r) => r.error)?.error;
+  const error = [summary, prevSummary, changed].find((r) => r.error)?.error;
   if (error) return { error };
   return {
     data: {
       summary: summary.data?.[0] ?? null,
       prevSummary: prevSummary.data?.[0] ?? null,
       changedMonths: changed.data ?? [],
-      categories: categories.data ?? [],
       suggest: suggest.error ? null : { month: prev, count: suggest.data.count },
-      categoryNames: new Map((names.data ?? []).map((c) => [c.id, c.name])),
     },
   };
 }
@@ -50,6 +47,8 @@ export async function loadHome(db, monthStart) {
 export async function renderHome({ db, member, monthStart, isCurrent, onError }, doc = globalThis.document) {
   const thisMonth = currentMonth();
   const uploads = loadUploadStatus(db, thisMonth).catch((err) => ({ error: err }));
+  // 공제 추천 카드(CL-062)도 함께 읽는다(실패해도 그 카드만 안내 줄). 연도 = 이번 달의 연도
+  const adviceCard = renderHomeDeduction({ db, taxYear: Number(thisMonth.slice(0, 4)), onError }, doc);
   const res = await loadHome(db, monthStart);
   if (!isCurrent()) return null;
   const ym = (m) => m.slice(0, 7);
@@ -103,18 +102,17 @@ export async function renderHome({ db, member, monthStart, isCurrent, onError },
     todos.replaceChildren(...todosKids(buildHomeModel(monthStart, homeData(up))));
   });
 
-  const groups = h('section', { class: 'card' }, [
-    h('h2', { class: 'card-title', text: '많이 쓴 곳' }, [], doc),
-    m.groups.length === 0
-      ? h('p', { class: 'muted', text: '아직 쓴 돈이 없어요' }, [], doc)
-      : h('ul', { class: 'bars' }, m.groups.map((g) => h('li', { class: 'bar-row' }, [
-        h('span', { class: 'bar-name', text: g.name }, [], doc),
-        h('span', { class: 'bar-track', attrs: { 'aria-hidden': 'true' } }, [
-          h('span', { class: `bar-fill ${widthClass(g.ratio)}` }, [], doc),
-        ], doc),
-        h('span', { class: 'bar-amount', text: g.amountText }, [], doc),
-      ], doc)), doc),
+  // 공제 카드는 기다리지 않는다: 자리만 먼저 그리고, 오면 바꿔 끼운다(다른 화면으로 넘어갔으면 그대로 둔다)
+  const advice = h('section', { class: 'card home-ded', attrs: { 'aria-live': 'polite' } }, [
+    h('h2', { class: 'card-title', text: '지금 누구 카드가 유리' }, [], doc),
+    h('p', { class: 'muted', text: '확인하는 중…' }, [], doc),
   ], doc);
-
-  return h('main', { class: 'screen' }, [head, summary, todos, groups], doc);
+  adviceCard.then((card) => {
+    if (isCurrent()) advice.replaceWith(card);
+  }, (err) => {
+    if (!isCurrent()) return;
+    onError?.(err);
+    advice.lastChild.textContent = '공제 정보를 불러오지 못했어요.';
+  });
+  return h('main', { class: 'screen' }, [head, summary, todos, advice], doc);
 }

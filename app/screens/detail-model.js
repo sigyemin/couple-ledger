@@ -2,10 +2,10 @@
 // 화면 6 거래 상세 — 화면 없이 계산하는 부분 (화면 설계 v0.1 4-4, v0.2 2-1, v0.3 2-3·5-2)
 // - 분류 바꾸기 = bulk_set_category([id], 카테고리) (v0.3 R1, 변경 기록에서 되돌릴 수 있음)
 // - 휴지통 = transactions update(deleted_at·deleted_by·updated_by). 연결된 환불이 있으면 환불 먼저(v0.3 2-3, DB가 반대 순서를 거부)
-// - 공동 여부·제외·분담은 이번 단계에서 표시만
+// - 공동 여부·제외는 표시(5:5 분담·상대 몫은 보이지 않음 — 사용자 결정 10-30)
 // 의존: core/format.js, screens/list-model.js
 // =====================================================================
-import { won, day, month, dateTime, ratio } from '../core/format.js';
+import { won, day, month, dateTime } from '../core/format.js';
 import { categoryLabel } from './list-model.js';
 
 const KIND_LABEL = { expense: '지출', refund: '환불', income: '수입', transfer: '이체' };
@@ -83,11 +83,8 @@ export function buildDetailModel(row, { cats, members, original = null, refunds 
     settle.push(['집계', `제외 · ${EXCLUDE_LABEL[row.exclude_reason] ?? '기타'}`]);
   } else if (row.kind === 'expense' || row.kind === 'refund') {
     const follows = row.kind === 'refund' && row.refund_of_txn_id;
+    // 5:5 분담·상대 몫은 보여 주지 않는다(사용자 결정 10-30 — 정산 = 명의별 사용)
     settle.push(['공동', `${follows ? '원거래를 따라요 · ' : ''}${row.is_shared ? '공동' : '개인'}`]);
-    if (row.is_shared) {
-      settle.push(['분담', `${row.payer_name} ${ratio(Number(row.share_ratio))}`]);
-      settle.push(['이 건에서 상대 몫', won(Number(row.other_share_amount))]);
-    }
   } else {
     settle.push(['집계', KIND_LABEL[row.kind]]);
   }
@@ -232,19 +229,19 @@ export function editability(row, refunds = []) {
 const reviewedNote = (row) => (row.month_reviewed_at
   ? ` ${month(row.period_month)}은 확인을 마친 달이라 '확인 후 변경됨'으로 표시돼요.` : '');
 
-/** 정산에 영향 주는 변경의 확인 문구 (v0.1 4-4: 확인 완료 달이면 저장 전에 알림) */
+/** 지출 집계에 영향 주는 변경(공동/개인·집계 제외)의 확인 문구 (v0.1 4-4: 확인 완료 달이면 저장 전에 알림) */
 export function settlementChangeText(row, change, refunds = []) {
   if (change.type === 'share') {
     // 연결된 환불은 원거래의 공동 여부를 따른다(트리거 sync_refund_from_original — 로컬 DB에서 확인)
     const follow = refunds.length > 0 ? ` 연결된 환불 ${refunds.length}건도 함께 바뀌어요.` : '';
     return {
       title: change.to ? '공동 지출로' : '개인 지출로',
-      message: (change.to ? '이 거래를 공동 지출로 바꿔 정산에 넣어요.' : '이 거래를 개인 지출로 바꿔 정산에서 빼요.') + follow + reviewedNote(row),
+      message: (change.to ? '이 거래를 공동 지출로 바꿔요.' : '이 거래를 개인 지출로 바꿔요.') + follow + reviewedNote(row),
     };
   }
   return {
     title: change.to ? '집계에서 빼기' : '집계에 다시 넣기',
-    message: (change.to ? '이 거래를 지출·정산 집계에서 빼요. 사유는 기타로 남아요(메모에 이유를 적어 두세요).' : '이 거래를 다시 지출·정산 집계에 넣어요.') + reviewedNote(row),
+    message: (change.to ? '이 거래를 지출 집계에서 빼요(명의별 사용·리포트에서도 빠져요). 사유는 기타로 남아요(메모에 이유를 적어 두세요).' : '이 거래를 다시 지출 집계에 넣어요.') + reviewedNote(row),
   };
 }
 

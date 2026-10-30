@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { parseHash, buildHash, monthParam, addMonths, currentMonth } from '../../app/router.js';
-import { buildHomeModel, compareText, topGroups, subjectParticle } from '../../app/screens/home-model.js';
+import { buildHomeModel, compareText, subjectParticle } from '../../app/screens/home-model.js';
 import { h, widthClass } from '../../app/ui/dom.js';
 import { activeTab, TABS } from '../../app/screens/shell.js';
 import * as config from '../../app/config.js';
@@ -45,12 +45,6 @@ test('홈 모델: 지출·비교·정산 문구·할 일·많이 쓴 곳', () =>
     ],
     thisMonth: '2026-10-01',
     changedMonths: [{ period_month: '2026-09-01', changed_txn_count: 2 }],
-    categories: [
-      { group_category_id: 'g1', total_amount: '650000' }, { group_category_id: 'g2', total_amount: 300000 },
-      { group_category_id: 'g2', total_amount: 12400 }, { group_category_id: null, total_amount: 98300 },
-      { group_category_id: 'g3', total_amount: 5000 },
-    ],
-    categoryNames: new Map([['g1', '주거'], ['g2', '식비'], ['g3', '생활']]),
   });
   assert.equal(m.title, '2026년 10월');
   assert.equal(m.expense, '1,325,400원');
@@ -63,20 +57,19 @@ test('홈 모델: 지출·비교·정산 문구·할 일·많이 쓴 곳', () =>
     ['9월 확인 후 변경됨', '#/settle?month=2026-09'],
   ]);
   assert.equal(m.todos[0].sub, '1월 2개, 2월 1개');
-  assert.deepEqual(m.groups.map((g) => [g.name, g.amountText, Math.round(g.ratio * 100)]), [['주거', '650,000원', 100], ['식비', '312,400원', 48], ['미분류', '98,300원', 15]]);
+  assert.equal('groups' in m, false); // '많이 쓴 곳' 없앰(사용자 결정 10-30)
 });
 
 test('홈 모델: 자료 없음·할 일 없음·같은 금액', () => {
-  const m = buildHomeModel('2026-10-01', { summary: null, prevSummary: null, missing: [], changedMonths: [], categories: [] });
-  assert.deepEqual([m.expense, m.compare, m.todos.length, m.groups.length], ['0원', null, 0, 0]);
+  const m = buildHomeModel('2026-10-01', { summary: null, prevSummary: null, missing: [], changedMonths: [] });
+  assert.deepEqual([m.expense, m.compare, m.todos.length], ['0원', null, 0]);
   assert.equal(compareText(1000, 1000), '지난달과 같게 썼어요');
   assert.equal(compareText(2000, 1000), '지난달보다 1,000원 많이 썼어요');
   assert.deepEqual([subjectParticle('갑'), subjectParticle('가'), subjectParticle('A')], ['이', '가', '이']);
-  assert.deepEqual(topGroups([{ group_category_id: 'x', total_amount: -5 }], new Map()), []);
 });
 
 test('홈 모델: 안 올린 파일 조회 중·실패(CL-056) — 실패하면 그 줄만 확인 못 함, 나머지는 그대로', () => {
-  const base = { summary: { expense_amount: 0, needs_review_count: 3 }, prevSummary: null, changedMonths: [], categories: [], thisMonth: '2026-10-01' };
+  const base = { summary: { expense_amount: 0, needs_review_count: 3 }, prevSummary: null, changedMonths: [], thisMonth: '2026-10-01' };
   const loading = buildHomeModel('2026-10-01', { ...base, missing: null, missingState: 'loading' });
   assert.equal(loading.pending, true);
   assert.deepEqual(loading.todos.map((t) => t.key), ['review']);

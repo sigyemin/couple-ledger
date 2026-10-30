@@ -108,12 +108,12 @@ export function valuesConfirmText(row, v, reviewStates, refunds = [], choice = n
   if (v.plan.type === 'auto') parts.push('카테고리 금액도 새 금액으로 맞춰요.');
   if (v.plan.type === 'choose' && choice === 'merge') parts.push(`나눈 ${v.plan.count}줄을 한 카테고리로 합쳐요.`);
   if (v.plan.type === 'choose' && choice === 'resplit') parts.push('저장한 뒤 금액 나누기로 다시 나눠 주세요.');
-  // 정산 영향(F10): 공동·비제외 거래의 금액·달이 바뀌면 확인 완료 달은 '확인 후 변경됨'
+  // 월 확인 영향(F10): 공동·비제외 거래의 금액·달이 바뀌면 확인 완료 달은 '확인 후 변경됨'
   const settles = row.is_shared && !row.is_excluded && (row.kind === 'expense' || row.kind === 'refund');
   if (settles && (v.changed.includes('amount') || v.monthFrom)) {
     const months = [...new Set([row.period_month, v.monthTo].filter(Boolean))].sort()
       .filter((x) => reviewStates.get(x) === 'reviewed' || reviewStates.get(x) === 'changed_after_review');
-    if (months.length) parts.push(`${months.map(shortMonth).join(', ')}은 확인을 마친 달이라 정산이 바뀌고 '확인 후 변경됨'으로 표시돼요.`);
+    if (months.length) parts.push(`${months.map(shortMonth).join(', ')}은 확인을 마친 달이라 '확인 후 변경됨'으로 표시돼요.`);
   }
   const needs = v.changed.includes('amount') || v.monthFrom || (follows && v.changed.includes('date'));
   if (!needs) return null;

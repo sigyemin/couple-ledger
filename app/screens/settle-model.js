@@ -77,7 +77,7 @@ export function reviewView(monthStart, st, members) {
   }
   if (state === 'changed_after_review') {
     return {
-      state, title: `${m} 확인 후 변경됨`, sub: `${nameOf(st.reviewed_by)}${subjectParticle(nameOf(st.reviewed_by))} ${dateTime(st.reviewed_at)}에 확인한 뒤 정산에 영향 주는 거래 ${num(st.changed_txn_count)}건이 바뀌었어요`,
+      state, title: `${m} 확인 후 변경됨`, sub: `${nameOf(st.reviewed_by)}${subjectParticle(nameOf(st.reviewed_by))} ${dateTime(st.reviewed_at)}에 확인한 뒤 공동 지출 거래 ${num(st.changed_txn_count)}건이 바뀌었어요`,
       pendingNote, canConfirm: true, canUnconfirm: true, changedCount: num(st.changed_txn_count), confirmLabel: `${m} 다시 확인 완료`,
     };
   }
@@ -88,7 +88,7 @@ export function reviewView(monthStart, st, members) {
 export function confirmMonthText(monthStart, pending) {
   return {
     title: `${shortMonth(monthStart)} 확인 완료`,
-    message: `${month(monthStart)} 정산 숫자를 확인했다고 남겨요.${pending > 0 ? ` 검토 대기 ${pending}건이 남아 있어요.` : ''} 확인한 뒤 정산에 영향 주는 거래가 바뀌면 '확인 후 변경됨'으로 알려 드려요.`,
+    message: `${month(monthStart)} 거래를 확인했다고 남겨요.${pending > 0 ? ` 검토 대기 ${pending}건이 남아 있어요.` : ''} 확인한 뒤 공동 지출 거래(금액·달·공동 여부·집계 제외)가 바뀌면 '확인 후 변경됨'으로 알려 드려요.`,
   };
 }
 

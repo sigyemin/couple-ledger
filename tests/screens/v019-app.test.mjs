@@ -14,11 +14,11 @@ test('연결 끊기 확인 문구: 달이 바뀌는지, 확인한 달 정산, �
   assert.equal(t.title, '연결 끊기');
   assert.match(t.message, /검토 대기가 되고 미연결 환불 목록에/);
   assert.match(t.message, /9월에서 환불일의 달인 10월로/);
-  assert.match(t.message, /9월은 확인을 마친 달이라 정산이 바뀌고/);
+  assert.match(t.message, /9월은 확인을 마친 달이라 '확인 후 변경됨'/);
   assert.match(t.message, /다시 연결할 수 있어요/);
   const same = unlinkConfirmText(refund({ period_month: '2026-10-01' }), new Map());
   assert.match(same.message, /10월에 그대로 집계돼요/);
-  assert.match(same.message, /정산 금액이 바뀔 수 있어요/);
+  assert.match(same.message, /달별 지출 합계가 바뀔 수 있어요/);
   assert.doesNotMatch(unlinkConfirmText(refund({ is_shared: false }), new Map()).message, /정산/);
 });
 

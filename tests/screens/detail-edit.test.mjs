@@ -93,7 +93,7 @@ test('날짜 변경: 달이 바뀌면 확인 창(연결 환불도 옮겨짐, 확
   const t = valuesConfirmText(row(), v, states, [{ id: 'r1' }]);
   assert.match(t.message, /10월에서 11월/);
   assert.match(t.message, /연결된 환불 1건도 11월로 옮겨져요/);
-  assert.match(t.message, /10월은 확인을 마친 달이라 정산이 바뀌고/);
+  assert.match(t.message, /10월은 확인을 마친 달이라 '확인 후 변경됨'/);
   // 개인 거래는 정산 안내 없음
   assert.doesNotMatch(valuesConfirmText(row({ is_shared: false }), v, states).message, /확인을 마친/);
   // 같은 달 안 날짜만 → 확인 창 없음
