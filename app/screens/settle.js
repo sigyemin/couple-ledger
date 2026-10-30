@@ -72,7 +72,6 @@ export async function renderSettle({ db, monthStart, reload, isCurrent, onError 
   // 공제 현황 카드(CL-062)는 함께 읽는다(실패해도 그 카드만 오류 줄)
   const deduction = renderDeductionCard({ db, monthStart, onError }, doc);
   const res = await loadSettle(db, monthStart);
-  const dedCard = await deduction;
   if (!isCurrent()) return null;
   const ym = (m) => m.slice(0, 7);
   const nav = (n, label, text) => h('a', { class: 'icon-btn', text, attrs: { href: buildHash('settle', { query: { month: ym(addMonths(monthStart, n)) } }), 'aria-label': label } }, [], doc);
@@ -84,6 +83,7 @@ export async function renderSettle({ db, monthStart, reload, isCurrent, onError 
     ], doc),
   ], doc);
   if (res.error) {
+    deduction.catch(() => null); // 화면 전체가 오류면 공제 카드는 버린다
     onError?.(res.error);
     return h('main', { class: 'screen' }, [head, errorView(res.error.message, res.error.detail?.sqlState ?? res.error.code, doc)], doc);
   }
@@ -113,7 +113,6 @@ export async function renderSettle({ db, monthStart, reload, isCurrent, onError 
   const info = h('section', { class: 'card' }, [
     h('p', { class: 'muted', text: '명의 = 결제수단 주인. 공동·개인 구분 없이, 지출에서 환불을 뺀 금액이에요(홈 지출과 같은 기준). 집계 제외·휴지통·시험 결제수단은 빼요. 그 밖 = 통장 출금·현금.' }, [], doc),
     spend.capped ? h('p', { class: 'notice small', text: '거래가 너무 많아 일부만 더했어요.' }, [], doc) : null,
-    h('p', { class: 'muted small', text: '연말정산 공제 현황은 준비 중이에요.' }, [], doc),
   ], doc);
 
   const btn = (text, cls, onClick) => h('button', { class: `btn ${cls}`, text, attrs: { type: 'button' }, on: { click: onClick } }, [], doc);
@@ -148,5 +147,17 @@ export async function renderSettle({ db, monthStart, reload, isCurrent, onError 
       ], doc)), doc),
   ], doc);
 
+  // 공제 카드는 기다리지 않는다(홈과 같이): 자리만 먼저 그리고, 오면 바꿔 끼운다. 다른 화면으로 넘어갔으면 그대로 둔다
+  const dedCard = h('section', { class: 'card ded', attrs: { 'aria-live': 'polite' } }, [
+    h('h2', { class: 'card-title', text: `공제 현황 · ${monthStart.slice(0, 4)}` }, [], doc),
+    h('p', { class: 'muted', text: '확인하는 중…' }, [], doc),
+  ], doc);
+  deduction.then((card) => {
+    if (isCurrent()) dedCard.replaceWith(card);
+  }, (err) => {
+    if (!isCurrent()) return;
+    onError?.(err);
+    dedCard.lastChild.textContent = '공제 현황을 불러오지 못했어요. 잠시 뒤 다시 열어 주세요.';
+  });
   return h('main', { class: 'screen' }, [head, statusLine, dedCard, ...people, info, review, pastCard], doc);
 }

@@ -6,9 +6,12 @@
 //       둘 다 맞음 → transactions update(review_status = confirmed) 한 건씩
 // 원거래를 못 찾은 환불(CL-034, 사용자 결정 U-13): 환불마다 카드. 체크카드 취소는 find_refund_candidates로 연결 제안(조건 1~4, refund-model.js)
 //   → 연결하기(link_refund + 확인함) / 다른 결제 찾기(#/refund). 제안된 것만 "모두 연결"(확인 창에 목록, 한 건씩, 멈추면 안내, n/N)
-// 준비 중: 아직 안 정한 이체 상대(규칙 화면 필요),
-//          분류 뒤 "같은 가맹점 규칙 저장"(규칙 화면 필요)
-// 의존: ui/dom.js, router.js, core/format.js, core/errors.js, screens/list.js, screens/review-model.js, screens/detail-model.js, screens/shell.js
+// 분류 뒤 같은 가맹점 규칙 저장(CL-066): 묶음마다 '앞으로 같은 가맹점 자동 분류' 체크(지출·통장 이체 아님) → 분류·확인함 뒤
+//   가맹점별 분류(CL-061)와 같은 saveMerchantRule(같은 패턴 켜진 규칙이 있으면 만들지 않고 안내)
+// 아직 안 정한 이체 상대(CL-066): 그 달 검토 대기 통장 행 중 켜진 이체 상대 규칙에 안 맞는 것을 묶어 보여 주고(unmatchedCounterparties)
+//   '규칙 만들기' → 이체 상대 직접 추가(#/cprulenew, 이름·통장·방향 미리 채움 — 이름은 주소에 넣지 않음) → 저장 뒤 검토 대기 거래에 적용 화면
+// 의존: ui/dom.js, router.js, core/format.js, core/errors.js, screens/list.js, screens/review-model.js, screens/merchant-classify-model.js(ruleFor),
+//       screens/merchant-rule.js, screens/counterparty.js(startCounterpartyDraft), screens/shell.js
 // =====================================================================
 import { h, widthClass } from '../ui/dom.js';
 import { addMonths, buildHash } from '../router.js';
@@ -18,7 +21,11 @@ import { readMonthRows } from './list.js';
 import { confirmDialog } from '../core/confirm.js';
 import {
   progress, uncategorizedGroups, classifyConfirmText, duplicateGroups, unlinkedRefundCount, mismatchItems, confirmBothPatch,
+  unmatchedCounterparties, CP_GROUP_LIMIT,
 } from './review-model.js';
+import { ruleFor } from './merchant-classify-model.js';
+import { saveMerchantRule } from './merchant-rule.js';
+import { startCounterpartyDraft } from './counterparty.js';
 import { categoryPicker } from './category-picker.js';
 import { readCandidates, readReviewStates, linkOne } from './refund.js';
 import {
@@ -30,7 +37,7 @@ let reviewNotice = null;
 
 export async function loadReview(db, monthStart) {
   const eq = (col, value) => ({ col, op: 'eq', value });
-  const [summary, rows, dups, mismatch, categories] = await Promise.all([
+  const [summary, rows, dups, mismatch, categories, cpRules] = await Promise.all([
     db.select('v_monthly_summary', { columns: 'period_month,txn_count,needs_review_count,uncategorized_count,unlinked_refund_count', filters: [eq('period_month', monthStart)] }),
     readMonthRows(db, monthStart),
     db.select('v_possible_duplicates', {
@@ -44,8 +51,13 @@ export async function loadReview(db, monthStart) {
       range: { from: 0, to: 499 },
     }),
     db.select('categories', { columns: 'id,parent_id,name,code,sort_order,is_active' }),
+    // 아직 안 정한 이체 상대: 켜진 규칙(순서는 서버 정렬 — 업로드와 같음)
+    db.select('counterparty_rules', {
+      columns: 'id,match_field,match_text,match_type,source_id,direction,txn_type,suggested_kind,is_active',
+      filters: [eq('is_active', true)], order: [{ col: 'priority' }, { col: 'created_at' }, { col: 'id' }],
+    }),
   ]);
-  const error = [summary, rows, dups, mismatch, categories].find((r) => r.error)?.error;
+  const error = [summary, rows, dups, mismatch, categories, cpRules].find((r) => r.error)?.error;
   if (error) return { error };
   // 원거래를 못 찾은 환불(검토 대기·연결 없음, 테스트 결제수단은 readMonthRows가 뺌)과 체크카드 취소의 후보
   const unlinked = rows.data.rows.filter((r) => r.kind === 'refund' && !r.refund_of_txn_id && r.review_status === 'needs_review')
@@ -60,7 +72,7 @@ export async function loadReview(db, monthStart) {
   return {
     data: {
       summary: summary.data?.[0] ?? null, rows: rows.data.rows, capped: rows.data.capped,
-      dups: dups.data ?? [], mismatch: mismatch.data ?? [], categories: categories.data ?? [],
+      dups: dups.data ?? [], mismatch: mismatch.data ?? [], categories: categories.data ?? [], cpRules: cpRules.data ?? [],
       unlinked, suggestions: monthSuggestions(byRefund), states,
       suggestFailed: cands.some((c) => c.error), suggestCapped: unlinked.filter(isSuggestTarget).length > targets.length,
     },
@@ -86,13 +98,14 @@ export async function renderReview({ db, member, monthStart, reload, isCurrent, 
     onError?.(res.error);
     return h('main', { class: 'screen' }, [head, errorView(res.error.message, res.error.detail?.sqlState ?? res.error.code, doc)], doc);
   }
-  const { summary, rows, capped, dups, mismatch, categories, unlinked: refunds, suggestions, states, suggestFailed, suggestCapped } = res.data;
+  const { summary, rows, capped, dups, mismatch, categories, cpRules, unlinked: refunds, suggestions, states, suggestFailed, suggestCapped } = res.data;
   const status = h('p', { class: 'status-line', attrs: { role: 'status', 'aria-live': 'polite' } }, [], doc);
-  const say = (msg, isError = false) => {
-    status.textContent = msg;
+  // link: { href, text } — 안내 끝에 붙는 앱 안 링크(같은 패턴 다른 카테고리 규칙 → 규칙 화면)
+  const say = (msg, isError = false, link = null) => {
+    status.replaceChildren(msg, ...(link ? [' ', h('a', { text: link.text, attrs: { href: link.href } }, [], doc)] : []));
     status.className = `status-line${isError ? ' error' : ''}`;
   };
-  if (reviewNotice) { say(reviewNotice.text, reviewNotice.isError); reviewNotice = null; }
+  if (reviewNotice) { say(reviewNotice.text, reviewNotice.isError, reviewNotice.link); reviewNotice = null; }
   const fail = (err, extra) => {
     const code = onError?.(err, extra);
     say(`${err.message}${code ? ` (오류 번호 ${code})` : ''}`, true);
@@ -122,13 +135,22 @@ export async function renderReview({ db, member, monthStart, reload, isCurrent, 
       : h('ul', { class: 'review-groups' }, groups.map((g) => {
         const sel = categoryPicker({ categories, kind: g.kind, label: `${g.merchant} 카테고리`, doc });
         const go = h('button', { class: 'btn secondary small-btn', text: `${g.count}건 바꾸기`, attrs: { type: 'button' } }, [], doc);
+        // 분류 뒤 같은 가맹점 규칙 저장(화면 v0.1 4-5) — 지출이고 통장 이체가 아닐 때만, 기본은 켬(가맹점별 분류와 같음)
+        const ruleBox = g.canRule ? h('input', { attrs: { type: 'checkbox', 'aria-label': `앞으로 ${g.merchant} 자동 분류` } }, [], doc) : null;
+        if (ruleBox) ruleBox.checked = true;
+        const lock = (on) => { go.disabled = on; sel.setDisabled(on); if (ruleBox) ruleBox.disabled = on; };
         go.addEventListener('click', async () => {
           if (!sel.value) { say('카테고리를 골라 주세요', true); return; }
           const name = sel.selectedName;
-          if (!(await confirmDialog({ ...classifyConfirmText(g, name), confirmLabel: '분류하기', doc }))) return;
-          go.disabled = true;
+          const makeRule = Boolean(ruleBox?.checked);
+          const rv = makeRule ? ruleFor(g, sel.value) : null;
+          if (rv && !rv.ok) { say(`규칙을 만들 수 없어요: ${rv.message}. 체크를 끄고 분류만 할 수 있어요.`, true); return; }
+          const text = classifyConfirmText(g, name, makeRule);
+          if (rv?.warning) text.message += ` (${rv.warning})`;
+          if (!(await confirmDialog({ ...text, confirmLabel: '분류하기', doc }))) return;
+          lock(true);
           const r = await db.rpc('bulk_set_category', { p_txn_ids: g.ids, p_category_id: sel.value, p_description: `월 검토 · ${g.merchant} → ${name}`.slice(0, 200) });
-          if (r.error) { go.disabled = false; fail(r.error, { stage: STAGES.db_rpc, action: ACTIONS.bulk_edit }); return; }
+          if (r.error) { lock(false); fail(r.error, { stage: STAGES.db_rpc, action: ACTIONS.bulk_edit }); return; }
           // 분류한 거래를 확인함으로(이미 확인함인 것은 건너뜀). 실패하면 거기서 멈추고 몇 건 됐는지 알림
           let confirmed = 0;
           const total = g.toConfirm.length;
@@ -138,7 +160,7 @@ export async function renderReview({ db, member, monthStart, reload, isCurrent, 
             if (u.error || !u.data?.length) {
               const code = u.error ? onError?.(u.error, { stage: STAGES.db_update, txnId: id }) : null;
               reviewNotice = {
-                text: `${g.count}건을 '${name}'(으)로 분류했지만 확인함으로는 ${confirmed}건만 바꿨어요. 나머지는 상세에서 확인해 주세요.${code ? ` (오류 번호 ${code})` : ''}`,
+                text: `${g.count}건을 '${name}'(으)로 분류했지만 확인함으로는 ${confirmed}건만 바꿨어요${makeRule ? '(규칙은 만들지 않았어요)' : ''}. 나머지는 상세에서 확인해 주세요.${code ? ` (오류 번호 ${code})` : ''}`,
                 isError: true,
               };
               reload();
@@ -146,15 +168,33 @@ export async function renderReview({ db, member, monthStart, reload, isCurrent, 
             }
             confirmed += 1;
           }
-          reviewNotice = { text: `${g.merchant} ${g.count}건을 '${name}'(으)로 분류하고 확인함으로 바꿨어요. 분류는 더보기 › 변경 기록에서 되돌릴 수 있어요.`, isError: false };
+          let ruleNote = '';
+          let ruleLink = null;
+          if (makeRule) {
+            const sr = await saveMerchantRule({ db, member, value: rv.value, categories, onError });
+            if (!sr.ok) {
+              reviewNotice = { text: `${g.merchant} ${g.count}건을 '${name}'(으)로 분류하고 확인함으로 바꿨지만 ${sr.text}`, isError: true };
+              reload();
+              return;
+            }
+            ruleNote = sr.note;
+            ruleLink = sr.link;
+          }
+          reviewNotice = {
+            text: `${g.merchant} ${g.count}건을 '${name}'(으)로 분류하고 확인함으로 바꿨어요.${ruleNote}${ruleLink ? '' : ' 분류는 더보기 › 변경 기록에서 되돌릴 수 있어요.'}`,
+            isError: false, link: ruleLink,
+          };
           reload();
         });
         return h('li', { class: 'review-group' }, [
           h('p', {}, [h('strong', { text: g.merchant }, [], doc), h('span', { class: 'sub', text: ` ${g.total}건 · ${g.amountText}${g.splitCount ? ` · 나눈 거래 ${g.splitCount}건` : ''}` }, [], doc)], doc),
           h('div', { class: 'review-pick' }, [sel, go], doc),
+          ruleBox ? h('label', { class: 'filter-check' }, [ruleBox, h('span', { text: '앞으로 같은 가맹점 자동 분류(가맹점 규칙 만들기)' }, [], doc)], doc)
+            : (g.transferLike ? h('p', { class: 'muted small' }, [
+              '통장 이체예요. 앞으로 자동으로 하려면 ', h('a', { text: '이체 상대 규칙', attrs: { href: buildHash('cprules') } }, [], doc), '에서 정해요.',
+            ], doc) : null),
         ], doc);
       }), doc),
-    h('p', { class: 'muted small', text: '같은 가맹점 규칙으로 저장하기는 규칙 화면과 함께 열어요(준비 중).' }, [], doc),
   ]);
 
   // 같은 거래일 수도 있어요
@@ -271,8 +311,24 @@ export async function renderReview({ db, member, monthStart, reload, isCurrent, 
     refunds.length ? h('p', { class: 'muted small', text: '연결하면 그 결제의 달·카테고리로 집계되고 "확인했어요" 처리돼요. 원거래가 다른 달이면 환불이 그 달로 옮겨 가서, 확인 완료한 달이 "확인 후 변경됨"이 될 수 있어요.' }, [], doc) : null,
   ]);
 
-  // 아직 안 정한 이체 상대 (준비 중)
-  const counterpartyCard = card('아직 안 정한 이체 상대', [h('p', { class: 'muted', text: '이체 상대 지정은 규칙 화면과 함께 열어요(준비 중).' }, [], doc)]);
+  // 아직 안 정한 이체 상대 (CL-066): 규칙에 안 맞는 검토 대기 통장 행 묶음 → 이체 상대 규칙 만들기(이름 등 미리 채움)
+  const cp = unmatchedCounterparties(rows, cpRules);
+  const cpItem = (g) => {
+    const make = h('a', { class: 'btn secondary small-btn', text: '규칙 만들기', attrs: { href: buildHash('cprulenew'), 'aria-label': `${g.name} 이체 상대 규칙 만들기` } }, [], doc);
+    make.addEventListener('click', () => startCounterpartyDraft({ matchText: g.name, sourceId: g.sourceId, direction: g.direction }));
+    return h('li', { class: 'review-group' }, [
+      h('p', {}, [h('strong', { text: g.name }, [], doc), h('span', { class: 'sub', text: ` ${g.sourceLabel} · ${g.direction === 'out' ? '출금' : '입금'} · ${g.count}건 · ${g.amountText}` }, [], doc)], doc),
+      make,
+    ], doc);
+  };
+  const counterpartyCard = card(`아직 안 정한 이체 상대${cp.groups.length ? ` · ${cp.groups.length}곳` : ''}`, [
+    cp.groups.length === 0 ? h('p', { class: 'muted', text: '정할 이체 상대가 없어요' }, [], doc)
+      : h('ul', { class: 'review-groups' }, cp.groups.slice(0, CP_GROUP_LIMIT).map(cpItem), doc),
+    cp.groups.length > CP_GROUP_LIMIT ? h('p', { class: 'muted small', text: `많아서 앞 ${CP_GROUP_LIMIT}곳만 보여요. 규칙을 만들면 나머지가 앞으로 와요.` }, [], doc) : null,
+    cp.unsure ? h('p', { class: 'muted small', text: `거래 종류·상대 칸을 보는 규칙이 있어 ${cp.unsure}건은 여기서 판정하지 못해 뺐어요.` }, [], doc) : null,
+    cp.groups.length ? h('p', { class: 'muted small', text: '규칙을 저장하면 이 달을 포함한 검토 대기 거래에 적용할지 미리 보여 드려요. 이미 확인한 거래는 바뀌지 않아요.' }, [], doc) : null,
+    link('이체 상대 규칙 모두 보기', buildHash('cprules')),
+  ]);
 
   // 나눈 금액이 안 맞는 거래
   const mm = mismatchItems(mismatch, rows);
