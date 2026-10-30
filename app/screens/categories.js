@@ -1,10 +1,11 @@
 // =====================================================================
 // 카테고리 관리 (화면 설계 v0.2 3-9, 시안 18): 보기 · 순서 · 이름 · 항목/그룹 추가 · 끄기/켜기 · 지우기 · 다른 그룹으로
 // 조회: categories / 끄기 전: 켜진 category_rules(category_id)·counterparty_rules(suggested_category_id) 수
-// 쓰기: categories insert(부모·이름·순서) · update(이름·순서·켜짐·부모) · delete(사용자가 만든 것만, 쓰는 곳 있으면 DB 거부)
+// 쓰기: categories insert(부모·이름·순서) · update(이름·순서·켜짐·부모·연말정산 기본값) · delete(사용자가 만든 것만, 쓰는 곳 있으면 DB 거부)
+// - 연말정산 기본값(CL-062 ② E4): default_deduction_kind(카드로 냈을 때 기본 공제 항목) · tax_credit_kind(세액공제 항목)
 // - 기본(code) 항목은 지우기·옮기기 없음. 2단계까지만
 // - 여러 행을 바꾸는 일(순서 다시 매기기·그룹 끄기)은 한 건씩 update → 중간 실패면 멈추고 다시 읽음
-// 의존: ui/dom.js, router.js, core/confirm.js, core/errors.js, screens/categories-model.js, screens/shell.js
+// 의존: ui/dom.js, router.js, core/confirm.js, core/errors.js, screens/categories-model.js, screens/deduction-edit-model.js, screens/shell.js
 // =====================================================================
 import { h } from '../ui/dom.js';
 import { buildHash } from '../router.js';
@@ -13,6 +14,7 @@ import { STAGES } from '../core/errors.js';
 import {
   categoryTree, checkName, moveUpdates, moveTargets, nextSortOrder, offTargets, offConfirmText, moveGroupText, deleteErrorText, nameErrorText, categoryErrorText,
 } from './categories-model.js';
+import { CATEGORY_KINDS, TAX_CREDIT_KINDS, categoryDeductionPatch, categoryDeductionTag } from './deduction-edit-model.js';
 import { errorView, rulesTabs } from './shell.js';
 
 let catNotice = null;
@@ -21,7 +23,7 @@ let catNotice = null;
  * @param {{ db, reload(), isCurrent(), onError(err, extra) → string }} ctx
  */
 export async function renderCategories({ db, reload, isCurrent, onError }, doc = globalThis.document) {
-  const r = await db.select('categories', { columns: 'id,parent_id,name,code,sort_order,is_active' });
+  const r = await db.select('categories', { columns: 'id,parent_id,name,code,sort_order,is_active,default_deduction_kind,tax_credit_kind' });
   if (!isCurrent()) return null;
   const head = h('header', { class: 'screen-head' }, [
     h('nav', { class: 'month-nav' }, [
@@ -136,8 +138,32 @@ export async function renderCategories({ db, reload, isCurrent, onError }, doc =
     return h('div', { class: 'cat-add' }, [input, add], doc);
   };
 
+  // 연말정산 기본값(CL-062 ② E4): 카드로 냈을 때 기본 공제 항목 · 세액공제 항목
+  const deductionEdit = (node, line) => {
+    const cat = rows.find((c) => c.id === node.id) ?? {};
+    const sel = (label, opts, value) => {
+      const el = h('select', { class: 'field mini-select', attrs: { 'aria-label': `${node.name} ${label}` } }, [
+        h('option', { text: `${label}: 없음`, attrs: { value: '' } }, [], doc),
+        ...opts.map(([k, t]) => h('option', { text: `${label}: ${t}`, attrs: { value: k } }, [], doc)),
+      ], doc);
+      el.value = value ?? '';
+      return el;
+    };
+    const d = sel('카드 공제', CATEGORY_KINDS, cat.default_deduction_kind);
+    const t = sel('세액공제', TAX_CREDIT_KINDS, cat.tax_credit_kind);
+    const save = btn('저장', `${node.name} 연말정산 기본값 저장`, async () => {
+      const patch = categoryDeductionPatch(cat, { defaultKind: d.value, taxCredit: t.value });
+      if (!patch) { reload(); return; }
+      await updateMany([{ id: node.id, ...patch }], `'${node.name}' 연말정산 기본값을 바꿨어요. 거래에서 직접 고친 값은 그대로예요.`);
+    }, 'mini primary');
+    const cancel = btn('취소', '연말정산 기본값 취소', () => reload());
+    line.replaceChildren(h('span', { class: 'cat-name' }, [node.name], doc), d, t, save, cancel);
+    d.focus();
+  };
+
   const line = (node, siblings, isGroup) => {
-    const tags = node.tags.map((t) => h('span', { class: 'tag', text: t }, [], doc));
+    const dedTag = categoryDeductionTag(rows.find((c) => c.id === node.id) ?? {});
+    const tags = [...node.tags, ...(dedTag ? [`연말정산: ${dedTag}`] : [])].map((t) => h('span', { class: 'tag', text: t }, [], doc));
     const nameLine = h('span', { class: 'cat-name' }, [h(isGroup ? 'strong' : 'span', { text: node.name }, [], doc), ...tags], doc);
     const i = siblings.findIndex((s) => s.id === node.id);
     const controls = [
@@ -145,6 +171,7 @@ export async function renderCategories({ db, reload, isCurrent, onError }, doc =
       btn('↓', `${node.name} 아래로`, () => updateMany(moveUpdates(siblings.map((s) => ({ id: s.id, name: s.name, sort_order: s.sortOrder })), node.id, 'down'), '순서를 바꿨어요.')),
       btn('이름', `${node.name} 이름 바꾸기`, () => rename(node, row)),
       btn(node.isActive ? '끄기' : '켜기', `${node.name} ${node.isActive ? '끄기' : '켜기'}`, () => toggle(node)),
+      btn('공제', `${node.name} 연말정산 기본값`, () => deductionEdit(node, row)),
     ];
     controls[0].disabled = i === 0;
     controls[1].disabled = i === siblings.length - 1;
