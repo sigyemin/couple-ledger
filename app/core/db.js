@@ -36,6 +36,10 @@ export const INSERT_COLUMNS = Object.freeze({
 });
 // 표별로 고칠 수 있는 칸(없으면 칸 이름 형식만 검사)
 export const UPDATE_COLUMNS = Object.freeze({
+  // 거래 상세·휴지통·월 검토·환불 연결이 쓰는 칸 + 금액·날짜·시각·가맹점 고치기(U-17 D2, CL-045).
+  // 종류·결제수단·공동 비율·dedup_key·raw·연결 칸은 고치지 않는다(dedup_key를 두면 같은 파일을 다시 올려도 다시 안 들어옴)
+  transactions: Object.freeze(['memo', 'review_status', 'is_shared', 'is_excluded', 'exclude_reason', 'deleted_at', 'deleted_by', 'updated_by',
+    'amount', 'occurred_on', 'occurred_time', 'merchant_raw', 'merchant_norm']),
   categories: Object.freeze(['name', 'sort_order', 'is_active', 'parent_id']),
   category_rules: Object.freeze(['pattern', 'match_type', 'category_id', 'is_ambiguous', 'priority', 'is_active']),
   // 이름·범위(match_*·source_id·direction)는 고치지 않는다 — 바꾸려면 끄고 새로 추가
