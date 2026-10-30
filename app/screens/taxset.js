@@ -115,7 +115,7 @@ export async function renderTaxSettings({ db, member, reload, isCurrent, onError
   });
   const profileCard = h('section', { class: 'card form' }, [
     h('h2', { class: 'card-title', text: `내 설정 (${member.displayName})` }, [], doc),
-    h('p', { class: 'muted small', text: '본인 것만 고칠 수 있어요. 두 사람 모두 정산 탭에서 볼 수 있어요(총급여는 가려져 있고 눌러야 보여요).' }, [], doc),
+    h('p', { class: 'muted small', text: '본인 것만 고칠 수 있어요. 두 사람 모두 정산 탭에서 볼 수 있어요. 총급여는 가려 두지만 다른 숫자로 짐작할 수 있어요.' }, [], doc),
     h('div', { class: 'form-row' }, [h('span', { class: 'field-label', text: '총급여(만 원, 연)' }, [], doc), salaryShown, salaryBox,
       h('span', { class: 'muted small', text: '원천징수영수증의 총급여. 비우면 공제를 계산하지 않아요.' }, [], doc)], doc),
     field('자녀 등 수(카드 공제 한도)', child),

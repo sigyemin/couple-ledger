@@ -167,8 +167,11 @@ export function rentLines(people) {
   return { lines, note };
 }
 
-/** 접힌 상세(사람별) — 금액 줄 */
-export function detailRows(r) {
+/**
+ * 접힌 상세(사람별) — 금액 줄
+ * 총급여에서 바로 나오는 금액(최저사용금액 = 총급여 25%)은 '보기'를 눌렀을 때만(revealed). 가림 상태에서는 남은 금액만 — 리뷰 #51(중)
+ */
+export function detailRows(r, { revealed = false } = {}) {
   if (!r) return [];
   const rows = [
     ['신용카드', won(num(r.credit_card_amount) ?? 0)],
@@ -180,7 +183,7 @@ export function detailRows(r) {
   ];
   if (r.total_salary_amount != null) {
     rows.push(
-      ['최저사용금액(총급여 25%)', won(num(r.minimum_spend_amount))],
+      revealed ? ['최저사용금액(총급여 25%)', won(num(r.minimum_spend_amount))] : ['최저사용금액까지 남은 금액', won(num(r.remaining_to_minimum_amount) ?? 0)],
       ['예상 카드 소득공제', won(num(r.card_deduction_amount))],
       ['기본 한도 · 남음', `${won(num(r.base_limit_amount))} · ${won(num(r.base_remaining_amount))}`],
       ['추가 한도 · 남음', `${won(num(r.extra_limit_amount))} · ${won(num(r.extra_remaining_amount))}`],
@@ -194,6 +197,22 @@ export function sourceLine(r) {
   if (!r?.baseline_as_of_on) return '모두 가계부 기준 추정이에요.';
   const d = String(r.baseline_as_of_on);
   return `${Number(d.slice(5, 7))}월 ${Number(d.slice(8, 10))}일까지 국세청 값(넣은 항목) + 그 뒤 가계부 추정이에요.`;
+}
+
+/**
+ * 최저사용금액 막대의 글·읽어 주기 글. 최저사용금액 금액은 '보기'일 때만(가림 상태: 비율·사용액·남은 금액)
+ * @returns {{ text, aria }}
+ */
+export function minimumBarView(r, revealed = false) {
+  const pctUsed = Math.round(minimumRatio(r) * 100);
+  const used = won(num(r?.total_spend_amount) ?? 0);
+  if (revealed) {
+    const min = won(num(r?.minimum_spend_amount) ?? 0);
+    return { text: `최저사용금액 ${min} · 사용 ${used}`, aria: `최저사용금액 ${min} 중 ${used} 사용(${pctUsed}%)` };
+  }
+  // 가림 상태: 만 원 단위 한 숫자만(사용액 원 단위는 빼기 — 총괄 10-30, '언뜻 보기 방지' 수준)
+  const left = manWon(num(r?.remaining_to_minimum_amount) ?? 0);
+  return { text: `최저까지 ${left} 남음(${pctUsed}%)`, aria: `최저사용금액의 ${pctUsed}% 사용, ${left} 남음` };
 }
 
 /** 최저사용금액 막대 비율(0~1) */
@@ -301,6 +320,9 @@ export function baselineGroups(rows) {
   }
   return [...by].sort((a, b) => b[0].localeCompare(a[0])).map(([asOf, values]) => ({ asOf, values, complete: values.size === BASELINE_KINDS.length }));
 }
+
+/** 가림 안내(총괄 10-30: 가림은 '언뜻 보기 방지' 수준 — D3 두 사람 조회와 같은 취지) */
+export const MASK_NOTE = '총급여는 가려 두었어요. 다른 숫자로 짐작할 수 있어요(두 사람 모두 볼 수 있는 정보).';
 
 /** 총급여 가림 글: '●●●●만 원' / 없으면 '넣지 않음' */
 export function maskedSalary(amount) {

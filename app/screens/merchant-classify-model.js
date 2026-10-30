@@ -99,9 +99,18 @@ export function classifyDescription(g, categoryName) {
  * @param rules 켜진 category_rules 행(match_type·category_id로 미리 거른 것이어도 됨)
  */
 export function sameRuleExists(rules, value) {
+  return samePatternRule(rules, value).same != null;
+}
+
+/**
+ * 같은 패턴(방식·정리값)의 켜진 규칙 찾기(재리뷰 권장): 같은 카테고리면 same, 다른 카테고리면 other
+ * 다른 카테고리 규칙이 있으면 새 규칙을 만들지 않고 규칙 화면에서 바꾸도록 안내한다(규칙끼리 다투지 않게)
+ * @returns {{ same: object|null, other: object|null }}
+ */
+export function samePatternRule(rules, value) {
   const n = matchNorm(value.pattern);
-  return (rules ?? []).some((r) => r.is_active !== false && r.match_type === value.match_type
-    && r.category_id === value.category_id && matchNorm(r.pattern) === n);
+  const hits = (rules ?? []).filter((r) => r.is_active !== false && r.match_type === value.match_type && matchNorm(r.pattern) === n);
+  return { same: hits.find((r) => r.category_id === value.category_id) ?? null, other: hits.find((r) => r.category_id !== value.category_id) ?? null };
 }
 
 /**
