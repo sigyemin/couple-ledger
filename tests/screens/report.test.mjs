@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  shortWon, sixMonths, series, barChart, diffView, categoryMap, compareGroups, groupView, itemTxns, incomeView, incomeCompareText, CHART,
+  defaultReportMonth, shortWon, sixMonths, series, barChart, diffView, categoryMap, compareGroups, groupView, itemTxns, incomeView, incomeCompareText, CHART,
 } from '../../app/screens/report-model.js';
 import { s, SVG_NS } from '../../app/ui/svg.js';
 import { parseHash } from '../../app/router.js';
@@ -144,4 +144,10 @@ test('SVG 도우미: 네임스페이스로 만들고, 허용 안 한 태그·속
   assert.throws(() => s('script', {}, [], doc), /태그/);
   assert.throws(() => s('a', {}, [], doc), /태그/);
   for (const k of ['onload', 'style', 'href', 'xlink:href']) assert.throws(() => s('rect', { [k]: 'x' }, [], doc), /속성/);
+});
+
+test('기본 달 = 지난달(서울 기준): 1월이면 전년 12월, 서울 자정 넘으면 그 달 기준', () => {
+  assert.equal(defaultReportMonth(new Date('2026-10-30T00:20:00Z')), '2026-09-01');
+  assert.equal(defaultReportMonth(new Date('2026-01-10T03:00:00Z')), '2025-12-01');
+  assert.equal(defaultReportMonth(new Date('2026-10-31T15:30:00Z')), '2026-10-01'); // 서울 11월 1일 00:30
 });
