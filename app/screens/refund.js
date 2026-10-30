@@ -32,9 +32,17 @@ export async function readReviewStates(db) {
 
 /**
  * 연결 한 건: link_refund → 확인함. 두 번째가 실패하면 연결은 된 채 검토 대기로 남는다(해 없음 — 설계 4장)
- * @returns {{ ok: boolean, linked: boolean, error?: AppError }}
+ * onlyIfUnlinked(제안 연결·일괄 연결): 직전에 그 환불을 다시 읽어 아직 연결 없고 휴지통도 아닐 때만 연결한다.
+ *   link_refund는 이미 연결된 환불도 덮어쓰므로(스키마) 그사이 다른 사람이 연결했으면 건너뛴다(PR #31 리뷰)
+ * @returns {{ ok: boolean, linked: boolean, skipped?: boolean, error?: AppError }}
  */
-export async function linkOne(db, memberId, refundId, originalId) {
+export async function linkOne(db, memberId, refundId, originalId, { onlyIfUnlinked = false } = {}) {
+  if (onlyIfUnlinked) {
+    const now = await db.select('v_transaction_detail', { columns: 'id,refund_of_txn_id,deleted_at', filters: [{ col: 'id', op: 'eq', value: refundId }] });
+    if (now.error) return { ok: false, linked: false, error: now.error };
+    const r = now.data?.[0];
+    if (!r || r.refund_of_txn_id || r.deleted_at) return { ok: false, linked: false, skipped: true };
+  }
   const l = await db.rpc('link_refund', { p_refund_id: refundId, p_original_id: originalId });
   if (l.error) return { ok: false, linked: false, error: l.error };
   const u = await db.update('transactions', refundId, confirmPatch(memberId));
@@ -68,6 +76,10 @@ export async function renderRefundFind({ db, member, id, query, go, isCurrent, o
   const refund = (refundRes.data ?? [])[0];
   if (!refund || refund.kind !== 'refund') {
     return h('main', { class: 'screen' }, [head, h('p', { class: 'card muted', text: '환불 거래를 찾지 못했어요' }, [], doc)], doc);
+  }
+  // 휴지통 환불: 연결(DB가 거부)·원거래 없음(DB가 막지 않음) 모두 두지 않는다(PR #31 리뷰)
+  if (refund.deleted_at) {
+    return h('main', { class: 'screen' }, [head, h('p', { class: 'card notice', text: '휴지통에 있는 거래예요. 되살린 뒤 원거래를 찾아 주세요.' }, [], doc)], doc);
   }
   const cands = candRes.data ?? [];
   const suggested = !widen && isSuggestTarget(refund) ? suggestFrom(cands).suggest : null;

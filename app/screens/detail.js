@@ -186,8 +186,9 @@ export async function renderDetail({ db, member, id, go, reload, isCurrent, onEr
           const note = reviewedNote([`${String(o.occurred_on).slice(0, 7)}-01`], states);
           if (note && !(await confirmDialog({ title: '환불 연결', message: `${t.what} 결제와 연결해요. ${note}`, confirmLabel: '연결', doc }))) return;
           go2.disabled = true;
-          const r = await linkOne(db, member.memberId, row.id, o.txn_id);
+          const r = await linkOne(db, member.memberId, row.id, o.txn_id, { onlyIfUnlinked: true });
           go2.disabled = false;
+          if (r.skipped) { carryNotice.set(row.id, '다른 사람이 먼저 연결했어요.'); reload(); return; }
           if (!r.ok && !r.linked) { fail(r.error, { stage: STAGES.db_rpc }); return; }
           if (!r.ok) carryNotice.set(row.id, '연결했지만 확인함으로는 바꾸지 못했어요. "확인했어요"를 눌러 주세요.');
           reload();

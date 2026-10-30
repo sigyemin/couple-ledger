@@ -117,9 +117,10 @@ export function bulkConfirmText(plan, reviewStates) {
 }
 
 /** 일괄 결과 문장 */
-export function bulkResultText(done, total, failedAt) {
-  if (failedAt == null) return `${done}건 연결했어요.`;
-  return `${done}건 연결했고, ${failedAt.merchant_raw} 환불에서 멈춰 나머지 ${total - done}건은 연결하지 않았어요.`;
+export function bulkResultText(done, total, failedAt, skipped = 0) {
+  const skip = skipped ? ` ${skipped}건은 다른 사람이 먼저 연결했거나 휴지통으로 옮겨 건너뛰었어요.` : '';
+  if (failedAt == null) return `${done}건 연결했어요.${skip}`;
+  return `${done}건 연결했고, ${failedAt.merchant_raw} 환불에서 멈춰 나머지 ${total - done}건은 연결하지 않았어요.${skip}`;
 }
 
 export function confirmPatch(memberId) {

@@ -80,3 +80,35 @@ test('주소·탭: 원거래 찾기', () => {
   assert.equal(parseHash('#/refund/x').screen, 'list');
   assert.equal(activeTab('refund'), 'list');
 });
+
+import { linkOne } from '../../app/screens/refund.js';
+
+function fakeDb(now) {
+  const calls = [];
+  return {
+    calls,
+    async select(view, o) { calls.push(['select', view, o.filters[0].value]); return { data: now === undefined ? [] : [now], error: null }; },
+    async rpc(name, args) { calls.push(['rpc', name, args.p_refund_id]); return { data: {}, error: null }; },
+    async update(t, id, patch) { calls.push(['update', t, patch.review_status]); return { data: [{ id }], error: null }; },
+  };
+}
+
+test('제안·일괄 연결 직전 다시 읽기: 이미 연결됐거나 휴지통·없으면 건너뜀(link_refund 안 부름), 아니면 연결 + 확인함', async () => {
+  for (const now of [{ id: ID(1), refund_of_txn_id: ID(9), deleted_at: null }, { id: ID(1), refund_of_txn_id: null, deleted_at: '2026-10-30T00:00:00Z' }, undefined]) {
+    const db = fakeDb(now);
+    const r = await linkOne(db, ID(71), ID(1), ID(11), { onlyIfUnlinked: true });
+    assert.deepEqual([r.ok, r.linked, r.skipped], [false, false, true]);
+    assert.ok(!db.calls.some((c) => c[0] === 'rpc'));
+  }
+  const db = fakeDb({ id: ID(1), refund_of_txn_id: null, deleted_at: null });
+  assert.deepEqual(await linkOne(db, ID(71), ID(1), ID(11), { onlyIfUnlinked: true }), { ok: true, linked: true });
+  assert.deepEqual(db.calls.map((c) => c.slice(0, 2)), [['select', 'v_transaction_detail'], ['rpc', 'link_refund'], ['update', 'transactions']]);
+  // 찾기 화면(원거래 바꾸기 허용)은 다시 읽지 않는다
+  const db2 = fakeDb();
+  await linkOne(db2, ID(71), ID(1), ID(11));
+  assert.deepEqual(db2.calls.map((c) => c[1]), ['link_refund', 'transactions']);
+});
+
+test('일괄 결과 문장: 건너뛴 수', () => {
+  assert.equal(bulkResultText(2, 2, null, 1), '2건 연결했어요. 1건은 다른 사람이 먼저 연결했거나 휴지통으로 옮겨 건너뛰었어요.');
+});

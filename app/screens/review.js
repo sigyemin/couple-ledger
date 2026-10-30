@@ -200,8 +200,9 @@ export async function renderReview({ db, member, monthStart, reload, isCurrent, 
     const note = reviewedNote([`${String(o.occurred_on).slice(0, 7)}-01`], states);
     if (note && !(await confirmDialog({ title: `${r.merchant_raw} 환불 연결`, message: `${fmtDay(o.occurred_on)} ${won(Number(o.amount))} 결제와 연결해요. ${note}`, confirmLabel: '연결', doc }))) return;
     refundBusy(true);
-    const res2 = await linkOne(db, member.memberId, r.id, o.txn_id);
+    const res2 = await linkOne(db, member.memberId, r.id, o.txn_id, { onlyIfUnlinked: true });
     refundBusy(false);
+    if (res2.skipped) { reviewNotice = { text: `${r.merchant_raw} 환불은 다른 사람이 먼저 연결했거나 휴지통으로 옮겼어요.`, isError: true }; reload(); return; }
     if (!res2.ok && !res2.linked) { fail(res2.error, { stage: STAGES.db_rpc, txnId: r.id }); return; }
     reviewNotice = res2.ok
       ? { text: `${r.merchant_raw} 환불을 연결했어요.`, isError: false }
@@ -213,10 +214,12 @@ export async function renderReview({ db, member, monthStart, reload, isCurrent, 
     if (!(await confirmDialog({ ...bulkConfirmText(plan, states), confirmLabel: `${plan.pairs.length}건 연결`, doc }))) return;
     refundBusy(true);
     let done = 0;
+    let skipped = 0;
     let failedAt = null;
-    for (const p of plan.pairs) {
-      say(`연결 중 ${done + 1}/${plan.pairs.length}`);
-      const r2 = await linkOne(db, member.memberId, p.refund.id, p.original.txn_id);
+    for (const [i, p] of plan.pairs.entries()) {
+      say(`연결 중 ${i + 1}/${plan.pairs.length}`);
+      const r2 = await linkOne(db, member.memberId, p.refund.id, p.original.txn_id, { onlyIfUnlinked: true });
+      if (r2.skipped) { skipped += 1; continue; } // 그사이 다른 사람이 연결·휴지통 → 건너뜀
       if (!r2.ok) {
         if (r2.error) onError?.(r2.error, { stage: STAGES.db_rpc, txnId: p.refund.id });
         failedAt = p.refund;
@@ -225,7 +228,7 @@ export async function renderReview({ db, member, monthStart, reload, isCurrent, 
       }
       done += 1;
     }
-    reviewNotice = { text: bulkResultText(done, plan.pairs.length, failedAt), isError: failedAt != null };
+    reviewNotice = { text: bulkResultText(done, plan.pairs.length - skipped, failedAt, skipped), isError: failedAt != null || skipped > 0 };
     reload();
   };
   const refundItem = (r) => {
