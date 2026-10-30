@@ -8,7 +8,7 @@
 // 의존: ./detect.js, ./formats.js, ./normalize.js
 // =====================================================================
 import { detectFileType, decodeUtf8Strict } from './detect.js';
-import { matchFormats } from './formats.js';
+import { matchFormats, diagnoseFormats } from './formats.js';
 import { normalizeRows } from './normalize.js';
 
 export const MAX_ROWS = 20000;
@@ -105,7 +105,9 @@ export function readGrid(XLSX, bytes) {
 /** 파일이 맞는 형식 id 목록 */
 export function detectFormats(XLSX, bytes, formats) {
   const { fileType, grid } = readGrid(XLSX, bytes);
-  return { fileType, formatIds: matchFormats(grid, formats, fileType).map((m) => m.format.id) };
+  const formatIds = matchFormats(grid, formats, fileType).map((m) => m.format.id);
+  // 맞는 형식이 없으면 진단(형식 쪽 이름·숫자만 — 셀 값 없음, CL-069)
+  return formatIds.length ? { fileType, formatIds } : { fileType, formatIds, diagnosis: diagnoseFormats(grid, formats, fileType) };
 }
 
 /**
