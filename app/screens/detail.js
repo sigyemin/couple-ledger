@@ -6,7 +6,7 @@
 //       transactions update(memo · review_status · is_shared · is_excluded/exclude_reason · deleted_at/deleted_by, 항상 updated_by = 나)
 // - 쓰기는 재시도하지 않는다. 끝나면 다시 읽어 그린다(reload). 0행이 바뀌면 실패로 본다
 // - 정산에 영향 주는 변경(공동/개인·집계 제외)은 확인 대화상자를 거친다(확인 완료 달이면 '확인 후 변경됨' 안내)
-// - 원거래 찾기는 다음 단계(사용자 결정 대기)
+// - 환불: 원거래 찾기(#/refund) 링크. 연결 안 된 체크카드 취소면 연결 제안 상자(CL-034 조건 1~3) → link_refund + 확인함
 // 의존: ui/dom.js, router.js, core/confirm.js, core/validate.js, core/errors.js, screens/detail-model.js, screens/list-model.js, screens/shell.js
 // =====================================================================
 import { h, replaceChildren } from '../ui/dom.js';
@@ -20,6 +20,8 @@ import {
   editability, settlementChangeText, sharePatch, excludePatch, confirmPatch, linesDraft, validateLines, MAX_LINES,
 } from './detail-model.js';
 import { errorView } from './shell.js';
+import { readCandidates, readReviewStates, linkOne } from './refund.js';
+import { isSuggestTarget, suggestFrom, suggestionText, reviewedNote } from './refund-model.js';
 import { historyEntries, HISTORY_NOTE, EDIT_LIMIT, ITEM_LIMIT } from './history-model.js';
 
 export const DETAIL_COLUMNS = [
@@ -27,7 +29,7 @@ export const DETAIL_COLUMNS = [
   'installment_months', 'kind', 'is_shared', 'share_ratio', 'is_excluded', 'exclude_reason', 'review_status', 'memo',
   'refund_of_txn_id', 'batch_id', 'created_at', 'created_by', 'updated_at', 'updated_by', 'deleted_at', 'source_label',
   'payer_member_id', 'payer_name', 'lines', 'other_share_amount', 'month_reviewed_at', 'is_changed_after_review',
-  'is_uncategorized', 'inherited_category_id',
+  'is_uncategorized', 'inherited_category_id', 'card_kind', 'is_test_source',
 ].join(',');
 const MINI = 'id,occurred_on,merchant_raw,amount';
 
@@ -169,6 +171,37 @@ export async function renderDetail({ db, member, id, go, reload, isCurrent, onEr
   for (const r of m.refunds) {
     links.push(h('a', { class: 'row-link soft', attrs: { href: buildHash('txn', { id: r.id }) } }, [
       h('span', { text: `연결된 ${r.text}` }, [], doc), h('strong', { text: `${r.amount} ›` }, [], doc),
+    ], doc));
+  }
+  if (row.kind === 'refund' && !row.deleted_at) {
+    const unlinkedRefund = !row.refund_of_txn_id;
+    if (unlinkedRefund && isSuggestTarget(row)) {
+      const [c, states] = await Promise.all([readCandidates(db, row.id), readReviewStates(db)]);
+      if (!isCurrent()) return null;
+      const sg = c.error ? null : suggestFrom(c.data ?? []);
+      const t = suggestionText(sg);
+      if (t?.kind === 'suggest') {
+        const o = sg.suggest;
+        const go2 = button('연결하기', 'primary small-btn', async () => {
+          const note = reviewedNote([`${String(o.occurred_on).slice(0, 7)}-01`], states);
+          if (note && !(await confirmDialog({ title: '환불 연결', message: `${t.what} 결제와 연결해요. ${note}`, confirmLabel: '연결', doc }))) return;
+          go2.disabled = true;
+          const r = await linkOne(db, member.memberId, row.id, o.txn_id);
+          go2.disabled = false;
+          if (!r.ok && !r.linked) { fail(r.error, { stage: STAGES.db_rpc }); return; }
+          if (!r.ok) carryNotice.set(row.id, '연결했지만 확인함으로는 바꾸지 못했어요. "확인했어요"를 눌러 주세요.');
+          reload();
+        });
+        links.push(h('div', { class: 'suggest-box', attrs: { role: 'group', 'aria-label': '연결 제안' } }, [
+          h('p', { class: 'small strong', text: t.title }, [], doc), h('p', { text: t.what }, [], doc), h('p', { class: 'muted small', text: t.why }, [], doc),
+          h('div', { class: 'btn-row' }, [go2], doc),
+        ], doc));
+      } else if (t) {
+        links.push(h('p', { class: 'muted small', text: t.text }, [], doc));
+      }
+    }
+    links.push(h('a', { class: 'row-link soft', attrs: { href: buildHash('refund', { id: row.id }) } }, [
+      h('span', { text: unlinkedRefund ? '원거래 연결 안 됨 · 원거래 찾기' : '원거래 바꾸기' }, [], doc), h('strong', { text: '›' }, [], doc),
     ], doc));
   }
   const linkCard = links.length ? h('section', { class: 'card' }, [h('h2', { class: 'card-title', text: '연결' }, [], doc), ...links], doc) : null;

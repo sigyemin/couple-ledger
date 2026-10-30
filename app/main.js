@@ -27,6 +27,7 @@ import { renderSources, renderSourceEdit } from './screens/sources.js';
 import { renderTrash } from './screens/trash.js';
 import { renderChanges, renderChange } from './screens/changes.js';
 import { renderReview } from './screens/review.js';
+import { renderRefundFind } from './screens/refund.js';
 import { renderReport, renderReportGroup, renderReportItem } from './screens/report.js';
 import { defaultReportMonth } from './screens/report-model.js';
 import { defaultReviewMonth } from './screens/review-model.js';
@@ -156,6 +157,8 @@ async function boot() {
         view = await renderCategories({ db, reload, isCurrent, onError });
       } else if (route.screen === 'settle') {
         view = await renderSettle({ db, monthStart: monthParam(route.query.get('month'), defaultSettleMonth()), reload, isCurrent, onError });
+      } else if (route.screen === 'refund') {
+        view = await renderRefundFind({ db, member, id: route.id, query: route.query, go, isCurrent, onError });
       } else if (route.screen === 'add') {
         view = await renderAdd({ db, member, query: route.query, go, isCurrent, onError });
       } else if (route.screen === 'txn') {

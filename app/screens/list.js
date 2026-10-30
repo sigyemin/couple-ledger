@@ -20,7 +20,7 @@ import { errorView } from './shell.js';
 export const LIST_COLUMNS = [
   'id', 'source_id', 'occurred_on', 'occurred_time', 'merchant_raw', 'merchant_norm', 'amount', 'kind', 'is_shared', 'is_excluded',
   'review_status', 'memo', 'refund_of_txn_id', 'source_label', 'payer_member_id', 'payer_name', 'lines',
-  'is_uncategorized', 'inherited_category_id', 'is_changed_after_review',
+  'is_uncategorized', 'inherited_category_id', 'is_changed_after_review', 'card_kind',
 ].join(',');
 
 const eq = (col, value) => ({ col, op: 'eq', value });
