@@ -160,6 +160,26 @@ export function applySourceChoice(f, value) {
   return 'prepare';
 }
 
+/**
+ * 저장한 파일에 체크카드 취소(환불)가 있으면 그 이용일의 달들(최대 3, 오래된 달부터) — 저장 뒤 연결 제안 수를 셀 달 (CL-042)
+ * 미연결 환불의 귀속월은 이용일의 달이다
+ */
+export function checkCancelMonths(savedFiles, max = 3) {
+  const months = new Set();
+  for (const f of savedFiles ?? []) {
+    for (const r of f.parsed?.rows ?? []) if (r.kind === 'refund' && r.card_kind === 'check_card') months.add(`${String(r.occurred_on).slice(0, 7)}-01`);
+  }
+  return [...months].sort().slice(0, max);
+}
+
+/** 올리기 결과의 연결 제안 한 줄 */
+export function suggestLineText(counts) {
+  const total = counts.reduce((s, c) => s + c.count, 0);
+  if (!total) return null;
+  const first = counts.find((c) => c.count > 0);
+  return { text: `체크카드 취소 연결 제안 ${total}건이 있어요. 월 검토에서 연결해요.`, month: first.month };
+}
+
 export const TEST_SOURCE_WARNING = '시험용 결제수단이에요(집계 제외, 나중에 일괄 삭제됨). 실제 파일이면 다른 결제수단을 골라 주세요.';
 
 export const monthTitle = (m) => `${monthLabel(m).replace(/^[0-9]+년 /, '')} 파일`;

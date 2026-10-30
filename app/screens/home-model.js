@@ -79,6 +79,11 @@ export function buildHomeModel(monthStart, d) {
   if (refunds > 0) {
     todos.push({ key: 'refund', tone: 'info', href: `#/list?month=${monthStart.slice(0, 7)}&kind=refund_unlinked`, text: `원거래를 못 찾은 환불 ${refunds}건`, sub: null });
   }
+  // 지난달 체크카드 취소 연결 제안(CL-042) → 그 달 월 검토
+  if (d.suggest?.count > 0) {
+    const ym = d.suggest.month.slice(0, 7);
+    todos.push({ key: 'refund-suggest', tone: 'info', href: `#/review?month=${ym}`, text: `${Number(ym.slice(5))}월 환불 연결 제안 ${d.suggest.count}건`, sub: '체크카드 취소 · 월 검토에서 연결해요' });
+  }
   for (const c of d.changedMonths ?? []) {
     const ym = String(c.period_month).slice(0, 7);
     todos.push({
