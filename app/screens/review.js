@@ -4,13 +4,15 @@
 // 쓰기: 분류 → 확인 대화상자 → bulk_set_category(가맹점 묶음, 500건까지) → 그 거래들을 review_status = confirmed로 한 건씩
 //       (사용자 결정 10-29. bulk_set_category는 검토 상태를 바꾸지 않음 — 스키마 v0.17)
 //       둘 다 맞음 → transactions update(review_status = confirmed) 한 건씩
-// 준비 중: 원거래를 못 찾은 환불(원거래 찾기 — 사용자 결정 U-13 대기), 아직 안 정한 이체 상대(규칙 화면 필요),
+// 원거래를 못 찾은 환불(CL-034, 사용자 결정 U-13): 환불마다 카드. 체크카드 취소는 find_refund_candidates로 연결 제안(조건 1~4, refund-model.js)
+//   → 연결하기(link_refund + 확인함) / 다른 결제 찾기(#/refund). 제안된 것만 "모두 연결"(확인 창에 목록, 한 건씩, 멈추면 안내, n/N)
+// 준비 중: 아직 안 정한 이체 상대(규칙 화면 필요),
 //          분류 뒤 "같은 가맹점 규칙 저장"(규칙 화면 필요)
 // 의존: ui/dom.js, router.js, core/format.js, core/errors.js, screens/list.js, screens/review-model.js, screens/detail-model.js, screens/shell.js
 // =====================================================================
 import { h, widthClass } from '../ui/dom.js';
 import { addMonths, buildHash } from '../router.js';
-import { month } from '../core/format.js';
+import { month, day, won } from '../core/format.js';
 import { STAGES, ACTIONS } from '../core/errors.js';
 import { readMonthRows } from './list.js';
 import { confirmDialog } from '../core/confirm.js';
@@ -18,6 +20,10 @@ import {
   progress, uncategorizedGroups, classifyConfirmText, duplicateGroups, unlinkedRefundCount, mismatchItems, confirmBothPatch,
 } from './review-model.js';
 import { categoryOptions } from './detail-model.js';
+import { readCandidates, readReviewStates, linkOne } from './refund.js';
+import {
+  SUGGEST_CALL_LIMIT, isSuggestTarget, monthSuggestions, suggestionText, reviewedNote, bulkPlan, bulkConfirmText, bulkResultText,
+} from './refund-model.js';
 import { errorView } from './shell.js';
 
 let reviewNotice = null;
@@ -41,10 +47,22 @@ export async function loadReview(db, monthStart) {
   ]);
   const error = [summary, rows, dups, mismatch, categories].find((r) => r.error)?.error;
   if (error) return { error };
+  // 원거래를 못 찾은 환불(검토 대기·연결 없음, 테스트 결제수단은 readMonthRows가 뺌)과 체크카드 취소의 후보
+  const unlinked = rows.data.rows.filter((r) => r.kind === 'refund' && !r.refund_of_txn_id && r.review_status === 'needs_review')
+    .sort((x, y) => String(x.occurred_on).localeCompare(String(y.occurred_on)) || String(x.id).localeCompare(String(y.id)));
+  const targets = unlinked.filter(isSuggestTarget).slice(0, SUGGEST_CALL_LIMIT);
+  const [cands, states] = await Promise.all([
+    Promise.all(targets.map((r) => readCandidates(db, r.id))),
+    readReviewStates(db),
+  ]);
+  const byRefund = new Map();
+  targets.forEach((r, i) => { if (!cands[i].error) byRefund.set(r.id, cands[i].data ?? []); });
   return {
     data: {
       summary: summary.data?.[0] ?? null, rows: rows.data.rows, capped: rows.data.capped,
       dups: dups.data ?? [], mismatch: mismatch.data ?? [], categories: categories.data ?? [],
+      unlinked, suggestions: monthSuggestions(byRefund), states,
+      suggestFailed: cands.some((c) => c.error), suggestCapped: unlinked.filter(isSuggestTarget).length > targets.length,
     },
   };
 }
@@ -68,7 +86,7 @@ export async function renderReview({ db, member, monthStart, reload, isCurrent, 
     onError?.(res.error);
     return h('main', { class: 'screen' }, [head, errorView(res.error.message, res.error.detail?.sqlState ?? res.error.code, doc)], doc);
   }
-  const { summary, rows, capped, dups, mismatch, categories } = res.data;
+  const { summary, rows, capped, dups, mismatch, categories, unlinked: refunds, suggestions, states, suggestFailed, suggestCapped } = res.data;
   const status = h('p', { class: 'status-line', attrs: { role: 'status', 'aria-live': 'polite' } }, [], doc);
   const say = (msg, isError = false) => {
     status.textContent = msg;
@@ -173,11 +191,87 @@ export async function renderReview({ db, member, monthStart, reload, isCurrent, 
       }), doc),
   ]);
 
-  // 원거래를 못 찾은 환불 (준비 중)
+  // 원거래를 못 찾은 환불 (CL-034): 환불마다 카드, 체크카드 취소는 연결 제안
   const unlinked = unlinkedRefundCount(summary);
-  const refundCard = card(`원거래를 못 찾은 환불${unlinked ? ` · ${unlinked}건` : ''}`, [
-    h('p', { class: 'muted', text: unlinked ? '원거래 찾기 화면은 준비 중이에요.' : '못 찾은 환불이 없어요' }, [], doc),
-    unlinked ? link('환불 목록 보기', buildHash('list', { query: { month: ym(monthStart), kind: 'refund_unlinked' } })) : null,
+  const fmtDay = (d) => day(d).replace(/ \(.\)$/, '');
+  const plan = bulkPlan(refunds, suggestions);
+  const refundBusy = (on) => { for (const b of refundCard.querySelectorAll('button')) b.disabled = on; };
+  const linkSuggested = async (r, o) => {
+    const note = reviewedNote([`${String(o.occurred_on).slice(0, 7)}-01`], states);
+    if (note && !(await confirmDialog({ title: `${r.merchant_raw} 환불 연결`, message: `${fmtDay(o.occurred_on)} ${won(Number(o.amount))} 결제와 연결해요. ${note}`, confirmLabel: '연결', doc }))) return;
+    refundBusy(true);
+    const res2 = await linkOne(db, member.memberId, r.id, o.txn_id, { onlyIfUnlinked: true });
+    refundBusy(false);
+    if (res2.skipped) { reviewNotice = { text: `${r.merchant_raw} 환불은 다른 사람이 먼저 연결했거나 휴지통으로 옮겼어요.`, isError: true }; reload(); return; }
+    if (!res2.ok && !res2.linked) { fail(res2.error, { stage: STAGES.db_rpc, txnId: r.id }); return; }
+    reviewNotice = res2.ok
+      ? { text: `${r.merchant_raw} 환불을 연결했어요.`, isError: false }
+      : { text: `${r.merchant_raw} 환불을 연결했지만 확인함으로는 바꾸지 못했어요. 상세에서 "확인했어요"를 눌러 주세요.`, isError: true };
+    reload();
+  };
+  const linkAll = async () => {
+    if (!plan.pairs.length) return;
+    if (!(await confirmDialog({ ...bulkConfirmText(plan, states), confirmLabel: `${plan.pairs.length}건 연결`, doc }))) return;
+    refundBusy(true);
+    let done = 0;
+    let skipped = 0;
+    let failedAt = null;
+    for (const [i, p] of plan.pairs.entries()) {
+      say(`연결 중 ${i + 1}/${plan.pairs.length}`);
+      const r2 = await linkOne(db, member.memberId, p.refund.id, p.original.txn_id, { onlyIfUnlinked: true });
+      if (r2.skipped) { skipped += 1; continue; } // 그사이 다른 사람이 연결·휴지통 → 건너뜀
+      if (!r2.ok) {
+        if (r2.error) onError?.(r2.error, { stage: STAGES.db_rpc, txnId: p.refund.id });
+        failedAt = p.refund;
+        if (r2.linked) done += 1; // 연결은 됐고 확인함만 못 바꿈
+        break;
+      }
+      done += 1;
+    }
+    reviewNotice = { text: bulkResultText(done, plan.pairs.length - skipped, failedAt, skipped), isError: failedAt != null || skipped > 0 };
+    reload();
+  };
+  const refundItem = (r) => {
+    const sg = suggestions.get(r.id);
+    const t = suggestionText(sg);
+    const find = (label) => h('a', { class: 'btn secondary small-btn', text: label, attrs: { href: buildHash('refund', { id: r.id }) } }, [], doc);
+    let box;
+    if (t?.kind === 'suggest') {
+      const go = h('button', { class: 'btn primary small-btn', text: '연결하기', attrs: { type: 'button' } }, [], doc);
+      go.addEventListener('click', () => linkSuggested(r, sg.suggest));
+      box = h('div', { class: 'suggest-box', attrs: { role: 'group', 'aria-label': `${r.merchant_raw} 연결 제안` } }, [
+        h('p', { class: 'small strong', text: t.title }, [], doc),
+        h('p', { text: t.what }, [], doc),
+        h('p', { class: 'muted small', text: t.why }, [], doc),
+        h('div', { class: 'btn-row' }, [go, find('다른 결제 찾기')], doc),
+      ], doc);
+    } else {
+      box = h('div', {}, [t ? h('p', { class: 'muted small', text: t.text }, [], doc) : null, h('div', { class: 'btn-row' }, [find('원거래 찾기')], doc)], doc);
+    }
+    return h('li', { class: 'refund-item' }, [
+      h('a', { class: 'txn tone-refund', attrs: { href: buildHash('txn', { id: r.id }) } }, [
+        h('span', { class: 'txn-main' }, [
+          h('span', { class: 'txn-merchant' }, [r.merchant_raw, h('span', { class: 'tag', text: r.card_kind === 'check_card' ? '체크카드 취소' : '환불' }, [], doc)], doc),
+          h('span', { class: 'sub', text: `${fmtDay(r.occurred_on)} · ${r.source_label}` }, [], doc),
+        ], doc),
+        h('span', { class: 'txn-amount', text: won(-Number(r.amount)) }, [], doc),
+      ], doc),
+      box,
+    ], doc);
+  };
+  let bulkBtn = null;
+  if (plan.pairs.length) {
+    bulkBtn = h('button', { class: 'btn primary', text: `제안 ${plan.pairs.length}건 모두 연결`, attrs: { type: 'button' } }, [], doc);
+    bulkBtn.addEventListener('click', linkAll);
+  }
+  const refundCard = card(`원거래를 못 찾은 환불${unlinked || refunds.length ? ` · ${Math.max(unlinked, refunds.length)}건` : ''}${plan.pairs.length ? ` · 연결 제안 ${plan.pairs.length}건` : ''}`, [
+    refunds.length === 0 ? h('p', { class: 'muted', text: '못 찾은 환불이 없어요' }, [], doc)
+      : h('ul', { class: 'refund-list' }, refunds.slice(0, 100).map(refundItem), doc),
+    refunds.length > 100 ? link(`나머지 ${refunds.length - 100}건은 내역에서`, buildHash('list', { query: { month: ym(monthStart), kind: 'refund_unlinked' } })) : null,
+    suggestFailed ? h('p', { class: 'notice small', text: '일부 환불의 후보를 읽지 못해 제안을 빼고 보여요.' }, [], doc) : null,
+    suggestCapped ? h('p', { class: 'muted small', text: `체크카드 취소가 많아 앞 ${SUGGEST_CALL_LIMIT}건만 제안을 계산했어요.` }, [], doc) : null,
+    bulkBtn,
+    refunds.length ? h('p', { class: 'muted small', text: '연결하면 그 결제의 달·카테고리로 집계되고 "확인했어요" 처리돼요. 원거래가 다른 달이면 환불이 그 달로 옮겨 가서, 확인 완료한 달이 "확인 후 변경됨"이 될 수 있어요.' }, [], doc) : null,
   ]);
 
   // 아직 안 정한 이체 상대 (준비 중)

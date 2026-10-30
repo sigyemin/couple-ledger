@@ -7,9 +7,10 @@
 // =====================================================================
 
 export const SCREENS = Object.freeze(['home', 'list', 'txn', 'add', 'upload', 'settle', 'more', 'categories', 'trash', 'changes', 'change', 'review',
-  'report', 'rgroup', 'ritem', 'rules', 'rule', 'rulenew', 'reapply', 'cprules', 'cprule', 'cprulenew', 'cpapply', 'sources', 'source', 'sourcenew']);
+  'report', 'rgroup', 'ritem', 'rules', 'rule', 'rulenew', 'reapply', 'refund', 'cprules', 'cprule', 'cprulenew', 'cpapply', 'sources', 'source', 'sourcenew']);
 // id를 받는 화면 → id가 틀리면 갈 목록 화면
 const ID_SCREENS = Object.freeze({
+  refund: 'list',
   txn: 'list', change: 'changes', rgroup: 'report', ritem: 'report', rule: 'rules', reapply: 'rules', cprule: 'cprules', cpapply: 'cprules',
   source: 'sources',
 });

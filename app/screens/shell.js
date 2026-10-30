@@ -15,7 +15,7 @@ export const TABS = Object.freeze([
 
 /** 현재 화면에 맞는 탭 표시 (거래 상세는 내역 탭) */
 export function activeTab(screen) {
-  if (screen === 'txn' || screen === 'add') return 'list';
+  if (screen === 'txn' || screen === 'add' || screen === 'refund') return 'list';
   return ['categories', 'trash', 'changes', 'change', 'review', 'report', 'rgroup', 'ritem', 'rules', 'rule', 'rulenew', 'reapply',
     'cprules', 'cprule', 'cprulenew', 'cpapply', 'sources', 'source', 'sourcenew'].includes(screen) ? 'more' : screen;
 }
