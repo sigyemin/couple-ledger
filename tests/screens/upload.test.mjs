@@ -19,7 +19,7 @@ test('휴대폰 판별: userAgentData.mobile 값이 먼저, 없으면 pointer: c
   assert.equal(isPhone({}), false);
 });
 
-test('결제수단 맞춤: 켜진 것·형식 일치만, 1개면 자동, 여러 개면 고르기(시험용은 뒤·표시), 없으면 빈 목록', () => {
+test('결제수단 맞춤: 켜진 것·형식 일치만, 1개면 자동(시험용은 자동 아님), 여러 개면 고르기(시험용은 뒤·표시), 없으면 빈 목록', () => {
   const F1 = ID(31);
   const F2 = ID(32);
   const s = (n, o) => ({ id: ID(n), label: `카드${n}`, import_format_id: F1, is_active: true, is_test: false, institution: '가상기관', ...o });
@@ -28,6 +28,9 @@ test('결제수단 맞춤: 켜진 것·형식 일치만, 1개면 자동, 여러 
   const m = matchSources([F1], sources);
   assert.deepEqual([m.choices.map((c) => c.label), m.autoId], [['카드1', '시험 (시험용)'], null]);
   assert.deepEqual(matchSources([], sources), { choices: [], autoId: null });
+  // 시험용 하나에만 맞아도 자동으로 고르지 않는다(실제 파일이 시험용으로 들어가는 것 막기)
+  const onlyTest = matchSources([F1], [s(4, { is_test: true, label: '시험' })]);
+  assert.deepEqual([onlyTest.choices.length, onlyTest.autoId, onlyTest.choices[0].isTest], [1, null, true]);
 });
 
 test('미리보기: 이미 있는 키는 빼고 셈, 행 오류 사유별, 집계 제외·체크카드·환불·숫자 가림·꼬리 줄, 지출 합계(제외 빼고 환불은 −)', () => {

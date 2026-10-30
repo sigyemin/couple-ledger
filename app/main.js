@@ -29,6 +29,7 @@ import { renderChanges, renderChange } from './screens/changes.js';
 import { renderReview } from './screens/review.js';
 import { renderUpload } from './screens/upload.js';
 import { renderReport, renderReportGroup, renderReportItem } from './screens/report.js';
+import { defaultReportMonth } from './screens/report-model.js';
 import { defaultReviewMonth } from './screens/review-model.js';
 
 const doc = globalThis.document;
@@ -125,11 +126,11 @@ async function boot() {
       } else if (route.screen === 'review') {
         view = await renderReview({ db, member, monthStart: monthParam(route.query.get('month'), defaultReviewMonth()), reload, isCurrent, onError });
       } else if (route.screen === 'report') {
-        view = await renderReport({ db, monthStart, view: route.query.get('view') === 'income' ? 'income' : 'expense', isCurrent, onError });
+        view = await renderReport({ db, monthStart: monthParam(route.query.get('month'), defaultReportMonth()), view: route.query.get('view') === 'income' ? 'income' : 'expense', isCurrent, onError });
       } else if (route.screen === 'rgroup') {
-        view = await renderReportGroup({ db, id: route.id, monthStart, isCurrent, onError });
+        view = await renderReportGroup({ db, id: route.id, monthStart: monthParam(route.query.get('month'), defaultReportMonth()), isCurrent, onError });
       } else if (route.screen === 'ritem') {
-        view = await renderReportItem({ db, id: route.id, monthStart, isCurrent, onError });
+        view = await renderReportItem({ db, id: route.id, monthStart: monthParam(route.query.get('month'), defaultReportMonth()), isCurrent, onError });
       } else if (route.screen === 'trash') {
         view = await renderTrash({ db, member, reload, isCurrent, onError });
       } else if (route.screen === 'changes') {

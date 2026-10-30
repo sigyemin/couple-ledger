@@ -153,7 +153,7 @@ export async function renderReport({ db, monthStart, view = 'expense', isCurrent
             h('span', { class: 'cmp-diff' }, [h('span', { class: g.diff.tone, text: g.diff.text }, [], doc), diffSvg(g.bar, doc)], doc),
           ], doc),
         ], doc)), doc),
-      h('p', { class: 'muted small', text: '합계는 홈의 이번 달 지출과 같아요. 집계 제외는 빼고, 환불은 원거래 달·카테고리에서 뺐어요.' }, [], doc),
+      h('p', { class: 'muted small', text: '합계는 홈의 그 달 지출과 같아요. 집계 제외는 빼고, 환불은 원거래 달·카테고리에서 뺐어요.' }, [], doc),
     ], doc);
   } else {
     const iv = incomeView(rows.filter((r) => r.period_month === monthStart), rows.filter((r) => r.period_month === prevMonth), cats, { hasPrev });

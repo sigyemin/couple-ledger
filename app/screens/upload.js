@@ -22,7 +22,7 @@ import { isPhone } from '../import/env.js';
 import { ensureBatch, uploadRows, batchFileName } from '../import/upload.js';
 import { fileHash } from '../import/dedup.js';
 import {
-  MAX_FILES, KEY_CHUNK, counterpartyGroups, counterpartyRule, draftRule, matchSources, previewOf, previewLines, readErrorText, resultLines, failedRows, monthTitle,
+  MAX_FILES, KEY_CHUNK, TEST_SOURCE_WARNING, counterpartyGroups, counterpartyRule, draftRule, matchSources, previewOf, previewLines, readErrorText, resultLines, failedRows, monthTitle,
 } from './upload-model.js';
 import { errorView } from './shell.js';
 import { choiceCard } from './counterparty-card.js';
@@ -180,9 +180,9 @@ export async function renderUpload({ db, guard, member, monthStart, isCurrent, o
   }
 
   async function addFiles(fileList) {
-    const picked = [...fileList].slice(0, MAX_FILES - files.length);
-    if (fileList.length > picked.length) say(`한 번에 ${MAX_FILES}개까지 올릴 수 있어요.`, true);
-    for (const file of picked) {
+    // 상한은 넣을 때마다 다시 본다(읽는 중에 또 고른 파일까지 세려고). 읽는 동안에는 고르기 버튼도 꺼진다
+    for (const file of [...fileList]) {
+      if (files.length >= MAX_FILES) { say(`한 번에 ${MAX_FILES}개까지 올릴 수 있어요.`, true); break; }
       const f = { key: `${files.length}-${file.name}`, name: file.name, state: 'reading', choices: [] };
       files.push(f);
       draw();
@@ -210,7 +210,7 @@ export async function renderUpload({ db, guard, member, monthStart, isCurrent, o
     if (f.state === 'reading') body.push(h('p', { class: 'muted small', text: '읽는 중…' }, [], doc));
     if (f.state === 'error') body.push(h('p', { class: 'notice small', text: f.message }, [], doc));
     if (f.state === 'nomatch') body.push(h('p', { class: 'notice small', text: '맞는 결제수단이 없어 건너뛰어요. 결제수단의 파일 형식을 확인해 주세요.' }, [], doc));
-    if (f.state === 'choose' || (f.choices.length > 1 && f.state !== 'reading' && f.state !== 'saved')) {
+    if (f.state === 'choose' || ((f.choices.length > 1 || f.choices[0]?.isTest) && f.state !== 'reading' && f.state !== 'saved')) {
       const sel = h('select', { class: 'field', attrs: { 'aria-label': `${f.name} 결제수단` } }, [
         h('option', { text: '어느 결제수단 파일인가요?', attrs: { value: '' } }, [], doc),
         ...f.choices.map((c) => h('option', { text: c.label, attrs: { value: c.id } }, [], doc)),
@@ -219,6 +219,7 @@ export async function renderUpload({ db, guard, member, monthStart, isCurrent, o
       sel.disabled = busy;
       sel.addEventListener('change', () => { if (sel.value) { f.sourceId = sel.value; f.result = null; prepare(f); } });
       body.push(sel);
+      if (f.choices.find((c) => c.id === f.sourceId)?.isTest) body.push(h('p', { class: 'notice small', text: TEST_SOURCE_WARNING }, [], doc));
     }
     if (f.state === 'ready' || f.state === 'saved') {
       const src = sources.find((s) => s.id === f.sourceId);
@@ -266,7 +267,7 @@ export async function renderUpload({ db, guard, member, monthStart, isCurrent, o
     const cardErrors = ready.some((f) => f.cards?.some((c) => c.error));
     save.disabled = busy || ready.length === 0 || cardErrors || files.some((f) => f.state === 'reading');
     if (cardErrors) say('새 이체 상대에서 고를 값을 마저 골라 주세요.', true);
-    picker.disabled = busy;
+    picker.disabled = busy || files.some((f) => f.state === 'reading');
   }
 
   async function saveAll() {

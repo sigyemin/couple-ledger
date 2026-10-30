@@ -2,6 +2,7 @@
 // 올리기 — 화면 없이 계산하는 부분 (화면 설계 v0.1 4-2 ①·③·④, 보정 CL-029 2판)
 // - 파일 해시: import/dedup.js fileHash(SHA-256 hex). 같은 결제수단·같은 해시면 이어 올리기("빠진 행만")
 // - 결제수단 맞춤: 파일 내용(헤더)이 맞는 형식 → 그 형식을 쓰는 켜진 결제수단. 1개면 자동, 여러 개면 고르기, 없으면 건너뜀
+//   시험용(is_test)은 자동으로 고르지 않는다 — 하나뿐이어도 고르기로 두고 경고(실제 파일이 시험용으로 들어가면 집계에서 빠지고 일괄 삭제될 수 있음)
 // - 미리보기: 새로 넣을 건수(이미 DB에 같은 중복 키가 있으면 뺌), 이미 있음, 행 오류(사유별), 꼬리 줄, 집계 제외,
 //   체크카드 사용, 숫자 가림. 검토 상태는 모두 검토 대기(정규화 규칙)
 // - 셀 원문은 화면에 오지 않는다(Worker가 정규화한 행·건수만 준다)
@@ -22,7 +23,7 @@ export function matchSources(formatIds, sources) {
   const choices = (sources ?? []).filter((s) => s.is_active && s.import_format_id && ids.has(s.import_format_id))
     .sort((a, b) => Number(a.is_test) - Number(b.is_test) || String(a.label).localeCompare(String(b.label)))
     .map((s) => ({ id: s.id, label: s.is_test ? `${s.label} (시험용)` : s.label, formatId: s.import_format_id, institution: s.institution, isTest: Boolean(s.is_test) }));
-  return { choices, autoId: choices.length === 1 ? choices[0].id : null };
+  return { choices, autoId: choices.length === 1 && !choices[0].isTest ? choices[0].id : null };
 }
 
 const ROW_ERROR = {
@@ -137,5 +138,7 @@ export function counterpartyRule(group, sourceId, values, alias = null) {
 export function draftRule(rule, n) {
   return { ...rule, id: `draft-${n}`, txn_type: null, priority: 100, is_active: true, created_at: '9999-12-31T00:00:00Z' };
 }
+
+export const TEST_SOURCE_WARNING = '시험용 결제수단이에요(집계 제외, 나중에 일괄 삭제됨). 실제 파일이면 다른 결제수단을 골라 주세요.';
 
 export const monthTitle = (m) => `${monthLabel(m).replace(/^[0-9]+년 /, '')} 파일`;
