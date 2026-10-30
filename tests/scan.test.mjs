@@ -203,6 +203,22 @@ test('글 검사: 같은 규칙(숫자·비밀값), 줄 번호·이름만, 허�
   assert.deepEqual(checkText('x', null), []);
 });
 
+test('글 검사: 줄이 나뉜 번호는 이어 붙여 한 번 더(줄 0, sensitive_number_joined), 백틱으로 끊어도 걸림, 줄에서 이미 걸리면 중복 없음', () => {
+  const n = digits(12);
+  assert.deepEqual(checkText('pr_body', `번호 ${n.slice(0, 6)}\n${n.slice(6)} 끝`), [{ label: 'pr_body', line: 0, rule: 'sensitive_number_joined' }]);
+  assert.deepEqual(checkText('pr_body', `\`${n.slice(0, 5)}\`\`${n.slice(5)}\``).map((f) => f.rule), ['sensitive_number_joined']);
+  assert.deepEqual(checkText('pr_body', `x ${n}\ny`).map((f) => f.rule), ['sensitive_number']);
+  assert.deepEqual(checkText('pr_body', '합계 2,000건\n2026-10-30 기준\nhead 74b7bfd'), []); // 날짜·짧은 숫자는 이어 붙여도 통과
+  assert.deepEqual(checkText('pr_body', '  - 10-31T14:59Z → 2026-10\n  - 10-31T15:00Z → 2026-10\n  - 2027-01-01T00:30 → 2026-12'), []); // 목록 줄끼리는 안 붙임
+  assert.deepEqual(checkText('pr_body', `a ${n.slice(0, 6)}\`\n\`${n.slice(6)}`).map((f) => f.rule), ['sensitive_number_joined']);
+});
+
+test('--modes: 글 검사 모드 목록', () => {
+  const r = spawnSync(process.execPath, [SCAN, '--modes'], { encoding: 'utf8' });
+  assert.equal(r.status, 0);
+  assert.deepEqual(r.stdout.trim().split('\n'), ['text', 'event', 'commits']);
+});
+
 test('이벤트 JSON에서 PR 제목·본문, 없는 칸은 빈 글', () => {
   assert.deepEqual(eventTexts({ pull_request: { title: 't', body: null } }), [['pr_title', 't'], ['pr_body', '']]);
   assert.deepEqual(eventTexts({}), [['pr_title', ''], ['pr_body', '']]);
