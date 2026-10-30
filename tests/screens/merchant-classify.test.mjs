@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  merchantGroups, groupSub, ruleFor, classifyText, classifyDescription, isTransferLike, sameRuleExists, reapplyOrder, reapplyCount, bulkReapplyText,
+  merchantGroups, groupSub, ruleFor, classifyText, classifyDescription, isTransferLike, sameRuleExists, samePatternRule, reapplyOrder, reapplyCount, bulkReapplyText,
 } from '../../app/screens/merchant-classify-model.js';
 import { readUncategorized } from '../../app/screens/merchant-classify.js';
 import { MAX_BULK } from '../../app/screens/list-model.js';
@@ -99,6 +99,11 @@ test('같은 규칙 있음: 방식·정리값 패턴·카테고리가 같고 켜
   assert.equal(sameRuleExists([r({ is_active: false })], v), false);
   assert.equal(sameRuleExists([r({ pattern: '가짜커피점' })], v), false);
   assert.equal(sameRuleExists(null, v), false);
+  // 같은 패턴 다른 카테고리(재리뷰 권장): other로 알려 새 규칙을 만들지 않게
+  const f = samePatternRule([r({ id: 'x', category_id: 'c2' }), r({ id: 'y', match_type: 'exact', category_id: 'c3' })], v);
+  assert.deepEqual([f.same, f.other?.id], [null, 'x']);
+  assert.deepEqual(samePatternRule([r({ id: 's' }), r({ id: 'o', category_id: 'c2' })], v).same.id, 's');
+  assert.deepEqual(samePatternRule([], v), { same: null, other: null });
 });
 
 test('켜진 규칙 한 번에: 카테고리 켜진 규칙만, 적용 순서(priority, created_at, id), 바뀌는 건수, 문구', () => {

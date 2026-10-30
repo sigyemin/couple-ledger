@@ -15,7 +15,7 @@ import { buildHash } from '../router.js';
 import { confirmDialog } from '../core/confirm.js';
 import { STAGES, ACTIONS } from '../core/errors.js';
 import {
-  merchantGroups, groupSub, ruleFor, classifyText, classifyDescription, sameRuleExists, reapplyOrder, reapplyCount, bulkReapplyText,
+  merchantGroups, groupSub, ruleFor, classifyText, classifyDescription, samePatternRule, reapplyOrder, reapplyCount, bulkReapplyText,
 } from './merchant-classify-model.js';
 import { reapplyErrorText } from './rules-model.js';
 import { categoryPicker } from './category-picker.js';
@@ -82,16 +82,17 @@ export async function renderMerchantClassify({ db, member, reload, isCurrent, on
   const groups = merchantGroups(txns.data.rows);
 
   const status = h('p', { class: 'status-line', attrs: { role: 'status', 'aria-live': 'polite' } }, [], doc);
-  const say = (msg, isError = false) => {
-    status.textContent = msg;
+  // link: { href, text } — 안내 끝에 붙는 앱 안 링크(같은 패턴 다른 카테고리 규칙 → 규칙 화면)
+  const say = (msg, isError = false, link = null) => {
+    status.replaceChildren(msg, ...(link ? [' ', h('a', { text: link.text, attrs: { href: link.href } }, [], doc)] : []));
     status.className = `status-line${isError ? ' error' : ''}`;
   };
-  if (classifyNotice) { say(classifyNotice.text, classifyNotice.isError); classifyNotice = null; }
+  if (classifyNotice) { say(classifyNotice.text, classifyNotice.isError, classifyNotice.link); classifyNotice = null; }
   const fail = (err, extra) => {
     const code = onError?.(err, extra);
     say(`${err.message}${code ? ` (오류 번호 ${code})` : ''}`, true);
   };
-  const done = (text, isError = false) => { classifyNotice = { text, isError }; reload(); };
+  const done = (text, isError = false, link = null) => { classifyNotice = { text, isError, link }; reload(); };
 
   const groupItem = (g) => {
     const pick = categoryPicker({ categories, kind: g.kind, label: `${g.merchant} 카테고리`, doc });
@@ -137,20 +138,28 @@ export async function renderMerchantClassify({ db, member, reload, isCurrent, on
         confirmed += 1;
       }
       let ruleNote = '';
-      // 같은 규칙(방식·정리값 패턴·카테고리)이 켜져 있으면 만들지 않는다(DB에 유일 제약이 없음 — 리뷰 ④)
+      let ruleLink = null;
+      // 같은 패턴(방식·정리값)의 켜진 규칙이 있으면 만들지 않는다(DB에 유일 제약이 없음 — 리뷰 ④).
+      // 카테고리가 다르면 규칙 화면에서 바꾸도록 안내(재리뷰 권장 — 같은 패턴 두 규칙이 다투지 않게)
       let exists = false;
       if (makeRule) {
         const ex = await db.select('category_rules', {
           columns: 'id,pattern,match_type,category_id,is_active',
-          filters: [eq('is_active', true), eq('match_type', rv.value.match_type), eq('category_id', rv.value.category_id)],
+          filters: [eq('is_active', true), eq('match_type', rv.value.match_type)],
         });
         if (ex.error) {
           const code = onError?.(ex.error, { stage: STAGES.list });
           done(`${g.count}건을 '${name}'(으)로 분류했지만 같은 규칙이 있는지 확인하지 못해 규칙은 만들지 않았어요. 규칙·카테고리에서 만들어 주세요.${code ? ` (오류 번호 ${code})` : ''}`, true);
           return;
         }
-        exists = sameRuleExists(ex.data, rv.value);
-        if (exists) ruleNote = ' 같은 규칙이 이미 있어요.';
+        const found = samePatternRule(ex.data, rv.value);
+        exists = Boolean(found.same || found.other);
+        if (found.same) ruleNote = ' 같은 규칙이 이미 있어요.';
+        else if (found.other) {
+          const other = categories.find((c) => c.id === found.other.category_id)?.name ?? '다른 카테고리';
+          ruleNote = ` 이미 「${found.other.pattern}」 규칙이 '${other}'(으)로 있어 새 규칙은 만들지 않았어요 —`;
+          ruleLink = { href: buildHash('rule', { id: found.other.id }), text: '규칙 화면에서 바꾸기' };
+        }
       }
       if (makeRule && !exists) {
         const ir = await db.insert('category_rules', { ...rv.value, created_by: member.memberId });
@@ -163,7 +172,9 @@ export async function renderMerchantClassify({ db, member, reload, isCurrent, on
           }
         } else ruleNote = ' 앞으로 올릴 때 자동 분류돼요.';
       }
-      done(`${g.merchant} ${g.count}건을 '${name}'(으)로 분류했어요.${ruleNote} 변경 기록에서 되돌릴 수 있어요.`);
+      done(ruleLink
+        ? `${g.merchant} ${g.count}건을 '${name}'(으)로 분류했어요.${ruleNote}`
+        : `${g.merchant} ${g.count}건을 '${name}'(으)로 분류했어요.${ruleNote} 변경 기록에서 되돌릴 수 있어요.`, false, ruleLink);
     });
     return h('li', { class: 'mc-item' }, [
       h('div', { class: 'mc-head' }, [
@@ -192,8 +203,16 @@ export async function renderMerchantClassify({ db, member, reload, isCurrent, on
 
   // 켜진 규칙으로 한 번에 분류: 규칙마다 미리보기(p_apply=false) → 합계 확인 → 적용(p_apply=true), 기간 전체, 적용 순서대로
   const bulkBtn = h('button', { class: 'btn secondary', text: '켜진 규칙으로 한 번에 분류', attrs: { type: 'button' } }, [], doc);
+  // 잠글 때 원래 상태를 적어 두고 풀 때 되돌린다(묶음별로 꺼 둔 체크·버튼이 풀리지 않게 — 재리뷰 낮음)
+  let locked = null;
   const lockAll = (on) => {
-    for (const b of main.querySelectorAll('button, input')) b.disabled = on;
+    if (on) {
+      locked = [...main.querySelectorAll('button, input, select')].map((el) => [el, el.disabled]);
+      for (const [el] of locked) el.disabled = true;
+    } else if (locked) {
+      for (const [el, was] of locked) el.disabled = was;
+      locked = null;
+    }
   };
   bulkBtn.addEventListener('click', async () => {
     lockAll(true);
