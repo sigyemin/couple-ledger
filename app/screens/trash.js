@@ -61,7 +61,7 @@ export async function renderTrash({ db, member, reload, isCurrent, onError }, do
   if (trashNotice) { say(trashNotice.text, trashNotice.isError); trashNotice = null; }
 
   const intro = h('section', { class: 'card' }, [
-    h('p', { class: 'label', text: `지운 거래 ${rows.length}${more ? '+' : ''}건 · 집계·정산에서 빠져 있어요` }, [], doc),
+    h('p', { class: 'label', text: `지운 거래 ${rows.length}${more ? '+' : ''}건 · 집계에서 빠져 있어요` }, [], doc),
     h('p', { class: 'muted small', text: '휴지통은 비우지 않아요. 같은 파일을 다시 올려도 지운 거래가 되살아나지 않도록 기록을 남겨 둬요.' }, [], doc),
   ], doc);
 
