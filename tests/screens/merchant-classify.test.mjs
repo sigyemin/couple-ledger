@@ -1,7 +1,9 @@
 // 가맹점별로 분류하기 (CL-061) — 합성 거래만, 이름은 가짜
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { merchantGroups, groupSub, ruleFor, classifyText, classifyDescription, isTransferLike } from '../../app/screens/merchant-classify-model.js';
+import {
+  merchantGroups, groupSub, ruleFor, classifyText, classifyDescription, isTransferLike, sameRuleExists, reapplyOrder, reapplyCount, bulkReapplyText,
+} from '../../app/screens/merchant-classify-model.js';
 import { readUncategorized } from '../../app/screens/merchant-classify.js';
 import { MAX_BULK } from '../../app/screens/list-model.js';
 import { parseHash } from '../../app/router.js';
@@ -85,4 +87,35 @@ test('조회: 미분류·휴지통·시험 수단 조건, 쪽 단위, 넘치면 
   assert.equal((await readUncategorized(bad)).error.code, 'network');
   assert.equal(parseHash('#/classify').screen, 'classify');
   assert.equal(activeTab('classify'), 'more');
+});
+
+test('같은 규칙 있음: 방식·정리값 패턴·카테고리가 같고 켜진 것만(띄어쓰기·전각 무시)', () => {
+  const v = { pattern: '가짜 커피', match_type: 'contains', category_id: 'c1' };
+  const r = (o) => ({ pattern: '가짜커피', match_type: 'contains', category_id: 'c1', is_active: true, ...o });
+  assert.equal(sameRuleExists([r()], v), true);
+  assert.equal(sameRuleExists([r({ pattern: '가짜　커피 ' })], v), true); // 전각 공백
+  assert.equal(sameRuleExists([r({ match_type: 'exact' })], v), false);
+  assert.equal(sameRuleExists([r({ category_id: 'c2' })], v), false);
+  assert.equal(sameRuleExists([r({ is_active: false })], v), false);
+  assert.equal(sameRuleExists([r({ pattern: '가짜커피점' })], v), false);
+  assert.equal(sameRuleExists(null, v), false);
+});
+
+test('켜진 규칙 한 번에: 카테고리 켜진 규칙만, 적용 순서(priority, created_at, id), 바뀌는 건수, 문구', () => {
+  const cats = [{ id: 'c1', is_active: true }, { id: 'c2', is_active: false }];
+  const rule = (id, priority, created_at, o = {}) => ({ id, priority, created_at, category_id: 'c1', is_active: true, ...o });
+  const plan = reapplyOrder([
+    rule('r3', 10, '2026-10-02'), rule('r1', 10, '2026-10-01'), rule('r2', 5, '2026-10-09'),
+    rule('rx', 1, '2026-10-01', { category_id: 'c2' }), rule('ry', 1, '2026-10-01', { is_active: false }), rule('rz', 1, '2026-10-01', { category_id: null }),
+    rule('r0', 10, '2026-10-01'),
+  ], cats);
+  assert.deepEqual(plan.map((r) => r.id), ['r2', 'r0', 'r1', 'r3']);
+  assert.equal(reapplyCount([{ result: 'created' }, { result: 'updated' }, { result: 'unchanged' }, { result: 'manual_kept' }, { result: 'skipped_priority' }]), 2);
+  assert.equal(reapplyCount(null), 0);
+  const t = bulkReapplyText(66, 120, 10);
+  assert.match(t.message, /규칙 66개를 우선 순서대로/);
+  assert.match(t.message, /120건이 분류돼요/);
+  assert.match(t.message, /규칙 10개는 건너뛰어요/);
+  assert.doesNotMatch(bulkReapplyText(3, 5, 0).message, /건너뛰어요/);
+  assert.match(t.undoNote, /규칙별로 되돌릴/);
 });

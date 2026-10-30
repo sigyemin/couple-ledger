@@ -92,3 +92,41 @@ export function classifyText(g, categoryName, makeRule, rule = null) {
 export function classifyDescription(g, categoryName) {
   return `가맹점별 분류 · ${g.merchant} ${g.count}건 → ${categoryName}`.slice(0, 200);
 }
+
+/**
+ * 같은 규칙이 이미 켜져 있나(category_rules에 유일 제약이 없어 앱이 먼저 본다 — CL-061 리뷰 ④)
+ * 같음 = match_type 같고, 정리값(match_norm) 패턴 같고, 카테고리 같음
+ * @param rules 켜진 category_rules 행(match_type·category_id로 미리 거른 것이어도 됨)
+ */
+export function sameRuleExists(rules, value) {
+  const n = matchNorm(value.pattern);
+  return (rules ?? []).some((r) => r.is_active !== false && r.match_type === value.match_type
+    && r.category_id === value.category_id && matchNorm(r.pattern) === n);
+}
+
+/**
+ * '켜진 규칙으로 한 번에 분류' 대상: 켜진 규칙 중 카테고리가 켜진 것, 적용 순서(priority, created_at, id)
+ * (카테고리가 꺼진 규칙은 DB가 LG007로 거부하므로 미리 뺀다)
+ */
+export function reapplyOrder(rules, categories) {
+  const on = new Set((categories ?? []).filter((c) => c.is_active).map((c) => c.id));
+  return (rules ?? []).filter((r) => r.is_active && r.category_id && on.has(r.category_id))
+    .sort((a, b) => a.priority - b.priority || String(a.created_at).localeCompare(String(b.created_at)) || String(a.id).localeCompare(String(b.id)));
+}
+
+const REAPPLY_CHANGES = new Set(['created', 'updated']);
+
+/** 규칙 하나의 미리보기·적용 결과 → 바뀌는(바뀐) 건수 */
+export function reapplyCount(rows) {
+  return (rows ?? []).filter((r) => REAPPLY_CHANGES.has(r.result)).length;
+}
+
+/** 한 번에 분류 확인 문구 */
+export function bulkReapplyText(ruleCount, changeCount, skippedRules) {
+  return {
+    title: '켜진 규칙으로 한 번에 분류',
+    message: `켜진 가맹점 규칙 ${ruleCount}개를 우선 순서대로 모든 달 거래에 적용해요. ${changeCount}건이 분류돼요(직접 고친 거래는 그대로).`
+      + (skippedRules ? ` 바뀌는 거래가 없는 규칙 ${skippedRules}개는 건너뛰어요.` : '') + ' 검토 상태는 그대로예요.',
+    undoNote: '규칙마다 변경 기록이 하나씩 남아요. 더보기 › 변경 기록에서 규칙별로 되돌릴 수 있어요.',
+  };
+}

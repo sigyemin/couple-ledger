@@ -3,6 +3,9 @@
 // 조회: v_transaction_detail(is_uncategorized, 휴지통·시험 결제수단 제외, 쪽 단위, 최대 MAX_ROWS), categories
 // 쓰기(묶음마다): bulk_set_category(변경 기록 — 되돌리기 가능) → 확인함으로(transactions update, 월 검토와 같음)
 //               → '앞으로 같은 가맹점 자동 분류'면 category_rules insert(정리값 똑같으면, 확정 — 또는 사용자가 줄인 글자가 들어가면). 같은 규칙이 이미 있으면 건너뜀
+//               (만들기 전에 같은 규칙 — 방식·정리값 패턴·카테고리 — 이 켜져 있는지 조회: DB에 유일 제약 없음, 리뷰 ④)
+// - 맨 위 '켜진 규칙으로 한 번에 분류': 켜진 규칙을 적용 순서대로 reapply_category_rule 미리보기(p_apply=false) → 합계 확인 →
+//   바뀌는 게 있는 규칙만 적용(p_apply=true), 기간 전체. 중간 실패면 멈추고 몇 개 했는지 안내. 변경 묶음은 규칙마다 하나
 // - 통장 이체 행 묶음은 이름을 보여 주되 규칙은 이체 상대 규칙 쪽으로 안내
 // 의존: ui/dom.js, router.js, core/confirm.js, core/errors.js, screens/merchant-classify-model.js, screens/category-picker.js,
 //       screens/review-model.js(confirmBothPatch), screens/shell.js
@@ -11,13 +14,17 @@ import { h } from '../ui/dom.js';
 import { buildHash } from '../router.js';
 import { confirmDialog } from '../core/confirm.js';
 import { STAGES, ACTIONS } from '../core/errors.js';
-import { merchantGroups, groupSub, ruleFor, classifyText, classifyDescription } from './merchant-classify-model.js';
+import {
+  merchantGroups, groupSub, ruleFor, classifyText, classifyDescription, sameRuleExists, reapplyOrder, reapplyCount, bulkReapplyText,
+} from './merchant-classify-model.js';
+import { reapplyErrorText } from './rules-model.js';
 import { categoryPicker } from './category-picker.js';
 import { confirmBothPatch } from './review-model.js';
 import { errorView } from './shell.js';
 
 const COLUMNS = 'id,merchant_raw,merchant_norm,kind,amount,lines,review_status,source_kind,card_kind,period_month,is_uncategorized,is_test_source';
 const PAGE_SIZE = 1000;
+const eq = (col, value) => ({ col, op: 'eq', value });
 export const MAX_ROWS = 3000;
 
 // 다시 그린 화면에 한 번 보여 줄 안내
@@ -130,7 +137,22 @@ export async function renderMerchantClassify({ db, member, reload, isCurrent, on
         confirmed += 1;
       }
       let ruleNote = '';
+      // 같은 규칙(방식·정리값 패턴·카테고리)이 켜져 있으면 만들지 않는다(DB에 유일 제약이 없음 — 리뷰 ④)
+      let exists = false;
       if (makeRule) {
+        const ex = await db.select('category_rules', {
+          columns: 'id,pattern,match_type,category_id,is_active',
+          filters: [eq('is_active', true), eq('match_type', rv.value.match_type), eq('category_id', rv.value.category_id)],
+        });
+        if (ex.error) {
+          const code = onError?.(ex.error, { stage: STAGES.list });
+          done(`${g.count}건을 '${name}'(으)로 분류했지만 같은 규칙이 있는지 확인하지 못해 규칙은 만들지 않았어요. 규칙·카테고리에서 만들어 주세요.${code ? ` (오류 번호 ${code})` : ''}`, true);
+          return;
+        }
+        exists = sameRuleExists(ex.data, rv.value);
+        if (exists) ruleNote = ' 같은 규칙이 이미 있어요.';
+      }
+      if (makeRule && !exists) {
         const ir = await db.insert('category_rules', { ...rv.value, created_by: member.memberId });
         if (ir.error) {
           if (ir.error.code === 'duplicate') ruleNote = ' 같은 규칙이 이미 있어요.';
@@ -168,10 +190,65 @@ export async function renderMerchantClassify({ db, member, reload, isCurrent, on
     ], doc);
   };
 
+  // 켜진 규칙으로 한 번에 분류: 규칙마다 미리보기(p_apply=false) → 합계 확인 → 적용(p_apply=true), 기간 전체, 적용 순서대로
+  const bulkBtn = h('button', { class: 'btn secondary', text: '켜진 규칙으로 한 번에 분류', attrs: { type: 'button' } }, [], doc);
+  const lockAll = (on) => {
+    for (const b of main.querySelectorAll('button, input')) b.disabled = on;
+  };
+  bulkBtn.addEventListener('click', async () => {
+    lockAll(true);
+    const rr = await db.select('category_rules', {
+      columns: 'id,pattern,match_type,category_id,is_active,priority,created_at',
+      filters: [eq('is_active', true)],
+      order: [{ col: 'priority', ascending: true }, { col: 'created_at', ascending: true }, { col: 'id', ascending: true }],
+    });
+    if (rr.error) { lockAll(false); fail(rr.error, { stage: STAGES.list }); return; }
+    const plan = reapplyOrder(rr.data, categories);
+    if (!plan.length) { lockAll(false); say('켜진 가맹점 규칙이 없어요. 규칙·카테고리에서 만들어 주세요.', true); return; }
+    const counts = [];
+    for (const [i, rule] of plan.entries()) {
+      say(`미리보기 ${i + 1}/${plan.length} · “${rule.pattern}”`);
+      const pv = await db.rpc('reapply_category_rule', { p_rule_id: rule.id, p_apply: false, p_from_month: null, p_to_month: null }, { retry: true });
+      if (pv.error) {
+        lockAll(false);
+        const code = onError?.(pv.error, { stage: STAGES.db_rpc });
+        say(`규칙 “${rule.pattern}” 미리보기에서 멈췄어요: ${reapplyErrorText(pv.error) ?? pv.error.message}${code ? ` (오류 번호 ${code})` : ''}`, true);
+        return;
+      }
+      counts.push(reapplyCount(pv.data));
+    }
+    const todo = plan.filter((_, i) => counts[i] > 0);
+    const total = counts.reduce((s, n) => s + n, 0);
+    if (!todo.length) { lockAll(false); say(`켜진 규칙 ${plan.length}개로 바뀌는 거래가 없어요.`); return; }
+    say('');
+    if (!(await confirmDialog({ ...bulkReapplyText(plan.length, total, plan.length - todo.length), confirmLabel: '한 번에 분류', doc }))) { lockAll(false); return; }
+    let doneRules = 0;
+    let changed = 0;
+    for (const rule of todo) {
+      say(`분류하는 중 ${doneRules + 1}/${todo.length} · “${rule.pattern}”`);
+      const r = await db.rpc('reapply_category_rule', {
+        p_rule_id: rule.id, p_apply: true, p_from_month: null, p_to_month: null, p_description: `규칙 “${rule.pattern}” 한 번에 분류`.slice(0, 200),
+      });
+      if (r.error) {
+        const code = onError?.(r.error, { stage: STAGES.db_rpc });
+        done(`규칙 ${todo.length}개 중 ${doneRules}개를 적용했어요(${changed}건). “${rule.pattern}”에서 멈췄어요: ${reapplyErrorText(r.error) ?? r.error.message}${code ? ` (오류 번호 ${code})` : ''}`, true);
+        return;
+      }
+      doneRules += 1;
+      changed += reapplyCount(r.data);
+    }
+    done(`켜진 규칙 ${doneRules}개로 ${changed}건 분류했어요. 변경 기록에서 규칙별로 되돌릴 수 있어요.`);
+  });
+
   const total = groups.reduce((s, g) => s + g.total, 0);
-  return h('main', { class: 'screen' }, [
+  const main = h('main', { class: 'screen' }, [
     head,
     status,
+    h('section', { class: 'card' }, [
+      h('h2', { class: 'card-title', text: '규칙으로 먼저' }, [], doc),
+      h('p', { class: 'muted small', text: '켜진 가맹점 규칙을 모든 달 거래에 우선 순서대로 적용해요. 미리 몇 건이 바뀌는지 보여 드려요.' }, [], doc),
+      bulkBtn,
+    ], doc),
     h('section', { class: 'card' }, [
       h('p', { class: 'muted', text: groups.length ? `미분류 ${total}건 · 가맹점 ${groups.length}곳. 건수가 많은 곳부터 보여요.` : '분류가 필요한 거래가 없어요' }, [], doc),
       txns.data.capped ? h('p', { class: 'notice small', text: `거래가 많아 앞 ${MAX_ROWS.toLocaleString('ko-KR')}건 안에서만 묶었어요. 분류하고 나면 나머지가 보여요.` }, [], doc) : null,
@@ -179,4 +256,5 @@ export async function renderMerchantClassify({ db, member, reload, isCurrent, on
     ], doc),
     groups.length ? h('ul', { class: 'mc-list' }, groups.map(groupItem), doc) : null,
   ], doc);
+  return main;
 }
