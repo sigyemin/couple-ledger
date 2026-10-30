@@ -8,7 +8,7 @@ import { parseHash } from '../../app/router.js';
 
 test('더보기 메뉴: 설계 순서, 월 검토 수, 없는 화면은 누를 수 없음', () => {
   const m = moreMenu({ member: { displayName: '가람' }, monthStart: '2026-10-01', needsReview: '18' });
-  assert.deepEqual(m.map((x) => x.label), ['구성원', '월 검토', '리포트', '규칙·카테고리', '카테고리 관리', '결제수단', '업로드 현황', '휴지통', '변경 기록']);
+  assert.deepEqual(m.map((x) => x.label), ['구성원', '월 검토', '리포트', '규칙·카테고리', '가맹점별로 분류하기', '카테고리 관리', '결제수단', '업로드 현황', '휴지통', '변경 기록']);
   assert.equal(m.find((x) => x.label === '업로드 현황').href, '#/uploads');
   assert.equal(m.find((x) => x.label === '카테고리 관리').href, '#/categories');
   assert.equal(m[0].sub, '가람 · 구글 계정으로 로그인됨');
