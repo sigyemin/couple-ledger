@@ -96,10 +96,22 @@ export function moveGroupText(node, toGroupName) {
 
 /** 지우기 실패(23503 등) 안내 */
 export function deleteErrorText(err) {
-  return err?.detail?.sqlState === '23503' ? '쓰는 거래·규칙이나 항목이 있어 끌 수만 있어요' : null;
+  return err?.detail?.sqlState === '23503' ? '쓰는 거래·규칙이나 항목이 있어 끌 수만 있어요' : categoryErrorText(err);
+}
+
+/**
+ * v0.18 카테고리 보호 안내(A5): LG004 기본 카테고리 삭제, LG005 기본 카테고리 옮기기·시스템 코드, 23514 2단계·지출↔수입·자기 아래
+ * 그 밖이면 null(일반 오류 문구)
+ */
+export function categoryErrorText(err) {
+  const s = err?.detail?.sqlState;
+  if (s === 'LG004') return '기본 카테고리는 지울 수 없어요. 끄기(사용 안 함)로 바꿔 주세요.';
+  if (s === 'LG005') return '기본 카테고리는 다른 그룹으로 옮기거나 시스템 값을 바꿀 수 없어요.';
+  if (s === '23514') return '카테고리는 그룹 → 항목 2단계까지만 되고, 지출과 수입 사이로는 옮길 수 없어요.';
+  return null;
 }
 
 /** 이름 저장 실패(23505) 안내 */
 export function nameErrorText(err) {
-  return err?.code === 'duplicate' ? '이미 있는 이름이에요' : null;
+  return err?.code === 'duplicate' ? '이미 있는 이름이에요' : categoryErrorText(err);
 }

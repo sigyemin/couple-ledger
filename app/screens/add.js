@@ -1,7 +1,8 @@
 // =====================================================================
 // 거래 직접 추가 (화면 설계 v0.1 4-3 머리 "+ 직접 추가", 4-4 "수동 추가는 같은 양식")
 // 조회: payment_sources(켜진 것), members, categories / 저장 전: v_monthly_review_status(그 달)
-// 쓰기: transactions insert 한 행(허용 칸만 — core/db.js INSERT_COLUMNS) → (카테고리를 골랐으면) set_transaction_lines 한 줄
+// 쓰기: add_manual_transaction(p_row, p_lines) 한 번(v0.18 A1) — 거래와 카테고리 라인이 함께 들어가거나 하나도 안 들어감.
+//   23505(같은 entry_key로 이미 들어감 — 응답만 끊긴 경우)면 dedup_key 'manual|<entry_key>'로 찾아 그 거래로 간다
 // 끝나면 새 거래 상세로 간다. 쓰기는 재시도하지 않는다
 // 의존: ui/dom.js, router.js, core/confirm.js, core/errors.js, screens/add-model.js, screens/detail-model.js, screens/shell.js
 // =====================================================================
@@ -11,7 +12,7 @@ import { confirmDialog } from '../core/confirm.js';
 import { STAGES } from '../core/errors.js';
 import { todaySeoul } from '../core/format.js';
 import { dateRange } from '../core/validate.js';
-import { ADD_KINDS, sourceOptions, buildManualRow, monthOf, addConfirmText } from './add-model.js';
+import { ADD_KINDS, sourceOptions, buildManualRow, manualRpcArgs, rpcRowId, monthOf, addConfirmText } from './add-model.js';
 import { categoryOptions } from './detail-model.js';
 import { noteForTxn } from './detail.js';
 import { errorView } from './shell.js';
@@ -124,7 +125,7 @@ export async function renderAdd({ db, member, query, go, isCurrent, onError }, d
 
     const sent = JSON.stringify([b.row, b.categoryId]);
     firstSent ??= sent;
-    const ins = await db.insert('transactions', b.row);
+    const ins = await db.rpc('add_manual_transaction', manualRpcArgs(b, entryKey));
     if (ins.error?.code === 'duplicate') {
       // 앞서 보낸 요청이 이미 들어감(응답만 끊김) → 그 거래로 간다 (transactions의 unique는 dedup_key뿐 — 스키마)
       const found = await db.select('transactions', { columns: 'id', filters: [eq('dedup_key', b.row.dedup_key)] });
@@ -141,19 +142,12 @@ export async function renderAdd({ db, member, query, go, isCurrent, onError }, d
       go(buildHash('txn', { id: prev }));
       return;
     }
-    if (ins.error || !ins.data?.[0]?.id) {
+    const id = rpcRowId(ins.data);
+    if (ins.error || !id) {
       busy(false);
-      if (ins.error) say(`${ins.error.message} (오류 번호 ${onError?.(ins.error, { stage: STAGES.db_update }) ?? ''})`, true);
+      if (ins.error) say(`${ins.error.message} (오류 번호 ${onError?.(ins.error, { stage: STAGES.db_rpc }) ?? ''})`, true);
       else say('추가하지 못했어요. 새로고침해 주세요.', true);
       return;
-    }
-    const id = ins.data[0].id;
-    if (b.categoryId) {
-      const r = await db.rpc('set_transaction_lines', { p_txn_id: id, p_lines: [{ category_id: b.categoryId, amount: b.amount, item_note: null }] });
-      if (r.error) { // 거래는 들어갔고 미분류로 남음 → 상세에서 고친다
-        const code = onError?.(r.error, { stage: STAGES.db_rpc, txnId: id });
-        noteForTxn(id, `거래는 추가했지만 카테고리는 넣지 못했어요. 여기서 다시 골라 주세요. (오류 번호 ${code ?? r.error.code})`);
-      }
     }
     go(buildHash('txn', { id }));
   });

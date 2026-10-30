@@ -19,7 +19,7 @@ import { todaySeoul } from '../core/format.js';
 import { STAGES, ACTIONS } from '../core/errors.js';
 import { categoryIndex } from './list-model.js';
 import {
-  buildDetailModel, categoryOptions, categoryChangeText, changeDescription, trashPlan, trashPatch,
+  buildDetailModel, categoryOptions, TRASHED_EDIT_TEXT, categoryChangeText, changeDescription, trashPlan, trashPatch,
   editability, settlementChangeText, sharePatch, excludePatch, confirmPatch, linesDraft, validateLines, MAX_LINES,
 } from './detail-model.js';
 import { errorView } from './shell.js';
@@ -151,6 +151,10 @@ export async function renderDetail({ db, member, id, go, reload, isCurrent, onEr
     busy(true);
     const r = await db.update('transactions', row.id, patch);
     busy(false);
+    if (r.error?.code === 'immutable') { // v0.18: 휴지통 거래는 되살리기 말고는 바꿀 수 없음(LG005) — 그사이 휴지통으로 갔을 때
+      onError?.(r.error, { txnId: row.id, stage: STAGES.db_update });
+      say(TRASHED_EDIT_TEXT, true); return;
+    }
     if (r.error) { fail(r.error, { stage: STAGES.db_update }); return; }
     if (!r.data?.length) { say('저장하지 못했어요. 새로고침해 주세요.', true); return; }
     reload();
@@ -430,8 +434,10 @@ export async function renderDetail({ db, member, id, go, reload, isCurrent, onEr
   }
 
   // 메모
+  // 휴지통 거래는 메모도 읽기 전용(v0.18 리뷰 R-1: DB가 LG005로 거부). 되살린 뒤 고친다
   const memo = h('textarea', { class: 'field memo', attrs: { 'aria-label': '메모', maxlength: '500', rows: '3', placeholder: '메모 (500자 이하)' } }, [], doc);
   memo.value = m.memo;
+  if (m.deleted) memo.readOnly = true;
   const memoSave = h('button', { class: 'btn secondary', text: '메모 저장', attrs: { type: 'button' } }, [], doc);
   memoSave.addEventListener('click', async () => {
     const v = checkText(memo.value, 'memo');
@@ -439,7 +445,10 @@ export async function renderDetail({ db, member, id, go, reload, isCurrent, onEr
     if (v.value === (row.memo ?? '')) { say('바뀐 내용이 없어요'); return; }
     await updateRow({ memo: v.value || null, updated_by: member.memberId });
   });
-  const memoCard = h('section', { class: 'card' }, [h('h2', { class: 'card-title', text: '메모' }, [], doc), memo, memoSave], doc);
+  const memoCard = h('section', { class: 'card' }, m.deleted
+    ? [h('h2', { class: 'card-title', text: '메모' }, [], doc), h('p', { class: m.memo ? '' : 'muted', text: m.memo || '메모 없음' }, [], doc),
+      h('p', { class: 'muted small', text: '휴지통에 있는 거래는 메모를 고칠 수 없어요. 되살린 뒤 고쳐 주세요.' }, [], doc)]
+    : [h('h2', { class: 'card-title', text: '메모' }, [], doc), memo, memoSave], doc);
 
   const hist = await loadHistory(db, row);
   if (!isCurrent()) return null;
