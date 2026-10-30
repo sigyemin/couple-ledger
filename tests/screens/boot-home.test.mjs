@@ -78,6 +78,18 @@ test('홈 모델: 자료 없음·할 일 없음·같은 금액', () => {
   assert.deepEqual(topGroups([{ group_category_id: 'x', total_amount: -5 }], new Map()), []);
 });
 
+test('홈 모델: 안 올린 파일 조회 중·실패(CL-056) — 실패하면 그 줄만 확인 못 함, 나머지는 그대로', () => {
+  const base = { summary: { expense_amount: 0, needs_review_count: 3 }, prevSummary: null, settlement: [], members, changedMonths: [], categories: [], thisMonth: '2026-10-01' };
+  const loading = buildHomeModel('2026-10-01', { ...base, missing: null, missingState: 'loading' });
+  assert.equal(loading.pending, true);
+  assert.deepEqual(loading.todos.map((t) => t.key), ['review']);
+  const failed = buildHomeModel('2026-10-01', { ...base, missing: null, missingState: 'error' });
+  assert.equal(failed.pending, false);
+  assert.deepEqual(failed.todos.map((t) => [t.key, t.text, t.href]), [['missing', '안 올린 파일을 확인하지 못했어요', '#/uploads'], ['review', '검토할 것 3건', '#/list?month=2026-10&status=needs_review']]);
+  const none = buildHomeModel('2026-10-01', { ...base, missing: [{ month: '2026-09-01', rows: [] }], missingState: null });
+  assert.deepEqual([none.pending, none.todos.map((t) => t.key)], [false, ['review']]);
+});
+
 test('DOM 도우미: style·on* 속성과 외부 링크를 거부한다', () => {
   const made = [];
   const doc = {

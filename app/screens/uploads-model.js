@@ -1,7 +1,8 @@
 // =====================================================================
 // 업로드 현황 — 달마다 안 올린 파일 (CL-056, 사용자 결정 10-30 B4). 화면 없이 계산하는 부분
 // - 대상 결제수단: missing_uploads와 같은 조건(사용 중·시험 아님·형식 있음·매달 올림)
-// - 범위: 올해 1월과 가장 이른 거래 달 중 이른 달 ~ 지난달. 길면 최근 MAX_MONTHS달만
+// - 범위: 지난달이 속한 해의 1월과 가장 이른 거래 달 중 이른 달 ~ 지난달. 길면 최근 MAX_MONTHS달만
+//   (1월에는 지난달 = 작년 12월 → 작년 1~12월)
 //   (모든 결제수단이 1·2월에 거래가 없어도 1·2월을 안 올림으로 보여야 한다 — 총괄 결정 10-30)
 // - 칸: 그 달 missing_uploads에 나오면 '안 올림', 아니면 '올림'(판정은 DB 함수 그대로)
 // 의존: router.js
@@ -25,7 +26,7 @@ export function monthlySources(sources) {
  */
 export function uploadRange(earliestDate, thisMonth, max = MAX_MONTHS) {
   const last = addMonths(thisMonth, -1);
-  const jan = `${thisMonth.slice(0, 4)}-01-01`;
+  const jan = `${last.slice(0, 4)}-01-01`;
   const early = earliestDate ? `${String(earliestDate).slice(0, 7)}-01` : jan;
   const first = early < jan ? early : jan;
   const floor = addMonths(last, -(max - 1));

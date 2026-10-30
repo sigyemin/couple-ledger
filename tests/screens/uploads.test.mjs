@@ -24,9 +24,10 @@ test('범위: min(올해 1월, 가장 이른 거래 달) ~ 지난달, 여러 해
   // 모든 결제수단의 첫 거래가 3월이어도 1·2월부터(1·2월이 비면 알려야 함)
   assert.deepEqual(uploadRange('2026-03-15', '2026-06-01'), ['2026-01-01', '2026-02-01', '2026-03-01', '2026-04-01', '2026-05-01']);
   assert.deepEqual(uploadRange(null, '2026-04-01'), ['2026-01-01', '2026-02-01', '2026-03-01']);
-  assert.deepEqual(uploadRange(null, '2026-01-01'), []); // 1월에 거래 없음 → 지난 달 없음
+  const janRange = uploadRange(null, '2026-01-01'); // 1월: 지난달(작년 12월)이 속한 해의 1~12월
+  assert.deepEqual([janRange.length, janRange[0], janRange.at(-1)], [12, '2025-01-01', '2025-12-01']);
   assert.equal(uploadRange('2026-10-02', '2026-10-01').length, 9); // 이번 달 거래만이어도 1~9월
-  assert.deepEqual(uploadRange('2026-01-10', '2026-01-01'), []); // 1월: 올해 지난 달 없음
+  assert.equal(uploadRange('2026-01-10', '2026-01-01').length, 12); // 이번 달(1월) 거래만이어도 작년 1~12월
   assert.deepEqual(uploadRange('2025-11-30', '2026-02-01'), ['2025-11-01', '2025-12-01', '2026-01-01']);
   const long = uploadRange('2023-01-01', '2026-10-01');
   assert.equal(long.length, MAX_MONTHS);
