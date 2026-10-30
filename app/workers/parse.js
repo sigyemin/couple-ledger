@@ -3,7 +3,7 @@
 // 파일은 브라우저 밖으로 나가지 않는다. 메인 스레드에는 정규화한 행·건수만 돌려준다.
 // 메시지
 //   { id, op: 'detect', bytes, formats }                         → { id, ok, fileType, formatIds }
-//   { id, op: 'parse',  bytes, format, sourceId, categories, counterpartyRules }
+//   { id, op: 'parse',  bytes, format, sourceId, categories, counterpartyRules, categoryRules }
 //                                                              → { id, ok, fileType, rows, errors, skipped, maskedCells }
 //   실패: { id, ok: false, code }  (code만. 셀 값·원본 메시지는 보내지 않는다)
 //     code: unsupported_file · too_many_rows · format_mismatch · zip_too_large(압축 해제 크기 상한) · parse_failed
@@ -26,7 +26,8 @@ self.onmessage = async (e) => {
     } else if (op === 'parse') {
       const categories = new Map(Array.isArray(e.data.categories) ? e.data.categories : []);
       const counterpartyRules = Array.isArray(e.data.counterpartyRules) ? e.data.counterpartyRules : [];
-      const r = await parseFile(XLSX, bytes, { format: e.data.format, sourceId: e.data.sourceId, categories, counterpartyRules });
+      const categoryRules = Array.isArray(e.data.categoryRules) ? e.data.categoryRules : [];
+      const r = await parseFile(XLSX, bytes, { format: e.data.format, sourceId: e.data.sourceId, categories, counterpartyRules, categoryRules });
       self.postMessage({ id, ok: true, ...r });
     } else {
       self.postMessage({ id, ok: false, code: 'bad_request' });
