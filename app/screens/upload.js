@@ -22,7 +22,7 @@ import { isPhone } from '../import/env.js';
 import { ensureBatch, uploadRows, batchFileName } from '../import/upload.js';
 import { fileHash } from '../import/dedup.js';
 import {
-  MAX_FILES, KEY_CHUNK, TEST_SOURCE_WARNING, checkCancelMonths, suggestLineText, reviewText, applySourceChoice, counterpartyGroups, counterpartyRule, draftRule, matchSources, previewOf, previewLines, readErrorText, resultLines, failedRows, monthTitle,
+  MAX_FILES, KEY_CHUNK, TEST_SOURCE_WARNING, checkCancelMonths, suggestLineText, reviewText, applySourceChoice, counterpartyGroups, counterpartyRule, draftRule, withDrafts, matchSources, previewOf, previewLines, readErrorText, resultLines, failedRows, monthTitle,
 } from './upload-model.js';
 import { errorView } from './shell.js';
 import { choiceCard } from './counterparty-card.js';
@@ -45,7 +45,9 @@ export async function loadUpload(db, monthStart) {
     db.select('payment_sources', { columns: 'id,label,kind,institution,import_format_id,owner_member_id,is_active,is_test' }),
     db.select('import_formats', { columns: FORMAT_COLUMNS }),
     db.select('categories', { columns: 'id,parent_id,name,code,sort_order,is_active' }),
-    db.select('counterparty_rules', { columns: CP_COLUMNS, filters: [{ col: 'is_active', op: 'eq', value: true }] }),
+    // 순서는 서버 정렬 그대로 쓴다(DB apply_counterparty_rule의 앞선 규칙 순서와 같음 — CL-046)
+    db.select('counterparty_rules', { columns: CP_COLUMNS, filters: [{ col: 'is_active', op: 'eq', value: true }],
+      order: [{ col: 'priority' }, { col: 'created_at' }, { col: 'id' }] }),
     db.rpc('missing_uploads', { p_month: monthStart }, { retry: true }),
     db.select('members', { columns: 'id,member_slot,display_name' }),
     // 순서는 서버 정렬 그대로 쓴다(DB reapply_category_rule의 앞선 규칙 순서와 같음)
@@ -194,7 +196,7 @@ export async function renderUpload({ db, guard, member, monthStart, isCurrent, o
     f.token = token;
     try {
       const parsed = await runParseWorker({
-        op: 'parse', bytes: f.bytes.slice().buffer, format, sourceId: src.id, categories: catCodes, counterpartyRules: [...cpRules, ...drafts], categoryRules,
+        op: 'parse', bytes: f.bytes.slice().buffer, format, sourceId: src.id, categories: catCodes, counterpartyRules: withDrafts(cpRules, drafts), categoryRules,
       }, { env });
       if (f.token !== token) return;
       f.parsed = parsed;

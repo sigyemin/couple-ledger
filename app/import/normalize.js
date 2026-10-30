@@ -78,7 +78,8 @@ export function parseDirection(v) {
 
 /**
  * 이체 상대 규칙에서 처음 맞는 규칙 (DB counterparty_rule_matches와 같은 조건).
- * rules는 priority 오름차순·같으면 먼저 만든 순으로 정렬돼 있어야 한다(sortCounterpartyRules)
+ * rules는 서버가 정렬해 준 순서(order by priority, created_at, id — DB apply_counterparty_rule의 앞선 규칙 판정과 같음) 그대로 쓴다.
+ * 앱에서 시각 글자를 다시 비교하지 않는다(소수 자리·마이크로초 차이로 순서가 틀어짐 — CL-046)
  * 제안 종류가 방향과 안 맞는 규칙(출금 → 수입, 입금 → 지출, 환불 제안)은 건너뛴다(apply_counterparty_rule과 같은 판단)
  */
 export function matchCounterpartyRule(rules, { sourceId, direction, txnType, merchantRaw, counterparty }) {
@@ -131,12 +132,6 @@ export function pickCategoryRule(rules, merchantNorm) {
   return null;
 }
 
-/** priority 오름차순, 같으면 created_at 오름차순 */
-export function sortCounterpartyRules(rules) {
-  return [...(rules ?? [])].sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100)
-    || String(a.created_at ?? '').localeCompare(String(b.created_at ?? '')));
-}
-
 function decideAmount(sign, cell) {
   if (sign === 'split_columns') {
     const out = parseAmount(cell('amount_out'));
@@ -179,7 +174,7 @@ export async function normalizeRows(grid, format, header, ctx) {
     if (hit.source === 'rule' && row.kind !== 'refund') row.review_status = 'confirmed';
     row.merchantRule = hit.source;
   };
-  const cpRules = format.kind === 'bank_account' ? sortCounterpartyRules(ctx?.counterpartyRules) : [];
+  const cpRules = format.kind === 'bank_account' && Array.isArray(ctx?.counterpartyRules) ? ctx.counterpartyRules : [];
   if (typeof sourceId !== 'string' || !sourceId) throw new TypeError('결제수단 id가 필요합니다');
   const dateFmt = compileFormat(format.date_format || DEFAULT_DATE_FORMAT);
   const timeFmt = format.time_format ? compileFormat(format.time_format) : null;

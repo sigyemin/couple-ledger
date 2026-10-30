@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { isPhone } from '../../app/import/env.js';
 import {
-  applySourceChoice, counterpartyGroups, counterpartyRule, draftRule, matchSources, previewOf, previewLines, readErrorText, resultLines, failedRows, monthTitle,
+  applySourceChoice, counterpartyGroups, counterpartyRule, draftRule, withDrafts, matchSources, previewOf, previewLines, readErrorText, resultLines, failedRows, monthTitle,
 } from '../../app/screens/upload-model.js';
 import { parseHash } from '../../app/router.js';
 
@@ -100,6 +100,14 @@ test('규칙 행: 기본 범위 = 그 통장 + 같은 방향 + 이름이 똑같�
     suggested_kind: 'transfer', suggested_exclude_reason: 'personal_transfer', member_id: ID(72) });
   const d = draftRule(rule, 3);
   assert.deepEqual([d.id, d.priority, d.is_active, d.created_at > '2100'], ['draft-3', 100, true, true]);
+});
+
+test('미리보기 draft는 서버 순서를 바꾸지 않고 priority 100 이하 뒤·100 초과 앞에 끼운다(CL-046)', () => {
+  const ids = (l) => l.map((r) => r.id);
+  const server = [{ id: 'p50', priority: 50 }, { id: 'p100', priority: 100 }, { id: 'p200', priority: 200 }];
+  assert.deepEqual(ids(withDrafts(server, [{ id: 'draft-0' }])), ['p50', 'p100', 'draft-0', 'p200']);
+  assert.deepEqual(ids(withDrafts(server.slice(0, 2), [{ id: 'draft-0' }, { id: 'draft-1' }])), ['p50', 'p100', 'draft-0', 'draft-1']);
+  assert.deepEqual(ids(withDrafts([], [{ id: 'draft-0' }])), ['draft-0']);
 });
 
 test('결제수단 고르기를 빈 값으로 되돌리면 고른 값·미리보기를 지우고 고르기 상태(저장 불가) — 시험용·일반 모두', () => {

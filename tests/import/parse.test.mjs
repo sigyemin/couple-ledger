@@ -211,7 +211,7 @@ test('파이프라인: html은 모든 표의 행을 이어 본다, 부호 금액
 });
 
 // ---------------------------------------------------------------- 설계 확인(가져오기 판단) 반영
-import { matchCounterpartyRule, sortCounterpartyRules, parseDirection } from '../../app/import/normalize.js';
+import { matchCounterpartyRule, parseDirection } from '../../app/import/normalize.js';
 
 const gridOf = (header, ...rows) => [header, ...rows];
 
@@ -266,7 +266,10 @@ test('이체 상대 규칙: row_rules 다음, priority 순, 조건(결제수단�
   ];
   const grid = sheetA();
   grid.splice(9, 0, ['2026.10.20 08:00', '이체', '박샘플', '7,000', '', '641,000', '']);
-  const r = await normalizeRows(grid, FORMAT_A, findHeader(grid, FORMAT_A), { sourceId: SOURCE, counterpartyRules: rules });
+  // 앱은 서버 정렬(priority, created_at, id) 순서를 그대로 받는다(CL-046) — 그 순서로 넘긴다
+  const serverOrder = ['r-cardbill', 'r-off', 'r-type', 'r-other-src', 'r-income-out', 'r-contains', 'r-first', 'r-late']
+    .map((id) => rules.find((x) => x.id === id));
+  const r = await normalizeRows(grid, FORMAT_A, findHeader(grid, FORMAT_A), { sourceId: SOURCE, counterpartyRules: serverOrder });
   const by = (m) => r.rows.find((x) => x.merchant_raw === m);
   // 같은 priority → 먼저 만든 규칙
   assert.deepEqual([by('이시험').kind, by('이시험').exclude_reason, by('이시험').is_excluded], ['transfer', 'personal_transfer', true]);
@@ -287,8 +290,12 @@ test('이체 상대 규칙: row_rules 다음, priority 순, 조건(결제수단�
 });
 
 test('이체 상대 규칙: 상대 예금주명 칸·정렬', () => {
-  const rules = sortCounterpartyRules([{ id: 'b', priority: 5, created_at: '2026-01-02' }, { id: 'a', priority: 5, created_at: '2026-01-01' }, { id: 'c' }]);
-  assert.deepEqual(rules.map((x) => x.id), ['a', 'b', 'c']);
+  // 받은 순서(서버 order by priority, created_at, id)를 그대로 쓴다 — 시각 글자를 앱에서 다시 비교하지 않음(CL-046)
+  const ordered = [
+    { id: 'a', match_field: 'merchant', match_text: '이시험', suggested_kind: 'transfer', created_at: '2026-10-01T00:00:00.000002+00:00' },
+    { id: 'b', match_field: 'merchant', match_text: '이시험', suggested_kind: 'transfer', created_at: '2026-10-01T00:00:00+00:00' },
+  ];
+  assert.equal(matchCounterpartyRule(ordered, { sourceId: SOURCE, direction: 'out', merchantRaw: '이시험' }).id, 'a');
   const hit = matchCounterpartyRule([{ match_field: 'counterparty', match_text: '최 가짜', suggested_kind: 'income' }],
     { sourceId: SOURCE, direction: 'in', txnType: null, merchantRaw: '타행입금', counterparty: '최가짜' });
   assert.equal(hit.suggested_kind, 'income');
