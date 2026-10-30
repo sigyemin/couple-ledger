@@ -8,6 +8,8 @@ name: scan
 on:
   pull_request:
     branches: [main]
+    # edited = PR 제목·본문을 고쳤을 때도 다시 검사(글 검사)
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read
@@ -52,7 +54,32 @@ jobs:
           git show "$BASE_SHA:.scan-allow" > "$RUNNER_TEMP/scan-allow-base" 2>/dev/null || : > "$RUNNER_TEMP/scan-allow-base"
           node "$scanner" --range "$BASE_SHA" HEAD --allow-file "$RUNNER_TEMP/scan-allow-base"
 
+      # 글 검사(CL-012 5번): PR 제목·본문은 이벤트 파일(GITHUB_EVENT_PATH)에서 검사기가 직접 읽는다
+      # (셸 변수·명령줄로 글을 옮기지 않음 — 명령 삽입·길이 제한 없음). 커밋 메시지는 BASE..HEAD 커밋마다.
+      # base 검사기에 글 검사 모드가 없으면(이 모드를 처음 넣는 PR) PR 쪽 검사기를 쓰고 경고한다.
+      - name: Leak scan (PR title, body, commit messages)
+        if: ${{ !cancelled() }}
+        working-directory: src
+        run: |
+          scanner=scripts/scan.mjs
+          # base 검사기를 꺼내 '--modes'로 글 검사 모드(event·commits)가 있는지 확인한다(도움말 글을 grep하지 않음)
+          if git cat-file -e "$BASE_SHA:scripts/scan.mjs" 2>/dev/null; then
+            text_dir="$RUNNER_TEMP/scan-base-text"
+            mkdir -p "$text_dir"
+            git archive "$BASE_SHA" scripts app/core | tar -x -C "$text_dir"
+            modes=$(node "$text_dir/scripts/scan.mjs" --modes 2>/dev/null || true)
+            if printf '%s\n' "$modes" | grep -qx event && printf '%s\n' "$modes" | grep -qx commits; then
+              scanner="$text_dir/scripts/scan.mjs"
+            fi
+          fi
+          if [ "$scanner" = scripts/scan.mjs ]; then
+            echo "::warning::base 검사기에 글 검사 모드가 없어 PR 쪽 검사기를 씁니다. 리뷰에서 반드시 확인하세요."
+          fi
+          node "$scanner" --event "$GITHUB_EVENT_PATH"
+          node "$scanner" --commits "$BASE_SHA" HEAD
+
       - name: Warn on scan setup changes
+        if: ${{ !cancelled() }}
         working-directory: src
         run: |
           changed=$(git diff --name-only "$BASE_SHA...HEAD" -- scripts/ app/core/sensitive.js vendor/ .scan-allow .github/ .githooks/ .gitignore)

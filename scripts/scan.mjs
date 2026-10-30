@@ -8,6 +8,12 @@
 //   node scripts/scan.mjs --all               저장소의 모든 추적 파일 (작업 트리 내용)
 //   --allow-file PATH                         .scan-allow 대신 이 파일을 허용 목록으로 쓴다
 //                                             (PR 검사는 base 쪽 허용 목록을 넘긴다)
+//   글 검사 (CL-012 5번 — 파일이 아닌 글에도 같은 규칙: 비밀값·10자리 이상 숫자. .scan-allow는 적용하지 않는다)
+//   node scripts/scan.mjs --text LABEL [FILE|-]  FILE(없거나 '-'면 표준입력)의 글 (.githooks/commit-msg: 커밋 메시지)
+//   node scripts/scan.mjs --event FILE           GitHub 이벤트 JSON(GITHUB_EVENT_PATH)의 PR 제목·본문
+//   node scripts/scan.mjs --commits BASE HEAD    BASE..HEAD 커밋들의 메시지(한 커밋씩)
+//   node scripts/scan.mjs --modes                아는 글 검사 모드 목록(워크플로가 base 검사기 확인에 씀)
+//   글은 셸 인자로 넘기지 않는다(파일·표준입력·이벤트 파일로만 — 명령 삽입·길이 제한 방지)
 //
 // 막는 것
 //   1) 파일 종류: 엑셀·CSV·PDF·캡처 이미지·DB 덤프·.env·인증서 등 (.gitignore와 같은 목록)
@@ -182,6 +188,35 @@ export function decodeTexts(buf) {
   return [buf.toString('utf8')];
 }
 
+/**
+ * 글 검사(커밋 메시지·PR 제목·본문). 파일과 같은 규칙, 허용 목록 없음, JWT는 어디서든 막는다(config 밖)
+ * 줄 단위로 본 뒤, 백틱을 지우고 '숫자 ⏎ 숫자'처럼 숫자 사이에 낀 줄바꿈만 붙인 글로 숫자만 한 번 더 본다
+ * (실수로 줄이 나뉜 번호 — PR #34 리뷰). 다른 줄바꿈은 그대로 둬서 목록·날짜 줄이 붙어 생기는 오탐을 막는다
+ * 이어 붙인 글에서만 걸리면 줄 번호 0, 규칙 sensitive_number_joined
+ * 결과: [{ label, line, rule }] (찾은 값은 담지 않는다)
+ */
+export function checkText(label, text) {
+  const s = String(text ?? '');
+  const out = checkContent(`<${label}>`, s, []).map((f) => ({ label, ...f }));
+  // 숫자와 숫자 사이의 줄바꿈만 붙인다(목록·날짜 줄이 서로 붙어 생기는 오탐 방지)
+  // 줄마다 먼저 id(UUID·해시)·날짜·시각을 지운 뒤 붙인다(줄 끝 id와 다음 줄 날짜가 붙어 숫자처럼 보이는 오탐 방지)
+  const cleaned = s.replace(/`/g, '').split(/\r?\n/).map((l) => removeKnownPatterns(stripIdentifiers(l))).join('\n');
+  const joined = cleaned.replace(/([0-9])[ \t]*\n[ \t]*(?=[0-9])/g, '$1');
+  if (!out.some((f) => f.rule === 'sensitive_number') && joined.split('\n').some((l) => hasSensitiveNumber(l))) {
+    out.push({ label, line: 0, rule: 'sensitive_number_joined' });
+  }
+  return out;
+}
+
+/** 이 검사기가 아는 글 검사 모드(워크플로가 base 검사기에 모드가 있는지 이것으로 확인) */
+export const TEXT_MODES = Object.freeze(['text', 'event', 'commits']);
+
+/** GitHub pull_request 이벤트 JSON → 검사할 글 [label, text] */
+export function eventTexts(json) {
+  const pr = json?.pull_request ?? {};
+  return [['pr_title', pr.title ?? ''], ['pr_body', pr.body ?? '']];
+}
+
 /** 이전 이름 호환: 첫 번째 해석만 */
 export function decodeText(buf) {
   return decodeTexts(buf)?.[0] ?? null;
@@ -216,11 +251,50 @@ function collect(mode, args) {
   if (mode === '--all') {
     return { files: splitZ(git(['ls-files', '-z'])), read: (f) => readFileSync(f) };
   }
-  throw new Error('모드를 지정하세요: --staged | --range BASE HEAD | --all');
+  throw new Error('모드를 지정하세요: --staged | --range BASE HEAD | --all | --text LABEL [FILE] | --event FILE | --commits BASE HEAD');
+}
+
+function textJobs(mode, rest) {
+  if (mode === '--text') {
+    const [label, file] = rest;
+    if (!label || !/^[a-z0-9_-]{1,40}$/.test(label)) throw new Error('--text LABEL [FILE] 가 필요합니다 (LABEL은 영소문자·숫자·_-)');
+    return [[label, readFileSync(file && file !== '-' ? file : 0, 'utf8')]];
+  }
+  if (mode === '--event') {
+    const [file] = rest;
+    if (!file) throw new Error('--event FILE 가 필요합니다');
+    return eventTexts(JSON.parse(readFileSync(file, 'utf8')));
+  }
+  if (mode === '--commits') {
+    const [base, head] = rest;
+    if (!base || !head) throw new Error('--commits BASE HEAD 가 필요합니다');
+    const shas = git(['rev-list', `${base}..${head}`]).toString('utf8').split('\n').filter(Boolean);
+    return shas.map((sha) => [`commit_${sha.slice(0, 7)}`, git(['log', '-1', '--format=%B', sha]).toString('utf8')]);
+  }
+  return null;
+}
+
+/** 글 검사 모드 실행. 값은 출력하지 않는다 */
+function runText(jobs) {
+  const problems = jobs.flatMap(([label, text]) => checkText(label, text)).map((f) => `${f.label}:${f.line}: ${f.rule}`);
+  if (problems.length) {
+    console.error(`유출 검사 실패 ${problems.length}건 (값은 출력하지 않음):`);
+    for (const p of [...new Set(problems)]) console.error(`  ${p}`);
+    console.error('커밋 메시지·PR 제목·본문에서 그 값을 빼 주세요. 오탐이면 PR에 사유를 적고 리뷰를 받으세요.');
+    return 1;
+  }
+  console.log(`유출 검사 통과: 글 ${jobs.length}개`);
+  return 0;
 }
 
 export function run(argv) {
   const args = [...argv];
+  if (args[0] === '--modes') { // 글 검사 모드 목록(한 줄에 하나). 워크플로의 base 검사기 확인용
+    console.log(TEXT_MODES.join('\n'));
+    return 0;
+  }
+  const jobs = textJobs(args[0], args.slice(1));
+  if (jobs) return runText(jobs);
   let allowFile = '.scan-allow';
   const ai = args.indexOf('--allow-file');
   if (ai !== -1) {
