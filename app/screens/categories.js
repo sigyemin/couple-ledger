@@ -9,7 +9,7 @@
 // 조회: categories / 끄기 전: 켜진 category_rules(category_id)·counterparty_rules(suggested_category_id) 수
 // 쓰기: categories insert(부모·이름·순서) · update(이름·순서·켜짐·부모·연말정산 기본값) · delete(사용자가 만든 것만, 쓰는 곳 있으면 DB 거부)
 // - 연말정산 기본값(CL-062 ② E4): default_deduction_kind · tax_credit_kind
-// - 여러 행을 바꾸는 일(순서 다시 매기기·그룹 끄기)은 한 건씩 update → 저장 중 잠금, 중간 실패면 멈추고 다시 읽음(원래 순서로)
+// - 여러 행을 바꾸는 일(순서 다시 매기기·그룹 끄기)은 한 건씩 update → 저장 중 잠금, 중간 실패면 멈추고 다시 읽음(앞쪽은 이미 저장됐을 수 있음)
 // 의존: ui/dom.js, router.js, core/confirm.js, core/errors.js, screens/categories-model.js, screens/deduction-edit-model.js, screens/shell.js
 // =====================================================================
 import { h } from '../ui/dom.js';
@@ -108,7 +108,7 @@ export async function renderCategories({ db, reload, isCurrent, onError }, doc =
   };
   const btn = (text, label, onClick, cls = 'mini') => h('button', { class: `btn ${cls}`, text, attrs: { type: 'button', 'aria-label': label }, on: { click: onClick } }, [], doc);
 
-  /** 여러 행 update를 차례로(저장 중 잠금). 실패하면 멈추고 다시 읽는다(원래 순서로 돌아감) */
+  /** 여러 행 update를 차례로(저장 중 잠금). 실패하면 멈추고 다시 읽는다(앞서 저장된 줄은 그대로 남을 수 있음) */
   const updateMany = async (updates, okText) => {
     if (!updates.length) { reload(); return; }
     busy(true);
@@ -119,7 +119,7 @@ export async function renderCategories({ db, reload, isCurrent, onError }, doc =
         busy(false);
         if (res.error) failed(res.error, nameErrorText(res.error));
         else say('저장하지 못했어요. 새로고침해 주세요.', true);
-        catNotice = { text: `${status.textContent} 원래 순서로 다시 읽었어요.`, isError: true };
+        catNotice = { text: `${status.textContent} 일부만 저장됐을 수 있어요. 다시 읽었어요.`, isError: true };
         reload();
         return;
       }
@@ -304,6 +304,8 @@ export async function renderCategories({ db, reload, isCurrent, onError }, doc =
   // 끄는 동안의 움직임·놓기는 문서에서 듣는다(줄을 다른 목록으로 옮기면 그 요소의 포인터 붙잡기가 풀리므로)
   function onMove(e) {
     if (!drag || drag.pointerId !== e.pointerId) return;
+    if (gone()) { cancelDrag(false); return; }
+    if (e.pointerType === 'mouse' && e.buttons === 0) { onCancel(); return; } // 버튼을 뗐는데 pointerup이 안 옴
     if (!drag.started) {
       if (Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y) < MOVE_PX) return;
       if (!drag.ready) { cancelDrag(false); return; } // 터치로 바로 밀면 화면 스크롤
@@ -314,8 +316,17 @@ export async function renderCategories({ db, reload, isCurrent, onError }, doc =
     e.preventDefault();
     dragOver(e.clientX, e.clientY);
   }
-  function onUp(e) { if (drag && drag.pointerId === e.pointerId) dropHere(); }
-  function onCancel() { cancelDrag(true); }
+  // 화면을 떠났으면 놓기도 저장도 하지 않는다
+  const gone = () => !isCurrent() || !main.isConnected;
+  function onUp(e) {
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    if (gone()) { cancelDrag(false); return; }
+    dropHere();
+  }
+  function onCancel() { cancelDrag(!gone()); }
+  // 놓기(pointerup)를 못 받은 채 끝난 끌기(창 밖에서 놓음·창 전환·다시 누름)는 원래 자리로 되돌리고 저장하지 않는다
+  function onDown(e) { if (drag && e !== drag.downEvent) onCancel(); }
+  function onHidden() { if (doc.visibilityState === 'hidden') onCancel(); }
   function attachDrag(rowEl, grips, node) {
     for (const grip of grips) {
       grip.addEventListener('pointerdown', (e) => {
@@ -324,14 +335,20 @@ export async function renderCategories({ db, reload, isCurrent, onError }, doc =
         doc.addEventListener('pointermove', onMove, { passive: false });
         doc.addEventListener('pointerup', onUp);
         doc.addEventListener('pointercancel', onCancel);
+        doc.addEventListener('pointerdown', onDown, true);
+        doc.addEventListener('visibilitychange', onHidden);
+        doc.defaultView?.addEventListener('blur', onCancel);
         drag = {
-          node, el, pointerId: e.pointerId, x: e.clientX, y: e.clientY, started: false, note: null,
+          node, el, pointerId: e.pointerId, downEvent: e, x: e.clientX, y: e.clientY, started: false, note: null,
           origin: { parent: el.parentElement, next: el.nextElementSibling },
           ready: e.pointerType !== 'touch' || grip.classList.contains('cat-handle'), timer: null,
           unlisten: () => {
             doc.removeEventListener('pointermove', onMove);
             doc.removeEventListener('pointerup', onUp);
             doc.removeEventListener('pointercancel', onCancel);
+            doc.removeEventListener('pointerdown', onDown, true);
+            doc.removeEventListener('visibilitychange', onHidden);
+            doc.defaultView?.removeEventListener('blur', onCancel);
           },
         };
         if (!drag.ready) drag.timer = setTimeout(() => { if (drag) drag.ready = true; }, HOLD_MS);

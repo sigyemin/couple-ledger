@@ -72,3 +72,16 @@ test('화면 코드: innerHTML·인라인 style 없음, 그룹마다 있던 추�
   assert.doesNotMatch(src, /cat-add'/);
   for (const ev of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel']) assert.match(src, new RegExp(`'${ev}'`));
 });
+
+test('끌기: pointerup을 못 받은 끌기는 취소하고, 중간 실패 안내는 부분 저장 가능성을 말한다', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../../app/screens/categories.js', import.meta.url), 'utf8');
+  for (const ev of ["'pointerdown', onDown, true", "'visibilitychange', onHidden", "'blur', onCancel"]) {
+    assert.ok(src.includes(`addEventListener(${ev}`), ev);
+    assert.ok(src.includes(`removeEventListener(${ev}`), ev);
+  }
+  assert.match(src, /e\.buttons === 0\) \{ onCancel\(\)/);
+  assert.match(src, /const gone = \(\) => !isCurrent\(\) \|\| !main\.isConnected/);
+  assert.match(src, /일부만 저장됐을 수 있어요\. 다시 읽었어요\./);
+  assert.doesNotMatch(src, /원래 순서로 다시 읽었어요/);
+});
