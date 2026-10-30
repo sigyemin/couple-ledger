@@ -102,6 +102,7 @@ ul { list-style: none; margin: 0; padding: 0; }
 .confirm-dialog::backdrop { background: rgba(0, 0, 0, .4); }
 .confirm-title { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
 .confirm-message, .confirm-undo { font-size: 15px; color: var(--sub-on-white); margin-top: 6px; }
+.confirm-message { white-space: pre-line; max-height: 50vh; overflow-y: auto; }
 .confirm-actions { display: flex; gap: 8px; margin-top: 20px; }
 .confirm-actions .btn { flex: 1; }
 .btn-secondary { background: var(--bg); color: var(--text); }
@@ -338,3 +339,17 @@ a.btn { display: flex; align-items: center; justify-content: center; text-decora
 .upload-name { font-weight: 700; overflow-wrap: anywhere; }
 .upload-file.error { border: 1px solid var(--orange); }
 .upload-result { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+
+/* 환불 원거래 연결 (CL-034, 시안 27·8) */
+.refund-list { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }
+.refund-item { display: flex; flex-direction: column; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.suggest-box { padding: 12px; border-radius: 14px; background: var(--blue-soft); display: flex; flex-direction: column; gap: 4px; }
+.strong { font-weight: 700; }
+.btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+a.btn.small-btn { display: inline-flex; }
+.cand-list { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.cand { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px; min-height: 44px; }
+.cand.suggested { border: 2px solid var(--blue); background: var(--blue-soft); padding: 11px 13px; }
+.cand input { width: 20px; height: 20px; flex: none; }
+.cand .txn-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.tag.blue { background: var(--blue); color: #FFFFFF; }
