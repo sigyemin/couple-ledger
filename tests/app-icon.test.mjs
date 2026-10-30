@@ -32,7 +32,7 @@ test('index.html: manifest·icon·apple-touch-icon·theme-color 연결, CSP mani
   assert.match(html, /<link rel="manifest" href="manifest\.webmanifest">/);
   assert.match(html, /<link rel="icon" type="image\/png" sizes="192x192" href="icons\/icon-192\.png">/);
   assert.match(html, /<link rel="apple-touch-icon" sizes="180x180" href="icons\/apple-touch-icon-180\.png">/);
-  assert.match(html, /<meta name="theme-color" content="#1B64DA">/);
+  assert.match(html, /<meta name="theme-color" content="#F2F4F6">/);
   assert.match(html, /manifest-src 'self'/);
   assert.match(html, /img-src 'self'/);
 });
