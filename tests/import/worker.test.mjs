@@ -78,8 +78,10 @@ test('runParseWorker: 응답 복제 실패(messageerror)면 기다리지 않고 
   class BadClone extends FakeWorker {
     postMessage(msg) { this.msg = msg; queueMicrotask(() => this.onmessageerror?.({})); }
   }
+  // 주 판정 = 동작: 시간 제한(timeout)이 아니라 worker_error로 끝남(= 시간 제한을 기다리지 않았다). 시간은 넉넉한 보조 상한만(CL-072 ③)
   const t = Date.now();
-  await assert.rejects(m.runParseWorker({ op: 'parse' }, { env: { Worker: BadClone }, timeoutMs: 5000 }), { message: 'worker_error' });
-  assert.ok(Date.now() - t < 1000);
+  await assert.rejects(m.runParseWorker({ op: 'parse' }, { env: { Worker: BadClone }, timeoutMs: 60000 }), { message: 'worker_error' });
+  const ms = Date.now() - t;
+  assert.ok(ms < 5000, `messageerror: ${ms}ms (시간 제한 60000ms를 기다리면 안 됨, 상한 5000ms)`);
   assert.equal(FakeWorker.last.terminated, true);
 });

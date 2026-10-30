@@ -187,7 +187,8 @@ export function trashPlan(row, refunds) {
 }
 
 /** 그사이 휴지통으로 간 거래를 고치려 할 때(v0.18 LG005) */
-export const TRASHED_EDIT_TEXT = '휴지통에 있는 거래라 바꿀 수 없어요. 새로고침해 확인해 주세요.';
+// LG005(거래): 휴지통 거래 고치기(v0.18) 또는 거래의 출처·업로드 원본 칸 바꾸기(v0.22 guard_txn_identity — 앱은 그 칸을 보내지 않음)
+export const TRASHED_EDIT_TEXT = '휴지통에 있는 거래이거나 바꿀 수 없는 칸(거래의 출처·업로드 원본)이라 저장하지 않았어요. 새로고침해 확인해 주세요.';
 
 /** v0.19 DB CHECK(23514): 거래 날짜 2000-01-01~오늘+1년, 메모 500자 */
 export const RANGE_TEXT = '날짜는 2000-01-01부터 오늘에서 1년 뒤까지, 메모는 500자까지 넣을 수 있어요.';

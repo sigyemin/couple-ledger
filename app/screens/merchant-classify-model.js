@@ -113,29 +113,71 @@ export function samePatternRule(rules, value) {
   return { same: hits.find((r) => r.category_id === value.category_id) ?? null, other: hits.find((r) => r.category_id !== value.category_id) ?? null };
 }
 
-/**
- * '켜진 규칙으로 한 번에 분류' 대상: 켜진 규칙 중 카테고리가 켜진 것, 적용 순서(priority, created_at, id)
- * (카테고리가 꺼진 규칙은 DB가 LG007로 거부하므로 미리 뺀다)
- */
-export function reapplyOrder(rules, categories) {
-  const on = new Set((categories ?? []).filter((c) => c.is_active).map((c) => c.id));
-  return (rules ?? []).filter((r) => r.is_active && r.category_id && on.has(r.category_id))
-    .sort((a, b) => a.priority - b.priority || String(a.created_at).localeCompare(String(b.created_at)) || String(a.id).localeCompare(String(b.id)));
+// ---------------------------------------------------------------- 켜진 규칙 전부 한 번에 (v0.22 reapply_all_category_rules, CL-072 A1)
+const ALL_RESULTS = ['created', 'updated', 'unchanged', 'manual_kept', 'skipped_no_category'];
+
+/** 결과 행 → result별 건수 + 바뀌는 수(created + updated) */
+export function reapplyAllSummary(rows) {
+  const s = Object.fromEntries(ALL_RESULTS.map((k) => [k, 0]));
+  for (const r of rows ?? []) if (r.result in s) s[r.result] += 1;
+  return { ...s, changed: s.created + s.updated };
 }
 
-const REAPPLY_CHANGES = new Set(['created', 'updated']);
-
-/** 규칙 하나의 미리보기·적용 결과 → 바뀌는(바뀐) 건수 */
-export function reapplyCount(rows) {
-  return (rows ?? []).filter((r) => REAPPLY_CHANGES.has(r.result)).length;
+/** 두 요약 더하기 */
+export function addSummary(a, b) {
+  const out = {};
+  for (const k of [...ALL_RESULTS, 'changed']) out[k] = (a?.[k] ?? 0) + (b?.[k] ?? 0);
+  return out;
 }
 
-/** 한 번에 분류 확인 문구 */
-export function bulkReapplyText(ruleCount, changeCount, skippedRules) {
+/** 'YYYY-MM-01' 달 목록(양 끝 포함) */
+export function monthList(from, to) {
+  const out = [];
+  let [y, m] = [Number(from.slice(0, 4)), Number(from.slice(5, 7))];
+  const end = Number(to.slice(0, 4)) * 12 + Number(to.slice(5, 7));
+  while (y * 12 + m <= end) {
+    out.push(`${y}-${String(m).padStart(2, '0')}-01`);
+    m += 1;
+    if (m > 12) { m = 1; y += 1; }
+  }
+  return out;
+}
+
+/** 기간 반으로: [from, to] → [[from, mid], [mid+1, to]]. 한 달이면 null(더 못 나눔) */
+export function splitRange(range) {
+  const ms = monthList(range.from, range.to);
+  if (ms.length < 2) return null;
+  const half = Math.ceil(ms.length / 2);
+  return [{ from: ms[0], to: ms[half - 1] }, { from: ms[half], to: ms.at(-1) }];
+}
+
+/** 나눠서 다시 부를 오류인가: 시간 초과(57014) 또는 대상 5,000건 초과(LG007) */
+export function shouldSplit(err) {
+  const s = err?.detail?.sqlState;
+  return s === '57014' || s === 'LG007';
+}
+
+/** 기간 글자: 전체면 '모든 달', 아니면 '2026-01~2026-06' */
+export function rangeText(range) {
+  if (!range?.from) return '모든 달';
+  const a = range.from.slice(0, 7);
+  const b = range.to.slice(0, 7);
+  return a === b ? a : `${a}~${b}`;
+}
+
+/** 한 번에 분류 확인 문구(result별 건수) */
+export function reapplyAllText(summary, ranges) {
+  const parts = [`켜진 가맹점 규칙을 모든 달 거래에 우선 순서대로 다시 적용해요. ${summary.changed}건이 분류돼요(새로 ${summary.created}건 · 바뀜 ${summary.updated}건).`];
+  if (summary.manual_kept) parts.push(`직접 고친 거래 ${summary.manual_kept}건은 그대로예요.`);
+  if (summary.skipped_no_category) parts.push(`규칙의 카테고리가 꺼졌거나 없어 ${summary.skipped_no_category}건은 건너뛰어요.`);
+  if (summary.unchanged) parts.push(`이미 같은 값 ${summary.unchanged}건.`);
+  parts.push('검토 상태는 그대로예요.');
+  const n = ranges.filter((r) => r.summary.changed > 0).length;
   return {
     title: '켜진 규칙으로 한 번에 분류',
-    message: `켜진 가맹점 규칙 ${ruleCount}개를 우선 순서대로 모든 달 거래에 적용해요. ${changeCount}건이 분류돼요(직접 고친 거래는 그대로).`
-      + (skippedRules ? ` 바뀌는 거래가 없는 규칙 ${skippedRules}개는 건너뛰어요.` : '') + ' 검토 상태는 그대로예요.',
-    undoNote: '규칙마다 변경 기록이 하나씩 남아요. 더보기 › 변경 기록에서 규칙별로 되돌릴 수 있어요.',
+    message: parts.join(' '),
+    undoNote: n > 1
+      ? `거래가 많아 기간을 ${n}개로 나눠 적용해요. 변경 기록에 기간마다 하나씩 남고, 각각 되돌릴 수 있어요.`
+      : '변경 기록에 하나로 남아요. 더보기 › 변경 기록에서 한 번에 되돌릴 수 있어요.',
   };
 }

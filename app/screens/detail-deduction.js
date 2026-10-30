@@ -1,7 +1,7 @@
 // =====================================================================
 // 거래 상세 › 연말정산 카드 (CL-062 ② E3)
-// 조회: transactions(이 거래의 deduction_kind·beneficiary_member_id — v_transaction_detail은 v0.20 칸이 없음),
-//       v_deduction_txn(이 거래의 자동 판정: 공제 항목·세액공제 항목·대상자)
+// 조회: 고친 값(deduction_kind·beneficiary_member_id)은 상세 행(v_transaction_detail, v0.22부터 칸이 있음 — CL-072 A2),
+//       v_deduction_txn(이 거래의 자동 판정: 공제 항목·공제 표시·대상자)
 // 쓰기: transactions update(deduction_kind: 자동 = null, beneficiary_member_id: 결제수단 주인 = null) — 정산 값이 아님
 // - 대상자 칸은 의료비(세액공제 항목 medical) 거래만(D8)
 // - 전세자금대출 표시(tax_credit_kind housing_rent_loan — 소득공제) 거래는 '공제 대상' 표시 + 다른 대출이면 카테고리 표시를 비우라는 안내(CL-065 H3)
@@ -14,14 +14,11 @@ import { TXN_KINDS, autoView, deductionPatch, beneficiaryNote, HOUSING_TXN_TEXT,
 
 const eq = (col, value) => ({ col, op: 'eq', value });
 
-export async function loadTxnDeduction(db, id) {
-  const [cur, parts] = await Promise.all([
-    db.select('transactions', { columns: 'id,deduction_kind,beneficiary_member_id', filters: [eq('id', id)] }),
-    db.select('v_deduction_txn', { columns: 'txn_id,deduction_kind,tax_credit_kind,beneficiary_member_id,signed_amount', filters: [eq('txn_id', id)] }),
-  ]);
-  const error = cur.error ?? parts.error;
-  if (error) return { error };
-  return { data: { cur: cur.data?.[0] ?? null, parts: parts.data ?? [] } };
+/** 이 거래의 자동 판정 조각(v_deduction_txn). 고친 값(deduction_kind·beneficiary_member_id)은 v0.22부터 상세 행(v_transaction_detail)에 있다 */
+export async function loadTxnDeduction(db, row) {
+  const parts = await db.select('v_deduction_txn', { columns: 'txn_id,deduction_kind,tax_credit_kind,beneficiary_member_id,signed_amount', filters: [eq('txn_id', row.id)] });
+  if (parts.error) return { error: parts.error };
+  return { data: { cur: { id: row.id, deduction_kind: row.deduction_kind ?? null, beneficiary_member_id: row.beneficiary_member_id ?? null }, parts: parts.data ?? [] } };
 }
 
 /**
@@ -30,7 +27,7 @@ export async function loadTxnDeduction(db, id) {
  */
 export async function renderTxnDeduction({ db, row, members, member, reload, onError, say }, doc = globalThis.document) {
   const title = h('h2', { class: 'card-title', text: '연말정산' }, [], doc);
-  const res = await loadTxnDeduction(db, row.id);
+  const res = await loadTxnDeduction(db, row);
   if (res.error) {
     onError?.(res.error, { txnId: row.id });
     return h('section', { class: 'card' }, [title, h('p', { class: 'notice small', text: '연말정산 판정을 불러오지 못했어요.' }, [], doc)], doc);

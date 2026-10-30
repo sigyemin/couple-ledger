@@ -69,7 +69,7 @@ test('새 오류 문구(A5): 카테고리 LG004·LG005·23514, 결제수단 LG00
   assert.match(deleteErrorText(e('23503')), /끌 수만/);
   assert.match(nameErrorText(e('23514')), /2단계/);
   assert.match(lockErrorText(e('LG005')), /시험용 여부는 관리자만/);
-  assert.match(valuesErrorText(e('LG005'), { kind: 'expense' }), /휴지통에 있는 거래라/);
+  assert.match(valuesErrorText(e('LG005'), { kind: 'expense' }), /휴지통에 있는 거래이거나 바꿀 수 없는 칸\(거래의 출처·업로드 원본\)/);
   assert.equal(restoreResultText([{ id: 'a', ok: true }, { id: 'b', ok: false, code: 'immutable' }], 0),
     '1건 되살렸어요. 1건은 휴지통에서 바꿀 수 없는 값이 있어 되살리지 못했어요. 새로고침해 주세요.');
 });
