@@ -117,7 +117,8 @@ test('통합: 업로드·재업로드·겹치는 파일·카드 취소 자동 �
   }
   assert.ok(db.some((x) => x.m === '김가짜 [숫자 가림]'));
   assert.deepEqual(db.filter((x) => x.m === '이시험').map((x) => [x.kind, x.ex]), [['transfer', 'personal_transfer'], ['transfer', 'personal_transfer']]);
-  assert.equal(q("select count(*) from transactions where batch_id = :'b' and review_status <> 'needs_review'", { b: a.batchId }), '0');
+  // 이체 상대 규칙이 맞은 행(이시험 2건)만 확인함, 나머지는 검토 대기(CL-050)
+  assert.equal(q("select string_agg(merchant_raw, ',' order by merchant_raw) from transactions where batch_id = :'b' and review_status <> 'needs_review'", { b: a.batchId }), '이시험,이시험');
   assert.equal(q("select count(*) from transaction_lines l join transactions t on t.id = l.txn_id where t.batch_id = :'b' and l.category_id = :'c'::uuid",
     { b: a.batchId, c: catId }), '1');
 

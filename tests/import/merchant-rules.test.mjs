@@ -99,7 +99,7 @@ test('통장 파일: 형식 행 규칙 분류는 그대로, 집계 제외·환�
   assert.equal(bill.category_id, null);
   for (const x of r.rows.filter((y) => y.merchant_raw === '이시험')) {
     assert.equal(x.category_id, CAT_2);
-    assert.equal(x.review_status, 'needs_review');
+    assert.equal(x.review_status, 'confirmed'); // 이체 상대 규칙이 맞은 행은 확인함(O2)
   }
 });
 
@@ -121,6 +121,6 @@ test('규칙이 없으면 이전과 같다(모두 검토 대기), 안내 문장'
   assert.equal(p.confirmed, 0);
   assert.equal(previewLines(p).some(([k]) => k === '가맹점 규칙으로 분류'), false);
   assert.equal(reviewText(5, 0), '모두 검토 대기로 들어가요');
-  assert.equal(reviewText(5, 2), '가맹점 규칙으로 분류된 2건은 확인함, 나머지 3건은 검토 대기로 들어가요');
-  assert.equal(reviewText(2, 2), '가맹점 규칙으로 분류돼 모두 확인함으로 들어가요');
+  assert.equal(reviewText(5, 2), '규칙으로 처리된 2건은 확인함, 나머지 3건은 검토 대기로 들어가요');
+  assert.equal(reviewText(2, 2), '규칙으로 처리돼 모두 확인함으로 들어가요');
 });
