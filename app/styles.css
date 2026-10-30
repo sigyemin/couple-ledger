@@ -328,3 +328,13 @@ a.btn { display: flex; align-items: center; justify-content: center; text-decora
 /* 결제수단 (화면 설계 v0.3 3) */
 .tag.dark { background: var(--text); color: #FFFFFF; }
 .section-title .payer { margin-right: 6px; }
+
+/* 올리기 (화면 설계 v0.1 4-2, 보정 CL-029) */
+.banner { background: var(--orange-soft); color: var(--text); }
+.banner strong { color: var(--orange); }
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.plain-list { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; font-size: 14px; color: var(--sub); }
+.upload-files { display: flex; flex-direction: column; gap: 12px; }
+.upload-name { font-weight: 700; overflow-wrap: anywhere; }
+.upload-file.error { border: 1px solid var(--orange); }
+.upload-result { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
