@@ -6,7 +6,10 @@
 // ③ 미리보기: Worker parse(정규화 행) + DB에 이미 있는 중복 키 조회 → 새로 넣을 건수·이미 있음·행 오류·집계 제외 등
 // ④ 저장: 확인 대화상자 → 파일마다 묶음 찾기/만들기(ensureBatch) → import_transactions 200행씩(uploadRows) → 결과
 // - 파일은 이 기기 밖으로 나가지 않는다. DB에는 정규화한 행과 앱이 만든 묶음 이름만 간다(원본 파일 이름은 화면에만)
-// - 새 이체 상대 카드(②)·원거래 못 찾은 환불 연결은 다음 단계(사용자 결정 U-13 대기)
+// ② 새 이체 상대: 통장 행 중 규칙에 안 맞은 행을 (방향, 설명)으로 묶어 카드(counterparty-card.js, 기본 '나중에').
+//    고르면 그 값을 임시 규칙으로 넣어 다시 정규화 → 미리보기에 바로 반영. 저장 때 그 파일을 올리기 전에 counterparty_rules insert
+//    (같은 이름·범위 규칙이 이미 있으면 DB가 거부 → 그대로 진행). '나중에'는 규칙 없이 검토 대기로 들어간다
+// - 원거래 못 찾은 환불 연결은 다음 단계(사용자 결정 U-13 대기)
 // 의존: ui/dom.js, router.js, core/confirm.js, core/errors.js, core/parse-worker.js, import/*, screens/upload-model.js, screens/shell.js
 // =====================================================================
 import { h } from '../ui/dom.js';
@@ -19,9 +22,11 @@ import { isPhone } from '../import/env.js';
 import { ensureBatch, uploadRows, batchFileName } from '../import/upload.js';
 import { fileHash } from '../import/dedup.js';
 import {
-  MAX_FILES, KEY_CHUNK, matchSources, previewOf, previewLines, readErrorText, resultLines, failedRows, monthTitle,
+  MAX_FILES, KEY_CHUNK, counterpartyGroups, counterpartyRule, draftRule, matchSources, previewOf, previewLines, readErrorText, resultLines, failedRows, monthTitle,
 } from './upload-model.js';
 import { errorView } from './shell.js';
+import { choiceCard } from './counterparty-card.js';
+import { categoryIndex, choiceValues, checkNames } from './counterparty-model.js';
 
 const FORMAT_COLUMNS = [
   'id', 'institution', 'kind', 'version', 'file_types', 'text_encoding', 'header_row', 'header_scan_limit', 'column_map',
@@ -35,18 +40,19 @@ const ACCEPT = '.xls,.xlsx,.html,.htm,application/vnd.ms-excel,application/vnd.o
 
 export async function loadUpload(db, monthStart) {
   const res = await Promise.all([
-    db.select('payment_sources', { columns: 'id,label,kind,institution,import_format_id,is_active,is_test' }),
+    db.select('payment_sources', { columns: 'id,label,kind,institution,import_format_id,owner_member_id,is_active,is_test' }),
     db.select('import_formats', { columns: FORMAT_COLUMNS }),
-    db.select('categories', { columns: 'id,code' }),
+    db.select('categories', { columns: 'id,parent_id,name,code,sort_order,is_active' }),
     db.select('counterparty_rules', { columns: CP_COLUMNS, filters: [{ col: 'is_active', op: 'eq', value: true }] }),
     db.rpc('missing_uploads', { p_month: monthStart }, { retry: true }),
+    db.select('members', { columns: 'id,member_slot,display_name' }),
   ]);
   const error = res.find((r) => r.error)?.error;
   if (error) return { error };
   return {
     data: {
       sources: res[0].data ?? [], formats: res[1].data ?? [], categories: res[2].data ?? [],
-      cpRules: res[3].data ?? [], missing: res[4].data ?? [],
+      cpRules: res[3].data ?? [], missing: res[4].data ?? [], members: res[5].data ?? [],
     },
   };
 }
@@ -64,9 +70,9 @@ async function existingKeys(db, rows) {
 }
 
 /**
- * @param {{ db, guard, monthStart, isCurrent(), onError(err, extra) → string }} ctx
+ * @param {{ db, guard, member, monthStart, isCurrent(), onError(err, extra) → string }} ctx
  */
-export async function renderUpload({ db, guard, monthStart, isCurrent, onError }, doc = globalThis.document, env = globalThis) {
+export async function renderUpload({ db, guard, member, monthStart, isCurrent, onError }, doc = globalThis.document, env = globalThis) {
   const res = await loadUpload(db, monthStart);
   if (!isCurrent()) return null;
   const ym = (m) => m.slice(0, 7);
@@ -85,7 +91,8 @@ export async function renderUpload({ db, guard, monthStart, isCurrent, onError }
     onError?.(res.error, { stage: STAGES.db_select });
     return h('main', { class: 'screen' }, [head, banner, errorView(res.error.message, res.error.detail?.sqlState ?? res.error.code, doc)], doc);
   }
-  const { sources, formats, categories, cpRules, missing } = res.data;
+  const { sources, formats, categories, cpRules, missing, members } = res.data;
+  const cats = categoryIndex(categories);
   const formatById = new Map(formats.map((f) => [f.id, f]));
   const catCodes = categories.filter((c) => c.code).map((c) => [c.code, c.id]);
 
@@ -121,8 +128,54 @@ export async function renderUpload({ db, guard, monthStart, isCurrent, onError }
       draw(); return;
     }
     f.resumed = Boolean(batch.data?.length);
-    f.preview = previewOf(f.parsed, keys.data);
+    f.keys = keys.data;
+    f.preview = previewOf(f.parsed, f.keys);
+    f.cards = src.kind === 'bank_account' ? counterpartyGroups(f.parsed.rows).map((g) => {
+      const card = choiceCard({ categories, cats, direction: g.direction, later: true, labelPrefix: g.text }, doc);
+      const c = { g, card, error: null, rule: null };
+      card.onChange(() => reparse(f));
+      return c;
+    }) : [];
     f.state = 'ready';
+    draw();
+  }
+
+  /** 카드에서 고른 값 → 규칙(나중에 = null). 고른 값이 모자라면 error */
+  function readCard(f, c) {
+    const src = sources.find((s) => s.id === f.sourceId);
+    const input = c.card.read();
+    c.error = null;
+    c.rule = null;
+    if (input.choice === 'later') return;
+    const names = checkNames({ matchText: null, alias: input.alias });
+    if (!names.ok) { c.error = names.message; return; }
+    const v = choiceValues({
+      choice: input.choice, categoryId: input.categoryId, direction: c.g.direction,
+      sourceOwnerId: src?.owner_member_id ?? null, meId: member?.memberId ?? null, members,
+    }, cats);
+    if (!v.ok) { c.error = v.message; return; }
+    c.rule = counterpartyRule(c.g, f.sourceId, v.value, names.value.alias);
+  }
+
+  /** 카드 값으로 다시 정규화(미리보기 숫자 반영). 늦게 온 앞 결과는 버린다 */
+  async function reparse(f) {
+    f.cards.forEach((c) => readCard(f, c));
+    const drafts = f.cards.filter((c) => c.rule).map((c, i) => draftRule(c.rule, i));
+    const src = sources.find((s) => s.id === f.sourceId);
+    const format = formatById.get(src.import_format_id);
+    const token = (f.token ?? 0) + 1;
+    f.token = token;
+    try {
+      const parsed = await runParseWorker({
+        op: 'parse', bytes: f.bytes.slice().buffer, format, sourceId: src.id, categories: catCodes, counterpartyRules: [...cpRules, ...drafts],
+      }, { env });
+      if (f.token !== token) return;
+      f.parsed = parsed;
+      f.preview = previewOf(parsed, f.keys);
+    } catch (e) {
+      if (f.token !== token) return;
+      fail(f, e?.message);
+    }
     draw();
   }
 
@@ -176,6 +229,19 @@ export async function renderUpload({ db, guard, monthStart, isCurrent, onError }
         h('p', { class: 'muted small', text: `지출 합계(집계 제외 빼고) ${p.spendText} · 모두 검토 대기로 들어가요` }, [], doc),
         h('dl', { class: 'kv' }, previewLines(p).flatMap(([k, v]) => [h('dt', { text: k }, [], doc), h('dd', { text: v }, [], doc)]), doc),
       );
+      if (f.cards?.length) {
+        body.push(h('div', { class: 'cp-new' }, [
+          h('h3', { class: 'card-title', text: `새 이체 상대 ${f.cards.length}` }, [], doc),
+          h('p', { class: 'muted small', text: '고른 값은 규칙으로 저장돼 다음 달부터 자동으로 적용돼요. 나중에 고르면 검토 대기로 들어가요.' }, [], doc),
+          ...f.cards.map((c) => h('div', { class: 'cp-new-item' }, [
+            h('p', { class: 'rule-title', text: c.g.text }, [], doc),
+            h('p', { class: 'muted small', text: `${c.g.direction === 'out' ? '보낼 때' : '받을 때'} · ${c.g.count}건 · ${c.g.totalText}` }, [], doc),
+            c.card.el,
+            c.error ? h('p', { class: 'notice small', text: c.error }, [], doc) : null,
+          ], doc)),
+        ], doc));
+        f.cards.forEach((c) => c.card.setDisabled(busy || f.state === 'saved'));
+      }
       if (p.errorCount) {
         body.push(h('p', { class: 'notice small', text: `읽지 못한 행 ${p.errorCount}줄: ${p.errorLines.join(', ')} (행 ${p.errorRows.join(', ')}${p.errorCount > p.errorRows.length ? ' …' : ''})` }, [], doc));
       }
@@ -197,7 +263,9 @@ export async function renderUpload({ db, guard, monthStart, isCurrent, onError }
     const ready = files.filter((f) => f.state === 'ready');
     const total = ready.reduce((s, f) => s + f.preview.newCount, 0);
     save.textContent = ready.length ? `${ready.length}개 파일 · 새로 ${total}건 저장` : '저장';
-    save.disabled = busy || ready.length === 0 || files.some((f) => f.state === 'reading');
+    const cardErrors = ready.some((f) => f.cards?.some((c) => c.error));
+    save.disabled = busy || ready.length === 0 || cardErrors || files.some((f) => f.state === 'reading');
+    if (cardErrors) say('새 이체 상대에서 고를 값을 마저 골라 주세요.', true);
     picker.disabled = busy;
   }
 
@@ -215,6 +283,11 @@ export async function renderUpload({ db, guard, monthStart, isCurrent, onError }
       const src = sources.find((s) => s.id === f.sourceId);
       try {
         say(`${f.name} 저장 중…`);
+        for (const c of f.cards ?? []) {
+          if (!c.rule) continue;
+          const r = await db.insert('counterparty_rules', { ...c.rule, created_by: member.memberId });
+          if (r.error && r.error.code !== 'duplicate') throw r.error; // 같은 이름·범위 규칙이 이미 있으면 그대로 진행
+        }
         const { batchId } = await ensureBatch(db, guard, {
           sourceId: src.id, targetMonth: monthStart, fileHash: f.hash,
           fileName: batchFileName(src.institution, monthStart, f.fileType),

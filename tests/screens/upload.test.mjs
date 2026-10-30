@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { isPhone } from '../../app/import/env.js';
 import {
-  matchSources, previewOf, previewLines, readErrorText, resultLines, failedRows, monthTitle,
+  counterpartyGroups, counterpartyRule, draftRule, matchSources, previewOf, previewLines, readErrorText, resultLines, failedRows, monthTitle,
 } from '../../app/screens/upload-model.js';
 import { parseHash } from '../../app/router.js';
 
@@ -69,4 +69,23 @@ test('저장 결과 문장: 넣음·건너뜀·못 넣음·원거래 못 찾은 
 test('주소·제목', () => {
   assert.equal(parseHash('#/upload?month=2026-09').query.get('month'), '2026-09');
   assert.equal(monthTitle('2026-09-01'), '9월 파일');
+});
+
+test('새 이체 상대 묶음: 표시된 통장 행만, (방향, 띄어쓰기 무시한 설명)으로, 건수 많은 순, 빈 설명은 뺌', () => {
+  const r = (merchant, kind, amount, o = {}) => ({ newCounterparty: true, merchant_raw: merchant, kind, amount, ...o });
+  const g = counterpartyGroups([
+    r('김가짜', 'expense', 50000), r('이시험', 'expense', 1000), r('이 시험', 'expense', 1000), r('이시험', 'income', 300),
+    r('', 'expense', 10), r('박샘플', 'expense', 9, { newCounterparty: false }),
+  ]);
+  assert.deepEqual(g.map((x) => [x.text, x.direction, x.count, x.totalText]), [
+    ['이시험', 'out', 2, '2,000원'], ['김가짜', 'out', 1, '50,000원'], ['이시험', 'in', 1, '300원']]);
+});
+
+test('규칙 행: 기본 범위 = 그 통장 + 같은 방향 + 이름이 똑같으면, 미리보기용은 기존 규칙 뒤에 오도록', () => {
+  const SRC = ID(804);
+  const rule = counterpartyRule({ text: '이시험', direction: 'out' }, SRC, { suggested_kind: 'transfer', suggested_exclude_reason: 'personal_transfer', member_id: ID(72) }, '나리');
+  assert.deepEqual(rule, { match_field: 'merchant', match_text: '이시험', match_type: 'exact', source_id: SRC, direction: 'out', alias: '나리',
+    suggested_kind: 'transfer', suggested_exclude_reason: 'personal_transfer', member_id: ID(72) });
+  const d = draftRule(rule, 3);
+  assert.deepEqual([d.id, d.priority, d.is_active, d.created_at > '2100'], ['draft-3', 100, true, true]);
 });

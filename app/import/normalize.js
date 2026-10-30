@@ -14,6 +14,7 @@
 // - 모든 글자 칸은 민감번호 규칙으로 가린다('[숫자 가림]', 붙여 쓴 일시 단계는 끈 보수적 검사)
 // - 승인번호가 형식(영숫자 4~12자, 숫자 10개 연속 금지)에 맞지 않으면 행 오류
 // - 검토 상태는 모두 needs_review
+// - 통장 행이 행 규칙·이체 상대 규칙 어디에도 안 맞으면 newCounterparty = true(화면 표시용, RPC로는 안 보냄)
 // - 한 파일 안에서 같은 1순위 키(결제수단|승인번호|kind)가 두 번째로 나오면 그 행은 행 오류(duplicate_key)
 //   1순위 키에 n번째·금액을 넣지 않는다(설계 확인 D2). 조용히 버리지 않고 미리보기에 보인다
 // - 2순위 키의 일시는 분 단위(YYYY-MM-DD HH:MI). 초는 키에서 뺀다(저장하는 시각은 그대로, 사용자 결정 D1)
@@ -245,6 +246,8 @@ export async function normalizeRows(grid, format, header, ctx) {
         : cp?.suggested_category_id && (kind === 'expense' || kind === 'income') ? cp.suggested_category_id : null,
     };
     if (base.category_id) base.category_source = 'rule';
+    // 통장 행인데 행 규칙·이체 상대 규칙에 안 맞았으면 "새 이체 상대" 후보(화면 4-2 ②). RPC로는 보내지 않는다(toRpcRows가 뺌)
+    if (format.kind === 'bank_account' && !rule && !cp) base.newCounterparty = true;
     if (base.card_kind && !['expense', 'refund'].includes(kind)) base.card_kind = null;
 
     const occurredAt = when.time ? `${when.date} ${when.time.slice(0, 5)}` : when.date; // 분 단위
@@ -289,7 +292,7 @@ export async function normalizeRows(grid, format, header, ctx) {
   return { rows, errors, skipped, maskedCells };
 }
 
-/** RPC로 보낼 모양(rowNo 제거) */
+/** RPC로 보낼 모양(rowNo·화면용 표시 newCounterparty 제거) */
 export function toRpcRows(rows) {
-  return rows.map(({ rowNo, ...r }) => r);
+  return rows.map(({ rowNo, newCounterparty, ...r }) => r);
 }
