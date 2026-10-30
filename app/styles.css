@@ -445,3 +445,5 @@ a.btn.small-btn { display: inline-flex; }
 .mc-name { font-size: 16px; overflow-wrap: anywhere; }
 .mc-item .muted { margin-top: 0; }
 .mc-item .btn { align-self: flex-end; }
+.mc-rule { display: flex; flex-direction: column; gap: 2px; }
+.mc-wide { padding-left: 28px; }

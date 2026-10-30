@@ -10,6 +10,7 @@
 import { won } from '../core/format.js';
 import { MAX_BULK } from './list-model.js';
 import { checkRule, PRIORITY_DEFAULT } from './rules-model.js';
+import { matchNorm } from '../import/formats.js';
 
 /** 통장 이체 행인가: 통장 결제수단 + 체크카드 사용이 아님 */
 export function isTransferLike(row) {
@@ -58,21 +59,31 @@ export function groupSub(g) {
 }
 
 /**
- * 가맹점 규칙 값(정리값 똑같으면 → 그 카테고리, 확정). 못 만들면 { ok:false, message }
- * pattern은 원래 이름(DB가 match_norm으로 비교 — 띄어쓰기·전각 무시)
+ * 가맹점 규칙 값 → 그 카테고리, 확정. 못 만들면 { ok:false, message }
+ * - 기본: 원래 이름이 똑같으면(exact, DB가 match_norm으로 비교 — 띄어쓰기·전각 무시)
+ * - contains: 사용자가 줄여 쓴 글자가 들어가면 모두(예: 같은 브랜드 다른 지점). 이 묶음 이름에 그 글자가 들어 있어야 한다
+ * @param {{ contains?: string|null }} [o]
  */
-export function ruleFor(g, categoryId) {
+export function ruleFor(g, categoryId, { contains = null } = {}) {
   if (!g.canRule) return { ok: false, message: g.transferLike ? '이체 상대는 이체 상대 규칙으로 정해요' : '수입은 가맹점 규칙을 만들 수 없어요' };
-  const v = checkRule({ pattern: g.merchant, matchType: 'exact', categoryId, isAmbiguous: false, priority: String(PRIORITY_DEFAULT) });
-  return v.ok ? { ok: true, value: v.value } : { ok: false, message: v.message };
+  const useContains = contains != null;
+  if (useContains && !matchNorm(g.norm).includes(matchNorm(contains))) {
+    return { ok: false, message: `'${g.merchant}' 안에 있는 글자로 줄여 주세요` };
+  }
+  const v = checkRule({
+    pattern: useContains ? contains : g.merchant, matchType: useContains ? 'contains' : 'exact', categoryId, isAmbiguous: false, priority: String(PRIORITY_DEFAULT),
+  });
+  return v.ok ? { ok: true, value: v.value, warning: v.warning } : { ok: false, message: v.message };
 }
 
 /** 확인 창 문구 */
-export function classifyText(g, categoryName, makeRule) {
+export function classifyText(g, categoryName, makeRule, rule = null) {
   const parts = [`${g.merchant} ${g.count}건을 '${categoryName}'(으)로 분류해요.`];
   if (g.splitCount) parts.push(`그중 나눈 거래 ${g.splitCount}건은 나눈 금액이 모두 '${categoryName}' 하나로 바뀌어요.`);
   if (g.toConfirm.length) parts.push(`${g.toConfirm.length}건은 확인함으로 바뀌어요.`);
-  if (makeRule) parts.push(`앞으로 '${g.merchant}' 거래는 올릴 때 '${categoryName}'(으)로 자동 분류돼요(가맹점 규칙).`);
+  if (makeRule && rule?.match_type === 'contains') {
+    parts.push(`앞으로 이름에 '${rule.pattern}'이(가) 들어간 가맹점은 모두 올릴 때 '${categoryName}'(으)로 자동 분류돼요(가맹점 규칙).`);
+  } else if (makeRule) parts.push(`앞으로 '${g.merchant}' 거래는 올릴 때 '${categoryName}'(으)로 자동 분류돼요(가맹점 규칙).`);
   if (g.total > g.count) parts.push(`(한 번에 ${MAX_BULK}건까지라 나머지 ${g.total - g.count}건은 다음에 해요.)`);
   return { title: '가맹점별로 분류하기', message: parts.join(' '), undoNote: '분류는 더보기 › 변경 기록에서 되돌릴 수 있어요. 규칙은 규칙·카테고리에서 끄거나 지울 수 있어요.' };
 }

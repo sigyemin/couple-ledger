@@ -2,7 +2,7 @@
 // 가맹점별로 분류하기 #/classify (CL-061): 모든 달의 미분류 거래를 가맹점으로 묶어 한 번에 분류
 // 조회: v_transaction_detail(is_uncategorized, 휴지통·시험 결제수단 제외, 쪽 단위, 최대 MAX_ROWS), categories
 // 쓰기(묶음마다): bulk_set_category(변경 기록 — 되돌리기 가능) → 확인함으로(transactions update, 월 검토와 같음)
-//               → '앞으로 같은 가맹점 자동 분류'면 category_rules insert(정리값 똑같으면, 확정). 같은 규칙이 이미 있으면 건너뜀
+//               → '앞으로 같은 가맹점 자동 분류'면 category_rules insert(정리값 똑같으면, 확정 — 또는 사용자가 줄인 글자가 들어가면). 같은 규칙이 이미 있으면 건너뜀
 // - 통장 이체 행 묶음은 이름을 보여 주되 규칙은 이체 상대 규칙 쪽으로 안내
 // 의존: ui/dom.js, router.js, core/confirm.js, core/errors.js, screens/merchant-classify-model.js, screens/category-picker.js,
 //       screens/review-model.js(confirmBothPatch), screens/shell.js
@@ -90,16 +90,30 @@ export async function renderMerchantClassify({ db, member, reload, isCurrent, on
     const pick = categoryPicker({ categories, kind: g.kind, label: `${g.merchant} 카테고리`, doc });
     const rule = h('input', { attrs: { type: 'checkbox', 'aria-label': `앞으로 ${g.merchant} 자동 분류` } }, [], doc);
     rule.checked = g.canRule;
+    // 같은 브랜드 다른 지점: 글자를 줄여 '들어가면 모두'로(사용자가 고칠 때만)
+    const wide = h('input', { attrs: { type: 'checkbox', 'aria-label': `${g.merchant} 글자가 들어가면 모두` } }, [], doc);
+    const widePattern = h('input', { class: 'field', attrs: { 'aria-label': `${g.merchant} 규칙 글자(줄여 쓰기)`, maxlength: '100' } }, [], doc);
+    widePattern.value = g.merchant;
+    const wideBox = h('div', { class: 'mc-wide', attrs: { hidden: true } }, [
+      widePattern, h('p', { class: 'muted small', text: '예: 지점 이름을 지우면 같은 브랜드 모든 지점에 맞아요.' }, [], doc),
+    ], doc);
+    wide.addEventListener('change', () => { wideBox.hidden = !wide.checked; });
+    rule.addEventListener('change', () => { wide.disabled = !rule.checked; if (!rule.checked) { wide.checked = false; wideBox.hidden = true; } });
     const go = h('button', { class: 'btn primary small-btn', text: `${g.count}건 분류`, attrs: { type: 'button' } }, [], doc);
-    const lock = (on) => { go.disabled = on; rule.disabled = on || !g.canRule; pick.setDisabled(on); };
+    const lock = (on) => {
+      go.disabled = on; rule.disabled = on || !g.canRule; pick.setDisabled(on);
+      wide.disabled = on || !g.canRule || !rule.checked; widePattern.disabled = on;
+    };
     lock(false);
     go.addEventListener('click', async () => {
       if (!pick.value) { say(`${g.merchant}: 카테고리를 골라 주세요`, true); return; }
       const name = pick.selectedName;
       const makeRule = g.canRule && rule.checked;
-      const rv = makeRule ? ruleFor(g, pick.value) : null;
+      const rv = makeRule ? ruleFor(g, pick.value, { contains: wide.checked ? widePattern.value : null }) : null;
       if (rv && !rv.ok) { say(`규칙을 만들 수 없어요: ${rv.message}. 체크를 끄고 분류만 할 수 있어요.`, true); return; }
-      if (!(await confirmDialog({ ...classifyText(g, name, makeRule), confirmLabel: '분류하기', doc }))) return;
+      const text = classifyText(g, name, makeRule, rv?.value);
+      if (rv?.warning) text.message += ` (${rv.warning})`;
+      if (!(await confirmDialog({ ...text, confirmLabel: '분류하기', doc }))) return;
       lock(true);
       const r = await db.rpc('bulk_set_category', { p_txn_ids: g.ids, p_category_id: pick.value, p_description: classifyDescription(g, name) });
       if (r.error) { lock(false); fail(r.error, { stage: STAGES.db_rpc, action: ACTIONS.bulk_edit }); return; }
@@ -138,7 +152,11 @@ export async function renderMerchantClassify({ db, member, reload, isCurrent, on
       h('p', { class: 'muted small', text: groupSub(g) }, [], doc),
       pick,
       g.canRule
-        ? h('label', { class: 'filter-check' }, [rule, h('span', { text: '앞으로 같은 가맹점 자동 분류(가맹점 규칙 만들기)' }, [], doc)], doc)
+        ? h('div', { class: 'mc-rule' }, [
+          h('label', { class: 'filter-check' }, [rule, h('span', { text: '앞으로 같은 가맹점 자동 분류(가맹점 규칙 만들기)' }, [], doc)], doc),
+          h('label', { class: 'filter-check' }, [wide, h('span', { text: '이 글자가 들어가면 모두(지점이 달라도)' }, [], doc)], doc),
+          wideBox,
+        ], doc)
         : (g.transferLike
           ? h('p', { class: 'muted small' }, [
             '통장 이체예요. 앞으로 자동으로 하려면 ',

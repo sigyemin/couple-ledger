@@ -53,7 +53,14 @@ test('한 번에 MAX_BULK건까지, 나머지는 안내', () => {
 
 test('규칙 값: 원래 이름 · 똑같으면 · 확정 · 기본 우선, 확인 문구·설명', () => {
   const [g] = merchantGroups([row('가짜 식당'), row('가짜식당', { lines: [{}, {}] })]);
-  assert.deepEqual(ruleFor(g, 'c1'), { ok: true, value: { pattern: '가짜 식당', match_type: 'exact', category_id: 'c1', is_ambiguous: false, priority: 100 } });
+  assert.deepEqual(ruleFor(g, 'c1'), { ok: true, warning: null, value: { pattern: '가짜 식당', match_type: 'exact', category_id: 'c1', is_ambiguous: false, priority: 100 } });
+  // 줄여 쓰기: 들어가면 모두(같은 브랜드 다른 지점). 이 이름 안의 글자만, 한 글자는 경고
+  const br = merchantGroups([row('가짜커피 역삼점')])[0];
+  assert.deepEqual(ruleFor(br, 'c1', { contains: '가짜 커피' }).value, { pattern: '가짜 커피', match_type: 'contains', category_id: 'c1', is_ambiguous: false, priority: 100 });
+  assert.match(ruleFor(br, 'c1', { contains: '다른가게' }).message, /안에 있는 글자로/);
+  assert.equal(ruleFor(br, 'c1', { contains: '  ' }).ok, false);
+  assert.ok(ruleFor(br, 'c1', { contains: '커' }).warning);
+  assert.match(classifyText(br, '카페', true, ruleFor(br, 'c1', { contains: '가짜커피' }).value).message, /'가짜커피'이\(가\) 들어간 가맹점은 모두/);
   assert.equal(ruleFor(g, '').ok, false);
   const t = classifyText(g, '외식', true);
   assert.match(t.message, /가짜 식당 2건을 '외식'\(으\)로 분류해요/);
