@@ -161,3 +161,46 @@ test('통합: 업로드·재업로드·겹치는 파일·카드 취소 자동 �
   const r6 = await uploadRows(pgDb, a.batchId, bad);
   assert.deepEqual(r6.failures, [{ rowNo: 99, result: 'sensitive', sqlState: 'LG002' }]);
 });
+
+test('통합: 가맹점 규칙(CL-044) — 앱 정규화 결과가 DB에 그대로, DB 재적용과 같은 판정', { skip }, async () => {
+  const SOURCE_C = 'a0000000-0000-4000-8000-0000000000c9';
+  q(`insert into auth.users (id, email) values (:'uid'::uuid, 'user-a@example.com') on conflict do nothing;
+     insert into members (id, member_slot, email, auth_user_id, display_name)
+       values (:'mem'::uuid, 1, 'user-a@example.com', :'uid'::uuid, '사용자A') on conflict do nothing;
+     insert into payment_sources (id, owner_member_id, kind, institution, label, is_test)
+       values (:'sc'::uuid, :'mem'::uuid, 'credit_card', '가상기관B', '시험 카드2', true);
+     insert into categories (name) values ('시험 외식'), ('시험 전자') on conflict do nothing;`, { sc: SOURCE_C, mem: MEMBER, uid: UID });
+  const dining = q("select id from categories where name = '시험 외식'");
+  const goods = q("select id from categories where name = '시험 전자'");
+  q(`insert into category_rules (pattern, match_type, category_id, is_ambiguous, created_by, created_at) values
+       ('가짜 식당', 'exact', :'d'::uuid, false, :'mem'::uuid, '2026-10-01'),
+       ('식당', 'contains', :'g'::uuid, false, :'mem'::uuid, '2026-10-02'),
+       ('가짜전자', 'contains', :'g'::uuid, true, :'mem'::uuid, '2026-10-01')`, { d: dining, g: goods, mem: MEMBER });
+  // 앱이 읽는 모양(구성원 권한 select) + 카테고리 켜짐 여부
+  const rules = JSON.parse(psql(`select json_agg(json_build_object('id', r.id, 'pattern', r.pattern, 'match_type', r.match_type, 'category_id', r.category_id,
+      'is_ambiguous', r.is_ambiguous, 'priority', r.priority, 'is_active', r.is_active, 'created_at', r.created_at, 'categoryActive', c.is_active))
+      from category_rules r join categories c on c.id = r.category_id where r.is_active;`).out);
+  // 승인번호를 바꾼 카드 파일(앞 시험과 겹치지 않게)
+  const sheet = sheetB().map((row, i) => (i >= 2 && row[6] ? row.map((c, k) => (k === 6 && c.length <= 8 ? `Z${c.slice(1)}` : c)) : row));
+  const parsed = await parseFile(XLSX, bookBytes(sheet, 'biff8'), { format: FORMAT_B, sourceId: SOURCE_C, categoryRules: rules });
+  const guard = { async requireMember() { return { memberId: MEMBER, memberSlot: 1, displayName: '사용자A' }; } };
+  const { batchId } = await ensureBatch(pgDb, guard, {
+    sourceId: SOURCE_C, targetMonth: '2026-10-01', fileHash: await fileHash(bookBytes(sheet, 'biff8')), fileName: 'c044.xls',
+  });
+  const res = await uploadRows(pgDb, batchId, parsed.rows);
+  assert.equal(res.counts.inserted, 5);
+  const got = JSON.parse(q(`select json_agg(json_build_array(t.merchant_raw, t.kind, t.review_status, l.category_id, l.category_source)
+      order by t.merchant_raw, t.kind) from transactions t left join transaction_lines l on l.txn_id = t.id where t.batch_id = :'b'`, { b: batchId }));
+  assert.deepEqual(got, [
+    ['가짜식당', 'expense', 'confirmed', dining, 'rule'],
+    ['가짜전자', 'expense', 'needs_review', goods, 'suggestion'],
+    ['가짜전자', 'refund', 'needs_review', null, null],
+    ['부분취소상점', 'expense', 'needs_review', null, null],
+    ['부분취소상점', 'refund', 'needs_review', null, null],
+  ]);
+  // DB 재적용 미리보기(구성원 권한): 지출 행은 앱과 같은 판정(unchanged), 뒤 규칙은 skipped_priority
+  const pre = JSON.parse(psql(`select json_agg(json_build_array(r.pattern, x.result, x.merchant_norm) order by r.pattern, x.merchant_norm, x.result)
+      from category_rules r, reapply_category_rule(r.id, false, null, null) x join transactions t on t.id = x.txn_id
+      where t.batch_id = :'b' and t.kind = 'expense';`, { b: batchId }).out);
+  assert.deepEqual(pre, [['가짜 식당', 'unchanged', '가짜식당'], ['가짜전자', 'unchanged', '가짜전자'], ['식당', 'skipped_priority', '가짜식당']]);
+});

@@ -4,7 +4,7 @@
 // - 결제수단 맞춤: 파일 내용(헤더)이 맞는 형식 → 그 형식을 쓰는 켜진 결제수단. 1개면 자동, 여러 개면 고르기, 없으면 건너뜀
 //   시험용(is_test)은 자동으로 고르지 않는다 — 하나뿐이어도 고르기로 두고 경고(실제 파일이 시험용으로 들어가면 집계에서 빠지고 일괄 삭제될 수 있음)
 // - 미리보기: 새로 넣을 건수(이미 DB에 같은 중복 키가 있으면 뺌), 이미 있음, 행 오류(사유별), 꼬리 줄, 집계 제외,
-//   체크카드 사용, 숫자 가림. 검토 상태는 모두 검토 대기(정규화 규칙)
+//   체크카드 사용, 숫자 가림, 가맹점 규칙으로 분류(CL-044). 검토 상태는 검토 대기, 확정 가맹점 규칙으로 분류된 행만 확인함(U-16·Q3)
 // - 셀 원문은 화면에 오지 않는다(Worker가 정규화한 행·건수만 준다)
 // 의존: core/format.js
 // =====================================================================
@@ -54,6 +54,9 @@ export function previewOf(parsed, existingKeys = new Set()) {
     checkCard: fresh.filter((r) => r.card_kind === 'check_card').length,
     refunds: fresh.filter((r) => r.kind === 'refund').length,
     masked: parsed?.maskedCells ?? 0,
+    merchantRule: fresh.filter((r) => r.merchantRule === 'rule').length,
+    merchantSuggest: fresh.filter((r) => r.merchantRule === 'suggestion').length,
+    confirmed: fresh.filter((r) => r.review_status === 'confirmed').length,
     spendText: won(sum(fresh.filter((r) => !r.is_excluded && (r.kind === 'expense' || r.kind === 'refund')))),
   };
 }
@@ -62,6 +65,8 @@ export function previewOf(parsed, existingKeys = new Set()) {
 export function previewLines(p) {
   const out = [];
   if (p.dupCount) out.push(['이미 들어온 행(건너뜀)', `${p.dupCount}건`]);
+  const byRule = (p.merchantRule ?? 0) + (p.merchantSuggest ?? 0);
+  if (byRule) out.push(['가맹점 규칙으로 분류', p.merchantSuggest ? `${byRule}건(확인 필요 ${p.merchantSuggest}건)` : `${byRule}건`]);
   if (p.excluded) out.push(['집계 제외(카드대금·이체 등)', `${p.excluded}건`]);
   if (p.checkCard) out.push(['체크카드 사용', `${p.checkCard}건`]);
   if (p.refunds) out.push(['환불', `${p.refunds}건`]);
@@ -178,6 +183,13 @@ export function suggestLineText(counts) {
   if (!total) return null;
   const first = counts.find((c) => c.count > 0);
   return { text: `체크카드 취소 연결 제안 ${total}건이 있어요. 월 검토에서 연결해요.`, month: first.month };
+}
+
+/** 검토 상태 안내(미리보기·저장 확인 창). confirmed = 확정 가맹점 규칙으로 확인함이 되는 건수 */
+export function reviewText(newCount, confirmed) {
+  if (!confirmed) return '모두 검토 대기로 들어가요';
+  if (confirmed >= newCount) return '가맹점 규칙으로 분류돼 모두 확인함으로 들어가요';
+  return `가맹점 규칙으로 분류된 ${confirmed}건은 확인함, 나머지 ${newCount - confirmed}건은 검토 대기로 들어가요`;
 }
 
 export const TEST_SOURCE_WARNING = '시험용 결제수단이에요(집계 제외, 나중에 일괄 삭제됨). 실제 파일이면 다른 결제수단을 골라 주세요.';

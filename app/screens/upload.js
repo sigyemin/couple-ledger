@@ -22,7 +22,7 @@ import { isPhone } from '../import/env.js';
 import { ensureBatch, uploadRows, batchFileName } from '../import/upload.js';
 import { fileHash } from '../import/dedup.js';
 import {
-  MAX_FILES, KEY_CHUNK, TEST_SOURCE_WARNING, checkCancelMonths, suggestLineText, applySourceChoice, counterpartyGroups, counterpartyRule, draftRule, matchSources, previewOf, previewLines, readErrorText, resultLines, failedRows, monthTitle,
+  MAX_FILES, KEY_CHUNK, TEST_SOURCE_WARNING, checkCancelMonths, suggestLineText, reviewText, applySourceChoice, counterpartyGroups, counterpartyRule, draftRule, matchSources, previewOf, previewLines, readErrorText, resultLines, failedRows, monthTitle,
 } from './upload-model.js';
 import { errorView } from './shell.js';
 import { choiceCard } from './counterparty-card.js';
@@ -37,6 +37,7 @@ const CP_COLUMNS = [
   'id', 'match_field', 'match_text', 'match_type', 'source_id', 'direction', 'txn_type', 'suggested_kind',
   'suggested_exclude_reason', 'suggested_category_id', 'suggested_is_shared', 'priority', 'is_active', 'created_at',
 ].join(',');
+const RULE_COLUMNS = 'id,pattern,match_type,category_id,is_ambiguous,priority,is_active,created_at';
 const ACCEPT = '.xls,.xlsx,.html,.htm,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/html';
 
 export async function loadUpload(db, monthStart) {
@@ -47,13 +48,14 @@ export async function loadUpload(db, monthStart) {
     db.select('counterparty_rules', { columns: CP_COLUMNS, filters: [{ col: 'is_active', op: 'eq', value: true }] }),
     db.rpc('missing_uploads', { p_month: monthStart }, { retry: true }),
     db.select('members', { columns: 'id,member_slot,display_name' }),
+    db.select('category_rules', { columns: RULE_COLUMNS, filters: [{ col: 'is_active', op: 'eq', value: true }] }),
   ]);
   const error = res.find((r) => r.error)?.error;
   if (error) return { error };
   return {
     data: {
       sources: res[0].data ?? [], formats: res[1].data ?? [], categories: res[2].data ?? [],
-      cpRules: res[3].data ?? [], missing: res[4].data ?? [], members: res[5].data ?? [],
+      cpRules: res[3].data ?? [], missing: res[4].data ?? [], members: res[5].data ?? [], categoryRules: res[6].data ?? [],
     },
   };
 }
@@ -93,6 +95,9 @@ export async function renderUpload({ db, guard, member, monthStart, isCurrent, o
     return h('main', { class: 'screen' }, [head, banner, errorView(res.error.message, res.error.detail?.sqlState ?? res.error.code, doc)], doc);
   }
   const { sources, formats, categories, cpRules, missing, members } = res.data;
+  // 가맹점 규칙(U-16 A안): 켜진 규칙 + 그 카테고리가 켜져 있는지(꺼졌으면 정규화가 분류하지 않음 — DB 재적용과 같게)
+  const catActive = new Map(categories.map((c) => [c.id, c.is_active !== false]));
+  const categoryRules = res.data.categoryRules.map((r) => ({ ...r, categoryActive: catActive.get(r.category_id) ?? false }));
   const cats = categoryIndex(categories);
   const formatById = new Map(formats.map((f) => [f.id, f]));
   const catCodes = categories.filter((c) => c.code).map((c) => [c.code, c.id]);
@@ -113,7 +118,7 @@ export async function renderUpload({ db, guard, member, monthStart, isCurrent, o
     if (!format) { fail(f, 'format_mismatch'); draw(); return; }
     try {
       f.parsed = await runParseWorker({
-        op: 'parse', bytes: f.bytes.slice().buffer, format, sourceId: src.id, categories: catCodes, counterpartyRules: cpRules,
+        op: 'parse', bytes: f.bytes.slice().buffer, format, sourceId: src.id, categories: catCodes, counterpartyRules: cpRules, categoryRules,
       }, { env });
     } catch (e) {
       fail(f, e?.message); draw(); return;
@@ -187,7 +192,7 @@ export async function renderUpload({ db, guard, member, monthStart, isCurrent, o
     f.token = token;
     try {
       const parsed = await runParseWorker({
-        op: 'parse', bytes: f.bytes.slice().buffer, format, sourceId: src.id, categories: catCodes, counterpartyRules: [...cpRules, ...drafts],
+        op: 'parse', bytes: f.bytes.slice().buffer, format, sourceId: src.id, categories: catCodes, counterpartyRules: [...cpRules, ...drafts], categoryRules,
       }, { env });
       if (f.token !== token) return;
       f.parsed = parsed;
@@ -246,7 +251,7 @@ export async function renderUpload({ db, guard, member, monthStart, isCurrent, o
       body.push(
         h('p', { class: 'muted small', text: `${src?.label ?? ''}${f.resumed ? ' · 이미 올린 파일이라 빠진 행만 넣어요' : ''}` }, [], doc),
         h('p', { class: 'amount-l', text: `새로 ${p.newCount}건` }, [], doc),
-        h('p', { class: 'muted small', text: `지출 합계(집계 제외 빼고) ${p.spendText} · 모두 검토 대기로 들어가요` }, [], doc),
+        h('p', { class: 'muted small', text: `지출 합계(집계 제외 빼고) ${p.spendText} · ${reviewText(p.newCount, p.confirmed)}` }, [], doc),
         h('dl', { class: 'kv' }, previewLines(p).flatMap(([k, v]) => [h('dt', { text: k }, [], doc), h('dd', { text: v }, [], doc)]), doc),
       );
       if (f.cards?.length) {
@@ -294,9 +299,10 @@ export async function renderUpload({ db, guard, member, monthStart, isCurrent, o
   async function saveAll() {
     const ready = files.filter((f) => f.state === 'ready' && f.sourceId);
     const total = ready.reduce((s, f) => s + f.preview.newCount, 0);
+    const confirmed = ready.reduce((s, f) => s + (f.preview.confirmed ?? 0), 0);
     if (!(await confirmDialog({
       title: '올리기',
-      message: `${ready.length}개 파일에서 새로 ${total}건을 ${monthTitle(monthStart).replace(' 파일', '')}분으로 넣어요. 모두 검토 대기로 들어가요.`,
+      message: `${ready.length}개 파일에서 새로 ${total}건을 ${monthTitle(monthStart).replace(' 파일', '')}분으로 넣어요. ${reviewText(total, confirmed)}.`,
       undoNote: '잘못 넣은 거래는 거래 상세에서 휴지통으로 옮길 수 있어요.',
       confirmLabel: '저장', doc,
     }))) return;
