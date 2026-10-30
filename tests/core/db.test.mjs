@@ -13,7 +13,7 @@ function fakeClient(results) {
   };
   const builder = (path) => {
     const b = {};
-    for (const m of ['select', 'eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'in', 'is', 'ilike', 'order', 'range', 'update']) {
+    for (const m of ['select', 'eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'in', 'is', 'ilike', 'order', 'range', 'update', 'upsert']) {
       b[m] = (...args) => {
         path.push([m, ...args]);
         return b;
@@ -142,4 +142,26 @@ test('category_rules match_type은 포함·일치만(insert·update) — 정규�
   const ok = await db.update('category_rules', 'r1', { match_type: 'exact' });
   assert.equal(ok.error, null);
   assert.equal(c.calls.length, 1);
+});
+
+test('upsert(CL-062): 연말정산 두 표만, 키 칸은 표마다 정해 둠, 칸·값 검사, 여러 행 한 요청, 재시도 없음', async () => {
+  const c = fakeClient([{ data: [{}], error: null }, { data: [{}], error: null }, NET]);
+  const db = createDb(c);
+  const prof = { member_id: 'm1', tax_year: 2026, total_salary_amount: null, child_count: 0, is_rent_eligible: false, medical_reimbursed_amount: 0 };
+  assert.equal((await db.upsert('member_tax_profiles', prof)).error, null);
+  assert.deepEqual(c.calls[0], [['from', 'member_tax_profiles'], ['upsert', [prof], { onConflict: 'member_id,tax_year' }], ['select']]);
+  const rows = ['credit_card', 'check_card'].map((k) => ({ member_id: 'm1', tax_year: 2026, as_of_on: '2026-09-30', deduction_kind: k, amount: 0 }));
+  assert.equal((await db.upsert('deduction_baselines', rows)).error, null);
+  assert.deepEqual(c.calls[1][1], ['upsert', rows, { onConflict: 'member_id,tax_year,as_of_on,deduction_kind' }]);
+  for (const r of await Promise.all([
+    db.upsert('transactions', { id: 'x' }),
+    db.upsert('member_tax_profiles', { ...prof, updated_by: 'm2' }),
+    db.upsert('member_tax_profiles', { tax_year: 2026 }),
+    db.upsert('deduction_baselines', [{ ...rows[0], deduction_kind: 'excluded' }]),
+    db.upsert('deduction_baselines', []),
+    db.upsert('deduction_baselines', [[rows[0]]]),
+  ])) assert.equal(r.error?.code, 'invalid');
+  assert.equal(c.calls.length, 2);
+  assert.equal((await db.upsert('member_tax_profiles', prof)).error.code, 'network');
+  assert.equal(c.calls.length, 3); // 네트워크 오류도 다시 보내지 않음
 });

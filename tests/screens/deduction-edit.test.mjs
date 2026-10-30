@@ -37,6 +37,8 @@ test('거래 고친 값: 바뀐 칸만 + updated_by, 자동 = null, 모르는 �
   assert.deepEqual(deductionPatch(cur, { kind: '', beneficiary: 'm2' }, 'm1'), { beneficiary_member_id: 'm2', updated_by: 'm1' });
   assert.deepEqual(deductionPatch({ beneficiary_member_id: 'm2' }, { kind: '', beneficiary: '' }, 'm1'), { beneficiary_member_id: null, updated_by: 'm1' });
   assert.equal(deductionPatch(cur, { kind: 'bogus' }, 'm1'), null);
+  assert.equal(deductionPatch(cur, { kind: '', beneficiary: 'zz' }, 'm1', ['m1', 'm2']), null); // 구성원이 아닌 대상자
+  assert.deepEqual(deductionPatch(cur, { kind: '', beneficiary: 'm2' }, 'm1', ['m1', 'm2']), { beneficiary_member_id: 'm2', updated_by: 'm1' });
   // 모든 칸이 update 허용 목록 안
   const p = deductionPatch(cur, { kind: 'culture', beneficiary: 'm2' }, 'm1');
   for (const k of Object.keys(p)) assert.ok(UPDATE_COLUMNS.transactions.includes(k), k);

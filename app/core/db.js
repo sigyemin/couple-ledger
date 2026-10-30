@@ -24,6 +24,19 @@ export const UPDATE_TABLES = Object.freeze(['transactions', 'categories', 'categ
 // delete를 허용하는 표 (거래·업로드 묶음은 실제 삭제 금지 — DB도 막음). 카테고리는 쓰는 곳이 없을 때만 DB가 허용(FK)
 // 결제수단은 거래·업로드 묶음이 없을 때만 화면이 지우기를 보이고, 쓰는 곳이 있으면 DB가 거부(FK)
 export const DELETE_TABLES = Object.freeze(['categories', 'payment_sources']);
+// upsert(넣거나 같은 키면 고치기)를 허용하는 표와 키 칸·넣을 수 있는 칸 (CL-062 연말정산 — 본인 행만, 실제로 막는 것은 RLS)
+// - member_tax_profiles: 사람·연도별 총급여·자녀 수·월세 요건·실손보험금(민감 — 값은 기록·주소에 남기지 않는다)
+// - deduction_baselines: 국세청 기준값(사람 × 연도 × 기준일 × 공제 항목)
+export const UPSERT_TABLES = Object.freeze({
+  member_tax_profiles: Object.freeze({
+    key: 'member_id,tax_year',
+    columns: Object.freeze(['member_id', 'tax_year', 'total_salary_amount', 'child_count', 'is_rent_eligible', 'medical_reimbursed_amount']),
+  }),
+  deduction_baselines: Object.freeze({
+    key: 'member_id,tax_year,as_of_on,deduction_kind',
+    columns: Object.freeze(['member_id', 'tax_year', 'as_of_on', 'deduction_kind', 'amount']),
+  }),
+});
 // 표별로 넣을 수 있는 칸(없으면 칸 이름 형식만 검사)
 export const INSERT_COLUMNS = Object.freeze({
   transactions: Object.freeze(['source_id', 'origin', 'occurred_on', 'occurred_time', 'merchant_raw', 'merchant_norm', 'amount',
@@ -66,6 +79,9 @@ export const COLUMN_VALUES = Object.freeze({
   categories: Object.freeze({
     default_deduction_kind: (v) => v === null || ['public_transit', 'traditional_market', 'culture', 'excluded'].includes(v),
     tax_credit_kind: (v) => v === null || ['medical', 'rent', 'insurance'].includes(v),
+  }),
+  deduction_baselines: Object.freeze({
+    deduction_kind: Object.freeze(['credit_card', 'check_card', 'cash_receipt', 'public_transit', 'traditional_market', 'culture']),
   }),
 });
 function assertValues(table, row) {
@@ -203,6 +219,31 @@ export function createDb(client) {
         return misuse();
       }
       return run(() => client.from(table).insert(row).select(), { retry: false });
+    },
+
+    /**
+     * 넣거나(없으면) 고치기(같은 키면). 여러 행을 한 요청으로(한 문장 — 전부 되거나 전부 안 됨). 재시도 없음
+     * 키 칸은 표마다 정해 둔 값만(UPSERT_TABLES) — 호출하는 쪽이 고르지 않는다
+     */
+    upsert(table, rows) {
+      const list = Array.isArray(rows) ? rows : [rows];
+      let spec;
+      try {
+        assertName('테이블', table);
+        spec = UPSERT_TABLES[table];
+        if (!spec) throw new TypeError('upsert를 허용하지 않는 표입니다');
+        if (!list.length || list.some((r) => !r || typeof r !== 'object' || Array.isArray(r))) throw new TypeError('넣을 값이 없습니다');
+        for (const r of list) {
+          const keys = Object.keys(r);
+          keys.forEach((k) => assertName('컬럼', k));
+          if (keys.some((k) => !spec.columns.includes(k))) throw new TypeError('넣을 수 없는 칸입니다');
+          if (spec.key.split(',').some((k) => !(k in r))) throw new TypeError('키 칸이 빠졌습니다');
+          assertValues(table, r);
+        }
+      } catch {
+        return misuse();
+      }
+      return run(() => client.from(table).upsert(list, { onConflict: spec.key }).select(), { retry: false });
     },
 
     /** 한 행 삭제 (id 기준). 재시도 없음. 지운 행을 돌려준다(0행이면 지운 것 없음) */

@@ -59,7 +59,7 @@ export async function renderTxnDeduction({ db, row, members, member, reload, onE
   save.addEventListener('click', async () => {
     const form = { kind: kind.value };
     if (ben) form.beneficiary = ben.value;
-    const patch = deductionPatch(cur, form, member.memberId);
+    const patch = deductionPatch(cur, form, member.memberId, (members ?? []).map((m) => m.id));
     if (!patch) { say('바뀐 내용이 없어요'); return; }
     save.disabled = true;
     const r = await db.update('transactions', row.id, patch);

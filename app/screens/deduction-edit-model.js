@@ -42,14 +42,16 @@ export function autoView(parts) {
  * 고친 값 → transactions update 값(바뀐 칸만 + updated_by). 바뀐 게 없으면 null
  * @param cur { deduction_kind, beneficiary_member_id } (transactions 행)
  * @param form { kind: '' | 공제 항목, beneficiary: '' | member id }  '' = 자동·결제수단 주인
+ * @param memberIds 구성원 id 목록(있으면 대상자가 그 안에 있어야 함 — #52 리뷰 낮음)
  */
-export function deductionPatch(cur, form, memberId) {
+export function deductionPatch(cur, form, memberId, memberIds = null) {
   const patch = {};
   const kind = form.kind || null;
   if (kind !== null && !TXN_KINDS.some(([k]) => k === kind)) return null;
   if (kind !== (cur?.deduction_kind ?? null)) patch.deduction_kind = kind;
   if ('beneficiary' in form) {
     const ben = form.beneficiary || null;
+    if (ben !== null && memberIds && !memberIds.includes(ben)) return null;
     if (ben !== (cur?.beneficiary_member_id ?? null)) patch.beneficiary_member_id = ben;
   }
   if (!Object.keys(patch).length) return null;
