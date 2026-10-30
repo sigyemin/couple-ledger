@@ -38,6 +38,20 @@ export const RAW_KEYS = Object.freeze([
 const DATE_KEYS = new Set(['occurred_on', 'occurred_time', 'occurred_at']);
 const CARD_KINDS = new Set(['credit_card', 'check_card']);
 const DEFAULT_DATE_FORMAT = 'YYYY-MM-DD[ HH24:MI[:SS]]';
+const ISO_DATE = compileFormat(DEFAULT_DATE_FORMAT);
+const ISO_TIME = compileFormat('HH24:MI[:SS]');
+
+/**
+ * 날짜 칸 글자가 거래 날짜처럼 보이는가(못 읽으면 꼬리 줄이 아니라 행 오류로 보일 것):
+ * 연·월·일 세 부분(9/3/26, 2026.02.30, 뒤에 시각 가능) 또는 2000~2099년 범위의 엑셀 일련번호(46268).
+ * 쪽 번호(1/1)·건수(3)·시각만(12:00:00)·기간(2026.09.01 ~ 2026.09.30)·'… 기준'은 아니다
+ */
+export function looksLikeDate(v) {
+  if (typeof v !== 'string') return false;
+  const s = v.normalize('NFKC').trim();
+  if (/^[0-9]{5}(\.[0-9]+)?$/.test(s)) return Number(s) >= 36526 && Number(s) < 73051;
+  return /^[0-9]{1,4}[./-][0-9]{1,2}[./-][0-9]{1,4}( [0-9: ]*([AaPp][Mm])?)?$/.test(s);
+}
 
 /** 금액 문자열 → 정수 (빈 값 null, 형식 오류 NaN) */
 export function parseAmount(v) {
@@ -178,6 +192,10 @@ export async function normalizeRows(grid, format, header, ctx) {
   if (typeof sourceId !== 'string' || !sourceId) throw new TypeError('결제수단 id가 필요합니다');
   const dateFmt = compileFormat(format.date_format || DEFAULT_DATE_FORMAT);
   const timeFmt = format.time_format ? compileFormat(format.time_format) : null;
+  // 날짜형 셀 값(pipeline.cellDateIso)은 표시 글자로 날짜를 못 읽은 행에서만 쓴다(CL-049) —
+  // 전에 읽히던 행은 날짜·시각·중복 키가 그대로다(이미 올린 파일을 다시 올려도 중복으로 걸러짐)
+  const rowNums = Array.isArray(ctx?.rowNums) ? ctx.rowNums : null;
+  const dateAlts = Array.isArray(ctx?.dateAlts) ? ctx.dateAlts : null;
   const isCard = CARD_KINDS.has(format.kind);
   const rules = Array.isArray(format.row_rules) ? format.row_rules : [];
   const { columns } = header;
@@ -192,27 +210,39 @@ export async function normalizeRows(grid, format, header, ctx) {
 
   for (let r = header.headerIndex + 1; r < grid.length; r++) {
     const line = grid[r] ?? [];
-    const rowNo = r + 1;
+    const rowNo = rowNums?.[r] ?? r + 1; // 엑셀에서 보이는 행 번호(빈 줄 포함, CL-049)
     const cell = (key) => {
       const i = columns.get(key);
       if (i === undefined) return null;
       const v = String(line[i] ?? '').trim();
       return v === '' ? null : v;
     };
+    const alt = (key) => {
+      const i = columns.get(key);
+      return i === undefined ? null : dateAlts?.[r]?.[i] ?? null;
+    };
 
     // 일시
     let when = null;
+    const dateKey = columns.has('occurred_at') ? 'occurred_at' : 'occurred_on';
     if (columns.has('occurred_at')) {
       when = parseWith(dateFmt, cell('occurred_at'));
+      if (!when?.date) when = parseWith(ISO_DATE, alt('occurred_at'));
     } else if (columns.has('occurred_on')) {
-      const d = parseWith(dateFmt, cell('occurred_on'));
+      let d = parseWith(dateFmt, cell('occurred_on'));
+      let fromAlt = false;
+      if (!d?.date) { d = parseWith(ISO_DATE, alt('occurred_on')); fromAlt = Boolean(d?.date); }
       if (d?.date) {
-        const t = timeFmt && cell('occurred_time') !== null ? parseWith(timeFmt, cell('occurred_time')) : null;
+        let t = timeFmt && cell('occurred_time') !== null ? parseWith(timeFmt, cell('occurred_time')) : null;
+        if (!t && fromAlt) t = parseWith(ISO_TIME, alt('occurred_time')); // 날짜를 셀 값으로 읽은 행만 시각도 셀 값으로
         when = { date: d.date, time: t?.time ?? d.time ?? null };
       }
     }
     if (!when?.date) {
-      skipped++; // 꼬리 줄(합계 등)·빈 줄
+      // 날짜 칸이 숫자·날짜 모양(엑셀 일련번호, 9/3/26, 없는 날짜 등)인데 못 읽었으면 거래가 빠지지 않게 행 오류로 보인다(CL-049).
+      // 그 밖(합계·안내 글·빈 칸)은 꼬리 줄로 건너뜀
+      if (looksLikeDate(cell(dateKey))) errors.push({ rowNo, reason: 'date' });
+      else skipped++;
       continue;
     }
 

@@ -30,6 +30,7 @@ export function matchSources(formatIds, sources) {
 const ROW_ERROR = {
   amount: '금액을 읽지 못함', direction: '입출금 방향이 안 맞음', approval_no: '승인번호 형식이 안 맞음',
   refund_amount: '취소 금액이 비어 있음', duplicate_key: '같은 승인번호가 두 번',
+  date: '날짜를 읽지 못함',
 };
 
 /**
