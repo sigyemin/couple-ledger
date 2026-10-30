@@ -170,6 +170,9 @@ export function trashPlan(row, refunds) {
 /** 그사이 휴지통으로 간 거래를 고치려 할 때(v0.18 LG005) */
 export const TRASHED_EDIT_TEXT = '휴지통에 있는 거래라 바꿀 수 없어요. 새로고침해 확인해 주세요.';
 
+/** v0.19 DB CHECK(23514): 거래 날짜 2000-01-01~오늘+1년, 메모 500자 */
+export const RANGE_TEXT = '날짜는 2000-01-01부터 오늘에서 1년 뒤까지, 메모는 500자까지 넣을 수 있어요.';
+
 /** 휴지통 update 값 */
 export function trashPatch(memberId, now = new Date()) {
   return { deleted_at: now.toISOString(), deleted_by: memberId, updated_by: memberId };

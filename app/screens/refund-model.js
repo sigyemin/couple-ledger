@@ -84,6 +84,25 @@ export function candidateView(c, suggestedId = null) {
 }
 
 /** 확인 완료한 달이면 '확인 후 변경됨'이 된다는 안내(원거래 달 기준) */
+/**
+ * 환불 연결 끊기 확인 문구(v0.19 unlink_refund, 사용자 결정 D5)
+ * 끊으면 귀속월 = 환불일의 달, 검토 대기, 공동 여부는 그대로(원거래에서 받은 값) — DB 함수 정의
+ * @param refund 상세 행 { occurred_on, period_month, is_shared, is_excluded }
+ */
+export function unlinkConfirmText(refund, reviewStates) {
+  const from = refund.period_month;
+  const to = monthOf(refund.occurred_on);
+  const short = (m) => month(m).replace(/^[0-9]+년 /, '');
+  const parts = ['원거래와의 연결을 끊어요. 이 환불은 검토 대기가 되고 미연결 환불 목록에 다시 보여요.'];
+  parts.push(from === to ? `${short(to)}에 그대로 집계돼요.` : `집계하는 달이 ${short(from)}에서 환불일의 달인 ${short(to)}로 바뀌어요.`);
+  if (!refund.is_excluded && refund.is_shared) {
+    const hit = [...new Set([from, to])].sort().filter((m) => reviewStates.get(m) === 'reviewed' || reviewStates.get(m) === 'changed_after_review');
+    parts.push(hit.length ? `${hit.map(short).join(', ')}은 확인을 마친 달이라 정산이 바뀌고 '확인 후 변경됨'으로 표시돼요.` : '정산 금액이 바뀔 수 있어요.');
+  }
+  parts.push('끊은 뒤에도 원거래 찾기로 다시 연결할 수 있어요.');
+  return { title: '연결 끊기', message: parts.join(' ') };
+}
+
 export function reviewedNote(months, reviewStates) {
   const hit = [...new Set(months)].sort().filter((m) => reviewStates.get(m) === 'reviewed');
   return hit.length ? `${hit.map((m) => month(m).replace(/^[0-9]+년 /, '')).join(', ')}은 확인 완료한 달이라 연결하면 "확인 후 변경됨"으로 바뀌어요.` : null;
