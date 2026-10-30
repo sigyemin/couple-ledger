@@ -131,3 +131,26 @@ test('이체 상대 직접 추가: 미리 채울 값은 한 번만 쓰고 지운
   assert.match(cp, /const draft = id \? null : cpDraft;\n {2}if \(!id\) cpDraft = null;/);
   assert.match(cp, /export function startCounterpartyDraft/);
 });
+
+test('이체 상대 직접 추가: 미리 채울 값은 읽기 직후(화면 바뀜·오류 화면 return 전에) 꺼내 지운다', () => {
+  const cp = src('counterparty.js');
+  const fn = cp.slice(cp.indexOf('export async function renderCounterpartyEdit'));
+  const take = fn.indexOf('if (!id) cpDraft = null;');
+  assert.ok(take > fn.indexOf('await Promise.all(reads)'), '읽기 뒤');
+  assert.ok(take < fn.indexOf('if (!isCurrent()) return null;'), 'isCurrent return 전');
+  assert.ok(take < fn.indexOf('if (err) return failView('), '오류 화면 return 전');
+});
+
+test('월 검토: 이체 상대 규칙 읽기가 실패해도 화면 전체는 오류가 아님(그 카드만)', async () => {
+  const { loadReview } = await import('../../app/screens/review.js');
+  const db = {
+    async select(view) { return view === 'counterparty_rules' ? { error: { message: 'x', code: 'y' } } : { data: [] }; },
+    async rpc() { return { data: [] }; },
+  };
+  const r = await loadReview(db, '2026-10-01');
+  assert.equal(r.error, undefined);
+  assert.equal(r.data.cpRules, null);
+  assert.deepEqual(r.data.cpRulesError, { message: 'x', code: 'y' });
+  const review = src('review.js');
+  assert.match(review, /cpRulesError \? h\('p', \{ class: 'notice small', attrs: \{ role: 'alert' \}, text: `이체 상대 규칙을 불러오지 못했어요/);
+});

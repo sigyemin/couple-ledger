@@ -57,7 +57,8 @@ export async function loadReview(db, monthStart) {
       filters: [eq('is_active', true)], order: [{ col: 'priority' }, { col: 'created_at' }, { col: 'id' }],
     }),
   ]);
-  const error = [summary, rows, dups, mismatch, categories, cpRules].find((r) => r.error)?.error;
+  // 이체 상대 규칙을 못 읽어도 월 검토는 그대로(그 카드만 오류 줄)
+  const error = [summary, rows, dups, mismatch, categories].find((r) => r.error)?.error;
   if (error) return { error };
   // 원거래를 못 찾은 환불(검토 대기·연결 없음, 테스트 결제수단은 readMonthRows가 뺌)과 체크카드 취소의 후보
   const unlinked = rows.data.rows.filter((r) => r.kind === 'refund' && !r.refund_of_txn_id && r.review_status === 'needs_review')
@@ -72,7 +73,7 @@ export async function loadReview(db, monthStart) {
   return {
     data: {
       summary: summary.data?.[0] ?? null, rows: rows.data.rows, capped: rows.data.capped,
-      dups: dups.data ?? [], mismatch: mismatch.data ?? [], categories: categories.data ?? [], cpRules: cpRules.data ?? [],
+      dups: dups.data ?? [], mismatch: mismatch.data ?? [], categories: categories.data ?? [], cpRules: cpRules.error ? null : (cpRules.data ?? []), cpRulesError: cpRules.error ?? null,
       unlinked, suggestions: monthSuggestions(byRefund), states,
       suggestFailed: cands.some((c) => c.error), suggestCapped: unlinked.filter(isSuggestTarget).length > targets.length,
     },
@@ -98,7 +99,7 @@ export async function renderReview({ db, member, monthStart, reload, isCurrent, 
     onError?.(res.error);
     return h('main', { class: 'screen' }, [head, errorView(res.error.message, res.error.detail?.sqlState ?? res.error.code, doc)], doc);
   }
-  const { summary, rows, capped, dups, mismatch, categories, cpRules, unlinked: refunds, suggestions, states, suggestFailed, suggestCapped } = res.data;
+  const { summary, rows, capped, dups, mismatch, categories, cpRules, cpRulesError, unlinked: refunds, suggestions, states, suggestFailed, suggestCapped } = res.data;
   const status = h('p', { class: 'status-line', attrs: { role: 'status', 'aria-live': 'polite' } }, [], doc);
   // link: { href, text } — 안내 끝에 붙는 앱 안 링크(같은 패턴 다른 카테고리 규칙 → 규칙 화면)
   const say = (msg, isError = false, link = null) => {
@@ -312,7 +313,8 @@ export async function renderReview({ db, member, monthStart, reload, isCurrent, 
   ]);
 
   // 아직 안 정한 이체 상대 (CL-066): 규칙에 안 맞는 검토 대기 통장 행 묶음 → 이체 상대 규칙 만들기(이름 등 미리 채움)
-  const cp = unmatchedCounterparties(rows, cpRules);
+  const cp = cpRules ? unmatchedCounterparties(rows, cpRules) : { groups: [], unsure: 0 };
+  const cpCode = cpRulesError ? onError?.(cpRulesError, { stage: STAGES.list }) : null;
   const cpItem = (g) => {
     const make = h('a', { class: 'btn secondary small-btn', text: '규칙 만들기', attrs: { href: buildHash('cprulenew'), 'aria-label': `${g.name} 이체 상대 규칙 만들기` } }, [], doc);
     make.addEventListener('click', () => startCounterpartyDraft({ matchText: g.name, sourceId: g.sourceId, direction: g.direction }));
@@ -322,7 +324,8 @@ export async function renderReview({ db, member, monthStart, reload, isCurrent, 
     ], doc);
   };
   const counterpartyCard = card(`아직 안 정한 이체 상대${cp.groups.length ? ` · ${cp.groups.length}곳` : ''}`, [
-    cp.groups.length === 0 ? h('p', { class: 'muted', text: '정할 이체 상대가 없어요' }, [], doc)
+    cpRulesError ? h('p', { class: 'notice small', attrs: { role: 'alert' }, text: `이체 상대 규칙을 불러오지 못했어요. 다시 열어 주세요.${cpCode ? ` (오류 번호 ${cpCode})` : ''}` }, [], doc)
+      : cp.groups.length === 0 ? h('p', { class: 'muted', text: '정할 이체 상대가 없어요' }, [], doc)
       : h('ul', { class: 'review-groups' }, cp.groups.slice(0, CP_GROUP_LIMIT).map(cpItem), doc),
     cp.groups.length > CP_GROUP_LIMIT ? h('p', { class: 'muted small', text: `많아서 앞 ${CP_GROUP_LIMIT}곳만 보여요. 규칙을 만들면 나머지가 앞으로 와요.` }, [], doc) : null,
     cp.unsure ? h('p', { class: 'muted small', text: `거래 종류·상대 칸을 보는 규칙이 있어 ${cp.unsure}건은 여기서 판정하지 못해 뺐어요.` }, [], doc) : null,

@@ -115,6 +115,9 @@ export async function renderCounterpartyEdit({ db, member, id = null, go, isCurr
   ];
   if (id) reads.push(db.select('counterparty_rules', { columns: RULE_COLUMNS, filters: [eq('id', id)] }));
   const res = await Promise.all(reads);
+  // 미리 채울 값은 읽기 직후 바로 꺼내 지운다(버려진 그리기·오류 화면 뒤 다음 '직접 추가'에 남지 않게)
+  const draft = id ? null : cpDraft;
+  if (!id) cpDraft = null;
   if (!isCurrent()) return null;
   const back = buildHash('cprules');
   const title = id ? '이체 상대' : '이체 상대 직접 추가';
@@ -125,8 +128,6 @@ export async function renderCounterpartyEdit({ db, member, id = null, go, isCurr
   const members = res[2].data ?? [];
   const cats = categoryIndex(categories);
   const original = id ? (res[3].data ?? [])[0] : null;
-  const draft = id ? null : cpDraft;
-  if (!id) cpDraft = null;
   if (id && !original) return h('main', { class: 'screen' }, [head(title, back, doc), h('p', { class: 'card muted', text: '이체 상대를 찾지 못했어요' }, [], doc)], doc);
   const status = statusLine(doc);
   const failed = (e) => {
