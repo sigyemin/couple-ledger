@@ -68,3 +68,16 @@ test('approvalNo: 승인번호 형식, 빈 값은 null', () => {
   assert.equal(v.approvalNo(j('12345', '67890')).ok, false);
   assert.equal(v.approvalNo('12-34').ok, false);
 });
+
+test('거래 날짜 범위(CL-047): 2000-01-01 ~ 오늘+1년, 2월 29일 → 다음 해 2월 28일, today가 없으면 범위 검사 안 함', () => {
+  assert.deepEqual(v.dateRange('2026-10-30'), { min: '2000-01-01', max: '2027-10-30' });
+  assert.deepEqual(v.dateRange('2028-02-29'), { min: '2000-01-01', max: '2029-02-28' });
+  assert.throws(() => v.dateRange('2026-13-01'));
+  const t = { today: '2026-10-30' };
+  assert.equal(v.date('2000-01-01', t).ok, true);
+  assert.equal(v.date('1999-12-31', t).ok, false);
+  assert.equal(v.date('2027-10-30', t).ok, true);
+  assert.equal(v.date('2027-10-31', t).message, v.MESSAGES.date_range);
+  assert.equal(v.date('1999-12-31').ok, true);
+  assert.equal(v.date('2026-02-30', t).message, v.MESSAGES.date);
+});

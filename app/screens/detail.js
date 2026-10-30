@@ -14,7 +14,8 @@
 import { h, replaceChildren } from '../ui/dom.js';
 import { buildHash } from '../router.js';
 import { confirmDialog } from '../core/confirm.js';
-import { text as checkText, amount as checkAmount } from '../core/validate.js';
+import { text as checkText, amount as checkAmount, dateRange } from '../core/validate.js';
+import { todaySeoul } from '../core/format.js';
 import { STAGES, ACTIONS } from '../core/errors.js';
 import { categoryIndex } from './list-model.js';
 import {
@@ -270,7 +271,9 @@ export async function renderDetail({ db, member, id, go, reload, isCurrent, onEr
       el.value = value;
       return [h('label', { class: 'field-label', text: label }, [], doc), el];
     };
-    const [dateL, date] = field('날짜', { type: 'date' }, d.date);
+    const today = todaySeoul();
+    const range = dateRange(today);
+    const [dateL, date] = field('날짜', { type: 'date', min: range.min, max: range.max }, d.date);
     const [timeL, time] = field('시각(선택)', { type: 'time' }, d.time);
     const [merL, merchant] = field('가맹점', { maxlength: '200' }, d.merchant);
     const [amtL, amount] = field('금액', { inputmode: 'numeric', maxlength: '20' }, d.amountText);
@@ -298,7 +301,7 @@ export async function renderDetail({ db, member, id, go, reload, isCurrent, onEr
     amount.addEventListener('input', refreshChoose);
 
     const save = button('고친 값 저장', 'primary', async () => {
-      const v = buildValuesPatch(row, { date: date.value, time: time.value, merchant: merchant.value, amountText: amount.value }, member.memberId);
+      const v = buildValuesPatch(row, { date: date.value, time: time.value, merchant: merchant.value, amountText: amount.value }, member.memberId, todaySeoul());
       if (!v.ok) { say(v.message, !!v.field); return; }
       let lines = v.plan.type === 'auto' ? v.plan.lines : null;
       let resplitAfter = false;
@@ -310,10 +313,11 @@ export async function renderDetail({ db, member, id, go, reload, isCurrent, onEr
         lines = ch.lines;
         resplitAfter = picked === 'resplit';
       }
+      // 확인 상태를 읽는 동안에도 두 번 누르지 못하게 바로 끈다(CL-047)
+      busy(true);
       const states = v.changed.includes('amount') || v.changed.includes('date') ? await readReviewStates(db) : new Map();
       const t = valuesConfirmText(row, v, states, refunds, picked);
-      if (t && !(await confirmDialog({ ...t, confirmLabel: '저장', doc }))) return;
-      busy(true);
+      if (t && !(await confirmDialog({ ...t, confirmLabel: '저장', doc }))) { busy(false); return; }
       const r = await db.update('transactions', row.id, v.patch);
       if (r.error) {
         busy(false);

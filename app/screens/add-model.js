@@ -28,14 +28,14 @@ export function sourceOptions(sources, members) {
 /**
  * 입력 검사 → insert 행
  * form: { sourceId, kind, date, time, merchant, amountText, categoryId, isShared, memo }
- * ctx: { sourceIds: Set, categoryIds: Set(종류에 맞는 켜진 카테고리), memberId, newId: () => uuid }
+ * ctx: { sourceIds: Set, categoryIds: Set(종류에 맞는 켜진 카테고리), memberId, newId: () => uuid, today: 'YYYY-MM-DD'(날짜 범위 검사, 선택) }
  * @returns {{ ok: true, row, categoryId, amount } | { ok: false, message, field }}
  */
 export function buildManualRow(form, ctx) {
   const bad = (field, message) => ({ ok: false, field, message });
   if (!ctx.sourceIds.has(form.sourceId)) return bad('source', '결제수단을 골라 주세요');
   if (!ADD_KINDS.some(([k]) => k === form.kind)) return bad('kind', '종류를 골라 주세요');
-  const d = checkDate(form.date);
+  const d = checkDate(form.date, { today: ctx.today ?? null });
   if (!d.ok) return bad('date', d.message);
   const time = String(form.time ?? '').trim();
   if (time && !RE_TIME.test(time)) return bad('time', '시각은 HH:MM으로 입력해 주세요');
