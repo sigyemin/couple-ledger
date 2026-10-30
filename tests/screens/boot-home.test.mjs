@@ -40,7 +40,12 @@ test('홈 모델: 지출·비교·정산 문구·할 일·많이 쓴 곳', () =>
     prevSummary: { expense_amount: 1407400 },
     settlement: [{ member_id: 'm1', balance_amount: '52300' }, { member_id: 'm2', balance_amount: '-52300' }],
     members,
-    missing: [{ label: '시험 카드' }, { label: '시험 통장' }],
+    missing: [
+      { month: '2026-01-01', rows: [{ source_id: 's1', label: '시험 카드' }, { source_id: 's2', label: '시험 통장' }] },
+      { month: '2026-02-01', rows: [{ source_id: 's1', label: '시험 카드' }] },
+      { month: '2026-03-01', rows: [] },
+    ],
+    thisMonth: '2026-10-01',
     changedMonths: [{ period_month: '2026-09-01', changed_txn_count: 2 }],
     categories: [
       { group_category_id: 'g1', total_amount: '650000' }, { group_category_id: 'g2', total_amount: 300000 },
@@ -54,12 +59,12 @@ test('홈 모델: 지출·비교·정산 문구·할 일·많이 쓴 곳', () =>
   assert.equal(m.compare, '지난달보다 82,000원 적게 썼어요');
   assert.equal(m.settlement, '가람이 52,300원 더 냄');
   assert.deepEqual(m.todos.map((t) => [t.text, t.href]), [
-    ['안 올린 파일 2개', '#/upload'],
+    ['안 올린 파일 3개', '#/uploads'],
     ['검토할 것 18건', '#/list?month=2026-10&status=needs_review'],
     ['원거래를 못 찾은 환불 1건', '#/list?month=2026-10&kind=refund_unlinked'],
     ['9월 확인 후 변경됨', '#/settle?month=2026-09'],
   ]);
-  assert.equal(m.todos[0].sub, '시험 카드 · 시험 통장');
+  assert.equal(m.todos[0].sub, '1월 2개, 2월 1개');
   assert.deepEqual(m.groups.map((g) => [g.name, g.amountText, Math.round(g.ratio * 100)]), [['주거', '650,000원', 100], ['식비', '312,400원', 48], ['미분류', '98,300원', 15]]);
 });
 
@@ -71,6 +76,18 @@ test('홈 모델: 자료 없음·할 일 없음·같은 금액', () => {
   assert.equal(settlementText([{ member_id: 'm2', balance_amount: 10 }], members), '나리가 10원 더 냄');
   assert.deepEqual([subjectParticle('갑'), subjectParticle('가'), subjectParticle('A')], ['이', '가', '이']);
   assert.deepEqual(topGroups([{ group_category_id: 'x', total_amount: -5 }], new Map()), []);
+});
+
+test('홈 모델: 안 올린 파일 조회 중·실패(CL-056) — 실패하면 그 줄만 확인 못 함, 나머지는 그대로', () => {
+  const base = { summary: { expense_amount: 0, needs_review_count: 3 }, prevSummary: null, settlement: [], members, changedMonths: [], categories: [], thisMonth: '2026-10-01' };
+  const loading = buildHomeModel('2026-10-01', { ...base, missing: null, missingState: 'loading' });
+  assert.equal(loading.pending, true);
+  assert.deepEqual(loading.todos.map((t) => t.key), ['review']);
+  const failed = buildHomeModel('2026-10-01', { ...base, missing: null, missingState: 'error' });
+  assert.equal(failed.pending, false);
+  assert.deepEqual(failed.todos.map((t) => [t.key, t.text, t.href]), [['missing', '안 올린 파일을 확인하지 못했어요', '#/uploads'], ['review', '검토할 것 3건', '#/list?month=2026-10&status=needs_review']]);
+  const none = buildHomeModel('2026-10-01', { ...base, missing: [{ month: '2026-09-01', rows: [] }], missingState: null });
+  assert.deepEqual([none.pending, none.todos.map((t) => t.key)], [false, ['review']]);
 });
 
 test('DOM 도우미: style·on* 속성과 외부 링크를 거부한다', () => {

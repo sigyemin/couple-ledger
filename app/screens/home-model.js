@@ -4,13 +4,16 @@
 //   summary, prevSummary : v_monthly_summary 행(그 달, 지난달) 또는 null
 //   settlement           : v_monthly_settlement 행들(그 달)
 //   members              : members 행들 { id, member_slot, display_name }
-//   missing              : missing_uploads(그 달) 행들 { source_id, label }
+//   missing              : 지난 달들의 missing_uploads [{ month, rows }] (uploads.js, CL-056 — 보고 있는 달과 상관없음)
+//   missingState         : 'loading'(아직 조회 중) | 'error'(조회 실패 — 이 줄만 '확인 못 함') | 없음(missing 사용)
+//   thisMonth            : 이번 달 'YYYY-MM-01'(달 이름에 해를 붙일지)
 //   changedMonths        : v_monthly_review_status 중 review_state = 'changed_after_review' 행들
 //   categories           : v_monthly_category 행들(그 달) + categoryNames(Map id → 이름)
 // 금액은 DB numeric이 문자열로 올 수 있어 Number로 바꾼다
 // 의존: core/format.js
 // =====================================================================
 import { won, month as monthLabel } from '../core/format.js';
+import { missingSummary } from './uploads-model.js';
 
 const num = (v) => {
   const n = Number(v ?? 0);
@@ -59,17 +62,17 @@ export function topGroups(categoryRows, categoryNames, n = 3) {
 
 /**
  * @param {string} monthStart 'YYYY-MM-01'
- * @returns {{ title, expense, compare, settlement, todos: {key, text, sub, href, tone}[], groups }}
+ * @returns {{ title, expense, compare, settlement, todos: {key, text, sub, href, tone}[], pending, groups }}
+ *   pending: 안 올린 파일을 아직 확인하는 중
  */
 export function buildHomeModel(monthStart, d) {
   const expense = num(d.summary?.expense_amount);
   const todos = [];
-  const missing = d.missing ?? [];
-  if (missing.length) {
-    todos.push({
-      key: 'missing', tone: 'warn', href: '#/upload',
-      text: `안 올린 파일 ${missing.length}개`, sub: missing.map((m) => m.label).join(' · '),
-    });
+  const missing = d.missingState ? null : missingSummary(d.missing, d.thisMonth ?? monthStart);
+  if (d.missingState === 'error') {
+    todos.push({ key: 'missing', tone: 'warn', href: '#/uploads', text: '안 올린 파일을 확인하지 못했어요', sub: '업로드 현황에서 다시 확인해요' });
+  } else if (missing) {
+    todos.push({ key: 'missing', tone: 'warn', href: '#/uploads', text: `안 올린 파일 ${missing.total}개`, sub: missing.text });
   }
   const review = num(d.summary?.needs_review_count);
   if (review > 0) {
@@ -97,6 +100,7 @@ export function buildHomeModel(monthStart, d) {
     compare: compareText(expense, d.prevSummary ? num(d.prevSummary.expense_amount) : null),
     settlement: settlementText(d.settlement, d.members),
     todos,
+    pending: d.missingState === 'loading',
     groups: topGroups(d.categories, d.categoryNames ?? new Map()).map((g) => ({ ...g, amountText: won(g.amount) })),
   };
 }
