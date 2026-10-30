@@ -139,11 +139,11 @@ export async function renderDetail({ db, member, id, go, reload, isCurrent, onEr
     say(carryNotice.get(row.id), true);
     carryNotice.delete(row.id);
   }
-  const fail = (err, extra) => {
+  // text: 경로에 맞는 안내(없으면 휴지통 LG005 안내 또는 일반 문구). v0.18·v0.19: 휴지통 거래는 값·메모·라인 모두 LG005
+  const fail = (err, extra, text = null) => {
     const code = onError?.(err, { txnId: row.id, ...extra });
-    // v0.18·v0.19: 휴지통 거래는 값·메모·라인 모두 바꿀 수 없음(LG005), 날짜 범위·메모 길이는 DB가 23514
-    const text = err.code === 'immutable' ? TRASHED_EDIT_TEXT : err.detail?.sqlState === '23514' ? RANGE_TEXT : err.message;
-    say(`${text}${code ? ` (오류 번호 ${code})` : ''}`, true);
+    const shown = text ?? (err.code === 'immutable' ? TRASHED_EDIT_TEXT : err.message);
+    say(`${shown}${code ? ` (오류 번호 ${code})` : ''}`, true);
   };
   const busy = (on) => {
     for (const el of main.querySelectorAll('button, select, textarea, input')) el.disabled = on;
@@ -157,7 +157,8 @@ export async function renderDetail({ db, member, id, go, reload, isCurrent, onEr
       onError?.(r.error, { txnId: row.id, stage: STAGES.db_update });
       say(TRASHED_EDIT_TEXT, true); return;
     }
-    if (r.error) { fail(r.error, { stage: STAGES.db_update }); return; }
+    // 거래 행 update(메모·공동·제외·확인)의 23514 = v0.19 날짜 범위·메모 길이 CHECK
+    if (r.error) { fail(r.error, { stage: STAGES.db_update }, r.error.detail?.sqlState === '23514' ? RANGE_TEXT : null); return; }
     if (!r.data?.length) { say('저장하지 못했어요. 새로고침해 주세요.', true); return; }
     reload();
   };
