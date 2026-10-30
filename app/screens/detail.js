@@ -4,6 +4,8 @@
 //       기록(v0.3 5-3): txn_edit_log·v_change_batch_items(이 거래) + v_change_batch_summary + import_batches — 읽기만
 // 쓰기: bulk_set_category([id], …) · set_transaction_lines(나누기·원거래 카테고리로 되돌리기)
 //       transactions update(memo · review_status · is_shared · is_excluded/exclude_reason · deleted_at/deleted_by, 항상 updated_by = 나)
+//       금액·날짜·시각·가맹점 고치기(U-17 D2, CL-045): transactions update(amount·occurred_on·occurred_time·merchant_raw·merchant_norm)
+//         → 라인을 맞춰야 하면 set_transaction_lines(두 번째 요청 — 실패하면 '나눈 금액이 안 맞아요'로 남는다)
 // - 쓰기는 재시도하지 않는다. 끝나면 다시 읽어 그린다(reload). 0행이 바뀌면 실패로 본다
 // - 정산에 영향 주는 변경(공동/개인·집계 제외)은 확인 대화상자를 거친다(확인 완료 달이면 '확인 후 변경됨' 안내)
 // - 환불: 원거래 찾기(#/refund) 링크. 연결 안 된 체크카드 취소면 연결 제안 상자(CL-034 조건 1~3) → link_refund + 확인함
@@ -21,6 +23,9 @@ import {
 } from './detail-model.js';
 import { errorView } from './shell.js';
 import { readCandidates, readReviewStates, linkOne } from './refund.js';
+import {
+  canEditValues, valuesDraft, linesPlan, buildValuesPatch, valuesConfirmText, chosenLines, valuesErrorText, editedFromFile, linesMismatch,
+} from './detail-edit-model.js';
 import { isSuggestTarget, suggestFrom, suggestionText, reviewedNote } from './refund-model.js';
 import { historyEntries, HISTORY_NOTE, EDIT_LIMIT, ITEM_LIMIT } from './history-model.js';
 
@@ -160,6 +165,7 @@ export async function renderDetail({ db, member, id, go, reload, isCurrent, onEr
   ], doc);
 
   const info = h('section', { class: 'card' }, [h('h2', { class: 'card-title', text: '기본 정보' }, [], doc), rows(m.info, doc)], doc);
+  if (canEditValues(row)) info.append(valuesEditor());
 
   // 원거래·연결된 환불
   const links = [];
@@ -218,6 +224,7 @@ export async function renderDetail({ db, member, id, go, reload, isCurrent, onEr
       h('span', { class: 'line-amount', text: l.amount }, [], doc),
     ], doc)), doc) : null,
     c.note ? h('p', { class: 'muted small', text: c.note }, [], doc) : null,
+    linesMismatch(row) ? h('p', { class: 'notice small', text: '나눈 금액이 안 맞아요. 금액 나누기로 거래 금액에 맞춰 주세요.' }, [], doc) : null,
   ], doc);
   if (m.canChangeCategory) {
     const options = categoryOptions(categories, row.kind);
@@ -253,6 +260,91 @@ export async function renderDetail({ db, member, id, go, reload, isCurrent, onEr
       if (r.error) { fail(r.error, { stage: STAGES.db_rpc }); return; }
       reload();
     }));
+  }
+
+  /** 금액·날짜·시각·가맹점 고치기 (U-17 D2, CL-045) */
+  function valuesEditor() {
+    const d = valuesDraft(row);
+    const field = (label, attrs, value) => {
+      const el = h('input', { class: 'field', attrs: { 'aria-label': label, ...attrs } }, [], doc);
+      el.value = value;
+      return [h('label', { class: 'field-label', text: label }, [], doc), el];
+    };
+    const [dateL, date] = field('날짜', { type: 'date' }, d.date);
+    const [timeL, time] = field('시각(선택)', { type: 'time' }, d.time);
+    const [merL, merchant] = field('가맹점', { maxlength: '200' }, d.merchant);
+    const [amtL, amount] = field('금액', { inputmode: 'numeric', maxlength: '20' }, d.amountText);
+    // 나눈 거래의 금액을 바꿀 때: 한 카테고리로 합치기 / 저장 뒤 나누기 다시
+    const name = `values-lines-${row.id}`;
+    const radio = (value, label) => {
+      const r = h('input', { attrs: { type: 'radio', name, value } }, [], doc);
+      return { r, el: h('label', { class: 'radio' }, [r, label], doc) };
+    };
+    const merge = radio('merge', '한 카테고리로 합치기');
+    const resplit = radio('resplit', '저장 뒤 나누기 다시');
+    const options = categoryOptions(categories, row.kind);
+    const mergeCat = h('select', { class: 'field', attrs: { 'aria-label': '합칠 카테고리' } }, [
+      h('option', { text: '카테고리 고르기', attrs: { value: '' } }, [], doc),
+      ...options.map((g) => h('optgroup', { attrs: { label: g.group } }, g.items.map((it) => h('option', { text: it.name, attrs: { value: it.id } }, [], doc)), doc)),
+    ], doc);
+    const choose = h('div', { class: 'form', attrs: { hidden: true, role: 'radiogroup', 'aria-label': '나눈 금액 처리' } }, [
+      h('p', { class: 'notice small', text: '나눠 둔 금액의 합이 새 금액과 달라져요. 어떻게 할까요?' }, [], doc),
+      merge.el, mergeCat, resplit.el,
+    ], doc);
+    const refreshChoose = () => {
+      const a = checkAmount(amount.value);
+      choose.hidden = !(a.ok && linesPlan(row, a.value).type === 'choose');
+    };
+    amount.addEventListener('input', refreshChoose);
+
+    const save = button('고친 값 저장', 'primary', async () => {
+      const v = buildValuesPatch(row, { date: date.value, time: time.value, merchant: merchant.value, amountText: amount.value }, member.memberId);
+      if (!v.ok) { say(v.message, !!v.field); return; }
+      let lines = v.plan.type === 'auto' ? v.plan.lines : null;
+      let resplitAfter = false;
+      let picked = null;
+      if (v.plan.type === 'choose') {
+        picked = merge.r.checked ? 'merge' : resplit.r.checked ? 'resplit' : null;
+        const ch = chosenLines(picked, mergeCat.value, v.amount);
+        if (!ch.ok) { say(ch.message, true); return; }
+        lines = ch.lines;
+        resplitAfter = picked === 'resplit';
+      }
+      const states = v.changed.includes('amount') || v.changed.includes('date') ? await readReviewStates(db) : new Map();
+      const t = valuesConfirmText(row, v, states, refunds, picked);
+      if (t && !(await confirmDialog({ ...t, confirmLabel: '저장', doc }))) return;
+      busy(true);
+      const r = await db.update('transactions', row.id, v.patch);
+      if (r.error) {
+        busy(false);
+        const msg = valuesErrorText(r.error, row);
+        if (msg) { onError?.(r.error, { txnId: row.id, stage: STAGES.db_update }); say(msg, true); } else fail(r.error, { stage: STAGES.db_update });
+        return;
+      }
+      if (!r.data?.length) { busy(false); say('저장하지 못했어요. 새로고침해 주세요.', true); return; }
+      if (lines) {
+        const lr = await db.rpc('set_transaction_lines', { p_txn_id: row.id, p_lines: lines });
+        if (lr.error) {
+          const code = onError?.(lr.error, { txnId: row.id, stage: STAGES.db_rpc });
+          carryNotice.set(row.id, `값은 고쳤지만 카테고리 금액을 맞추지 못했어요(나눈 금액이 안 맞아요). 금액 나누기로 맞춰 주세요.${code ? ` (오류 번호 ${code})` : ''}`);
+        }
+      } else if (resplitAfter) {
+        carryNotice.set(row.id, '금액을 고쳤어요. 금액 나누기로 새 금액에 맞게 다시 나눠 주세요.');
+      }
+      busy(false);
+      reload();
+    });
+    const box = h('div', { class: 'form values-edit', attrs: { hidden: true } }, [
+      dateL, date, timeL, time, merL, merchant, amtL, amount, choose,
+      h('p', { class: 'muted small', text: '검토 상태는 그대로예요. 파일에서 올린 거래는 다시 올려도 이 거래가 또 들어오지 않아요.' }, [], doc),
+      save,
+    ], doc);
+    const toggle = button('금액·날짜·가맹점 고치기', 'secondary', () => {
+      box.hidden = !box.hidden;
+      toggle.setAttribute('aria-expanded', String(!box.hidden));
+    });
+    toggle.setAttribute('aria-expanded', 'false');
+    return h('div', { class: 'values-wrap' }, [toggle, box], doc);
   }
 
   /** 금액 나누기(set_transaction_lines — 한 번에 전부 바뀌거나 전부 안 바뀜) */
@@ -354,6 +446,8 @@ export async function renderDetail({ db, member, id, go, reload, isCurrent, onEr
   } else {
     const nameOf = new Map(members.map((x) => [x.id, x.display_name]));
     const entries = historyEntries({ row, ...hist.data, cats, nameOf });
+    const fromFile = editedFromFile(row, hist.data.edits);
+    if (fromFile.length) info.append(h('p', { class: 'notice small', text: `파일 값에서 고침: ${fromFile.join('·')}` }, [], doc));
     historyBody = [
       h('ol', { class: 'history-list' }, entries.map((e) => h('li', { class: 'history-line' }, [
         h('span', { class: 'history-when' }, [e.day, h('br', {}, [], doc), e.time], doc),
