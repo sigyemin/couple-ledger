@@ -1,26 +1,28 @@
 // =====================================================================
 // 화면 1 홈 (화면 설계 v0.1 4-1, 시안 1): 달 선택, 이번 달 지출, 정산 차이, 할 일, 많이 쓴 곳
-// 조회: v_monthly_summary(그 달·지난달), v_monthly_settlement, members, missing_uploads(그 달),
+// 조회: v_monthly_summary(그 달·지난달), v_monthly_settlement, members, 업로드 현황(uploads.js — 지난 달들의 missing_uploads, CL-056),
 //       v_monthly_review_status(확인 후 변경됨), v_monthly_category(그 달), categories(그룹 이름)
 //       지난달 체크카드 취소 연결 제안 수(refund.js suggestionCount — 미연결 체크카드 취소가 있을 때만 후보 RPC, 실패해도 홈은 그대로)
 // 의존: ui/dom.js, router.js, screens/home-model.js, screens/shell.js
 // =====================================================================
 import { h, widthClass } from '../ui/dom.js';
-import { addMonths, buildHash } from '../router.js';
+import { addMonths, buildHash, currentMonth } from '../router.js';
 import { buildHomeModel } from './home-model.js';
 import { suggestionCount } from './refund.js';
 import { errorView } from './shell.js';
+import { loadUploadStatus } from './uploads.js';
 
 /** 홈에 필요한 조회를 한 번에 (실패한 조회가 있으면 첫 오류를 돌려준다) */
 export async function loadHome(db, monthStart) {
   const prev = addMonths(monthStart, -1);
+  const thisMonth = currentMonth();
   const eq = (col, value) => ({ col, op: 'eq', value });
   const [summary, prevSummary, settlement, members, missing, changed, categories, names, suggest] = await Promise.all([
     db.select('v_monthly_summary', { filters: [eq('period_month', monthStart)] }),
     db.select('v_monthly_summary', { filters: [eq('period_month', prev)] }),
     db.select('v_monthly_settlement', { filters: [eq('period_month', monthStart)] }),
     db.select('members', { columns: 'id,member_slot,display_name' }),
-    db.rpc('missing_uploads', { p_month: monthStart }, { retry: true }),
+    loadUploadStatus(db, thisMonth),
     db.select('v_monthly_review_status', {
       columns: 'period_month,changed_txn_count',
       filters: [eq('review_state', 'changed_after_review')],
@@ -38,7 +40,8 @@ export async function loadHome(db, monthStart) {
       prevSummary: prevSummary.data?.[0] ?? null,
       settlement: settlement.data ?? [],
       members: members.data ?? [],
-      missing: missing.data ?? [],
+      missing: missing.data.missing,
+      thisMonth,
       changedMonths: changed.data ?? [],
       categories: categories.data ?? [],
       suggest: suggest.error ? null : { month: prev, count: suggest.data.count },

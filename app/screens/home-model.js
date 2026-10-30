@@ -4,13 +4,15 @@
 //   summary, prevSummary : v_monthly_summary 행(그 달, 지난달) 또는 null
 //   settlement           : v_monthly_settlement 행들(그 달)
 //   members              : members 행들 { id, member_slot, display_name }
-//   missing              : missing_uploads(그 달) 행들 { source_id, label }
+//   missing              : 지난 달들의 missing_uploads [{ month, rows }] (uploads.js, CL-056 — 보고 있는 달과 상관없음)
+//   thisMonth            : 이번 달 'YYYY-MM-01'(달 이름에 해를 붙일지)
 //   changedMonths        : v_monthly_review_status 중 review_state = 'changed_after_review' 행들
 //   categories           : v_monthly_category 행들(그 달) + categoryNames(Map id → 이름)
 // 금액은 DB numeric이 문자열로 올 수 있어 Number로 바꾼다
 // 의존: core/format.js
 // =====================================================================
 import { won, month as monthLabel } from '../core/format.js';
+import { missingSummary } from './uploads-model.js';
 
 const num = (v) => {
   const n = Number(v ?? 0);
@@ -64,12 +66,9 @@ export function topGroups(categoryRows, categoryNames, n = 3) {
 export function buildHomeModel(monthStart, d) {
   const expense = num(d.summary?.expense_amount);
   const todos = [];
-  const missing = d.missing ?? [];
-  if (missing.length) {
-    todos.push({
-      key: 'missing', tone: 'warn', href: '#/upload',
-      text: `안 올린 파일 ${missing.length}개`, sub: missing.map((m) => m.label).join(' · '),
-    });
+  const missing = missingSummary(d.missing, d.thisMonth ?? monthStart);
+  if (missing) {
+    todos.push({ key: 'missing', tone: 'warn', href: '#/uploads', text: `안 올린 파일 ${missing.total}개`, sub: missing.text });
   }
   const review = num(d.summary?.needs_review_count);
   if (review > 0) {
