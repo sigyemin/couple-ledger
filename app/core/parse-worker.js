@@ -3,12 +3,13 @@
 // - 같은 출처 module Worker만. blob:·data: 주소는 쓰지 않는다
 // - Trusted Types: 이름 붙인 정책 하나('cl-worker')가 정확한 URL 하나(app/workers/parse.js)만 허용한다.
 //   default 정책·allow-duplicates는 쓰지 않는다. CSP에는 `trusted-types cl-worker`를 넣는다
-// - 한 번 부를 때마다 Worker를 새로 만들고, 끝나거나 20초가 지나면 terminate한다(ReDoS·압축 폭탄 대비)
+// - 한 번 부를 때마다 Worker를 새로 만들고, 끝나거나 60초가 지나면 terminate한다(ReDoS·압축 폭탄 대비).
+//   여러 달이 든 큰 파일·느린 PC를 감안해 20초 → 60초(CL-051). 합성 3,000행은 1초 안팎
 // 의존 없음.
 // =====================================================================
 
 export const WORKER_URL = new URL('../workers/parse.js', import.meta.url).href;
-export const TIMEOUT_MS = 20000;
+export const TIMEOUT_MS = 60 * 1000;
 export const POLICY_NAME = 'cl-worker';
 
 let policy = null;

@@ -84,7 +84,9 @@ const WORKER_ERROR = {
   format_mismatch: '고른 결제수단의 파일 형식과 맞지 않아요',
   zip_too_large: '압축을 풀면 너무 커요. 파일을 다시 내려받아 주세요',
   too_big: '파일이 너무 커요(5MB 넘음)',
-  timeout: '파일을 읽는 데 너무 오래 걸려요',
+  timeout: '파일을 읽지 못했어요(시간 초과). 파일이 아주 크면 기간을 나눠 내려받아 주세요',
+  lookup_timeout: '이미 들어온 거래를 확인하지 못했어요(시간 초과). 잠시 뒤 다시 올려 주세요',
+  worker_error: '파일을 읽는 중에 멈췄어요',
 };
 
 /** Worker·읽기 실패 안내. 휴대폰이면 "PC에서 다시" 한 줄을 더한다(설계 3-3) */
@@ -220,6 +222,14 @@ export function targetMonthOf(rows, fallbackMonth) {
 /** 끌어다 놓는 것이 파일인가(글자·링크 끌기는 무시) */
 export function isFileDrag(dataTransfer) {
   return Array.from(dataTransfer?.types ?? []).includes('Files');
+}
+
+/** 기록할 읽기 오류(사용자 파일 문제가 아닌 것): 시간 초과·Worker 멈춤·알 수 없는 실패 — 오류 번호를 함께 보인다 */
+export const LOGGED_READ_ERRORS = Object.freeze(['timeout', 'lookup_timeout', 'worker_error', 'parse_failed']);
+
+/** 진행 문구: '파일 2/3 · 가짜.xls · 거래 읽는 중…' */
+export function progressText(index, total, name, step) {
+  return `${total > 1 ? `파일 ${index}/${total} · ` : ''}${name} · ${step}`;
 }
 
 export const TEST_SOURCE_WARNING = '시험용 결제수단이에요(집계 제외, 나중에 일괄 삭제됨). 실제 파일이면 다른 결제수단을 골라 주세요.';
