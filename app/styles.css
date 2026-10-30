@@ -467,3 +467,26 @@ button.chip.on { border-color: var(--text); }
 .mc-item .btn { align-self: flex-end; }
 .mc-rule { display: flex; flex-direction: column; gap: 2px; }
 .mc-wide { padding-left: 28px; }
+
+/* 카테고리 관리 다듬기 (CL-064): 줄은 모두 같은 모양 — [⠿] 이름 꼬리표 … [↑][↓][⋯], 버튼 열은 오른쪽 같은 자리 */
+.cat-screen .cat-line { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; flex-wrap: nowrap; align-items: center; gap: 4px; min-height: 44px; }
+.cat-screen .cat-name { min-width: 0; flex-wrap: wrap; row-gap: 2px; cursor: grab; user-select: none; -webkit-user-select: none; }
+.cat-screen .cat-label { overflow-wrap: anywhere; }
+.cat-screen .cat-controls { flex-wrap: nowrap; justify-self: end; }
+.cat-screen .cat-controls .btn.mini { min-width: 36px; padding: 0 8px; }
+.cat-handle { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 36px; color: var(--sub-on-white);
+  font-size: 18px; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+.cat-screen .cat-items > li { padding: 2px 0 2px 8px; }
+.cat-top { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+.cat-top .muted { margin-top: 0; }
+.cat-add-btn { margin: 0; white-space: nowrap; }
+.cat-group-list { display: flex; flex-direction: column; gap: 12px; }
+.cat-screen .dragging { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 12px; background: var(--blue-soft); }
+.cat-screen .dragging.bad { outline-color: var(--orange); background: var(--orange-soft); }
+.cat-drop-note { color: var(--orange); font-size: 12px; padding: 4px 8px; border-top: 0; }
+.cat-screen.saving { opacity: .7; }
+.cat-dialog.form { gap: 10px; }
+.cat-menu-item { display: flex; flex-direction: column; gap: 4px; }
+.cat-menu-item .btn { width: 100%; margin: 0; }
+.cat-screen .cat-items > li { display: block; }
+.cat-screen .cat-items > li > .cat-line { width: 100%; }

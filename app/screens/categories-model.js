@@ -115,3 +115,88 @@ export function categoryErrorText(err) {
 export function nameErrorText(err) {
   return err?.code === 'duplicate' ? '이미 있는 이름이에요' : categoryErrorText(err);
 }
+
+// ---------------------------------------------------------------- CL-064: 추가 대화상자 · 끌어 놓기 순서
+
+/**
+ * 묶음 안에서 id를 toIndex 자리(자기를 뺀 목록 기준)로 옮김 → 바뀐 sort_order만 [{ id, sort_order }]
+ * 새 순서대로 10, 20, …으로 다시 매기고 값이 그대로인 것은 뺀다
+ */
+export function reorderUpdates(siblings, id, toIndex) {
+  const list = [...siblings].sort(order);
+  const self = list.find((c) => c.id === id);
+  if (!self) return [];
+  const rest = list.filter((c) => c.id !== id);
+  const at = Math.max(0, Math.min(rest.length, toIndex));
+  const next = [...rest.slice(0, at), self, ...rest.slice(at)];
+  return next.map((c, k) => ({ id: c.id, sort_order: (k + 1) * 10 })).filter((u, k) => u.sort_order !== next[k].sort_order);
+}
+
+export const BASIC_MOVE_TEXT = '기본 카테고리는 다른 그룹으로 옮길 수 없어요';
+
+/**
+ * 끌어 놓기 계획
+ * - 같은 묶음(같은 그룹의 항목끼리, 또는 같은 쪽 그룹끼리) → 순서만
+ * - 항목을 다른 그룹으로: 사용자가 만든 항목만, 같은 쪽(지출↔지출)만, 그 그룹에 같은 이름 없을 때 → parent_id + 그 그룹 순서
+ * @param rows categories 행(sort_order·parent_id·name)
+ * @param node 끄는 줄(categoryTree 노드)
+ * @param target { groupId: 놓을 그룹 id(항목일 때) | null(그룹 끌기), index: 놓을 자리(자기를 뺀 목록 기준) }
+ * @returns {{ ok: true, updates, same: boolean } | { ok: false, message }}
+ */
+export function dropPlan(rows, tree, node, target) {
+  const sib = (parentId) => rows.filter((c) => (c.parent_id ?? null) === parentId);
+  if (node.parentId == null) {
+    // 그룹 끌기: 같은 쪽 그룹끼리 순서만
+    const side = tree.income.some((g) => g.id === node.id) ? tree.income : tree.expense;
+    const list = rows.filter((c) => side.some((g) => g.id === c.id));
+    return { ok: true, same: true, updates: reorderUpdates(list, node.id, target.index) };
+  }
+  if (target.groupId === node.parentId) return { ok: true, same: true, updates: reorderUpdates(sib(node.parentId), node.id, target.index) };
+  if (!node.canMove) return { ok: false, message: BASIC_MOVE_TEXT };
+  if (!moveTargets(tree, node).some((g) => g.id === target.groupId)) return { ok: false, message: '지출과 수입 사이로는 옮길 수 없어요' };
+  const dest = sib(target.groupId);
+  if (dest.some((c) => c.name === node.name)) return { ok: false, message: '그 그룹에 같은 이름이 있어요' };
+  const self = rows.find((c) => c.id === node.id);
+  const ordered = reorderUpdates([...dest, { ...self, sort_order: -1 }], node.id, target.index);
+  // 옮기는 항목은 parent_id와 새 sort_order를 한 번에(같은 그룹 안 이름 중복을 피해 먼저 옮긴다)
+  const mine = ordered.find((u) => u.id === node.id) ?? { id: node.id, sort_order: (target.index + 1) * 10 };
+  return { ok: true, same: false, updates: [{ id: node.id, parent_id: target.groupId, sort_order: mine.sort_order }, ...ordered.filter((u) => u.id !== node.id)] };
+}
+
+export const NEW_GROUP = '__new_group';
+
+/**
+ * 추가 대화상자 → categories insert 값
+ * @param form { groupId: 그룹 id | NEW_GROUP | '', name }
+ * @returns {{ ok: true, row: { parent_id, name, sort_order }, place } | { ok: false, field, message }}
+ */
+export function addPlan(rows, tree, form) {
+  if (!form.groupId) return { ok: false, field: 'group', message: '대카테고리를 골라 주세요' };
+  if (form.groupId === NEW_GROUP) {
+    const v = checkName(form.name, rows.filter((c) => !c.parent_id));
+    if (!v.ok) return { ok: false, field: 'name', message: v.message };
+    const incomeGroup = tree.income[0];
+    const sortOrder = nextSortOrder(tree.expense.map((g) => ({ sort_order: g.sortOrder })), { before: incomeGroup?.sortOrder });
+    return { ok: true, row: { parent_id: null, name: v.value, sort_order: sortOrder }, place: '새 대분류' };
+  }
+  const group = [...tree.expense, ...tree.income].find((g) => g.id === form.groupId);
+  if (!group) return { ok: false, field: 'group', message: '대카테고리를 골라 주세요' };
+  const siblings = rows.filter((c) => c.parent_id === group.id);
+  const v = checkName(form.name, siblings);
+  if (!v.ok) return { ok: false, field: 'name', message: v.message };
+  return { ok: true, row: { parent_id: group.id, name: v.value, sort_order: nextSortOrder(siblings) }, place: group.name };
+}
+
+/** ⋯ 메뉴의 할 수 있는 일과 못 하는 이유 */
+export function menuActions(node, tree) {
+  const basic = Boolean(node.code);
+  const targets = node.parentId != null ? moveTargets(tree, node) : [];
+  return {
+    rename: { ok: true },
+    toggle: { ok: true, label: node.isActive ? '끄기(사용 안 함)' : '켜기' },
+    move: node.parentId == null ? { ok: false, reason: '대분류는 끌어서 순서만 바꿔요' }
+      : basic ? { ok: false, reason: BASIC_MOVE_TEXT }
+        : targets.length ? { ok: true, targets } : { ok: false, reason: '옮길 수 있는 다른 그룹이 없어요' },
+    remove: basic ? { ok: false, reason: '기본 카테고리는 지울 수 없어요(끄기를 써 주세요)' } : { ok: true },
+  };
+}
