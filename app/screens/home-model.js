@@ -2,8 +2,6 @@
 // 홈 데이터 → 화면 모델 (화면 설계 v0.1 4-1, 시안 1). DB 호출 없는 순수 함수
 // 입력(조회 결과 그대로)
 //   summary, prevSummary : v_monthly_summary 행(그 달, 지난달) 또는 null
-//   settlement           : v_monthly_settlement 행들(그 달)
-//   members              : members 행들 { id, member_slot, display_name }
 //   missing              : 지난 달들의 missing_uploads [{ month, rows }] (uploads.js, CL-056 — 보고 있는 달과 상관없음)
 //   missingState         : 'loading'(아직 조회 중) | 'error'(조회 실패 — 이 줄만 '확인 못 함') | 없음(missing 사용)
 //   thisMonth            : 이번 달 'YYYY-MM-01'(달 이름에 해를 붙일지)
@@ -35,15 +33,6 @@ export function subjectParticle(name) {
   return '이';
 }
 
-/** 정산 차이 한 줄: 더 낸 사람 기준. 차이가 없으면 '정산 차이 없어요' */
-export function settlementText(rows, members) {
-  const name = new Map((members ?? []).map((m) => [m.id, m.display_name]));
-  const payer = (rows ?? []).map((r) => ({ id: r.member_id, bal: num(r.balance_amount) })).sort((a, b) => b.bal - a.bal)[0];
-  if (!payer || payer.bal <= 0) return '정산 차이 없어요';
-  const who = name.get(payer.id) ?? '한 사람';
-  return `${who}${subjectParticle(who)} ${won(payer.bal)} 더 냄`;
-}
-
 /** 많이 쓴 곳: 그룹별 합계 상위 n개 (미분류는 '미분류'), 막대 비율 = 1등 대비 */
 export function topGroups(categoryRows, categoryNames, n = 3) {
   const sums = new Map();
@@ -62,7 +51,7 @@ export function topGroups(categoryRows, categoryNames, n = 3) {
 
 /**
  * @param {string} monthStart 'YYYY-MM-01'
- * @returns {{ title, expense, compare, settlement, todos: {key, text, sub, href, tone}[], pending, groups }}
+ * @returns {{ title, expense, compare, todos: {key, text, sub, href, tone}[], pending, groups }}
  *   pending: 안 올린 파일을 아직 확인하는 중
  */
 export function buildHomeModel(monthStart, d) {
@@ -98,7 +87,6 @@ export function buildHomeModel(monthStart, d) {
     title: monthLabel(monthStart),
     expense: won(expense),
     compare: compareText(expense, d.prevSummary ? num(d.prevSummary.expense_amount) : null),
-    settlement: settlementText(d.settlement, d.members),
     todos,
     pending: d.missingState === 'loading',
     groups: topGroups(d.categories, d.categoryNames ?? new Map()).map((g) => ({ ...g, amountText: won(g.amount) })),
