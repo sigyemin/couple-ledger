@@ -21,6 +21,7 @@ import { renderSettle } from './screens/settle.js';
 import { defaultSettleMonth } from './screens/settle-model.js';
 import { renderMore } from './screens/more.js';
 import { renderUploads } from './screens/uploads.js';
+import { renderTaxSettings } from './screens/taxset.js';
 import { renderMerchantClassify } from './screens/merchant-classify.js';
 import { renderCategories } from './screens/categories.js';
 import { renderRules, renderRuleEdit, renderReapply } from './screens/rules.js';
@@ -156,6 +157,8 @@ async function boot() {
         view = await renderSources({ db, isCurrent, onError });
       } else if (route.screen === 'source' || route.screen === 'sourcenew') {
         view = await renderSourceEdit({ db, id: route.id, go, isCurrent, onError });
+      } else if (route.screen === 'taxset') {
+        view = await renderTaxSettings({ db, member, reload, isCurrent, onError });
       } else if (route.screen === 'classify') {
         view = await renderMerchantClassify({ db, member, reload, isCurrent, onError });
       } else if (route.screen === 'uploads') {

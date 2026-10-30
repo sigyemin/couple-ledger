@@ -438,6 +438,26 @@ a.btn.small-btn { display: inline-flex; }
 .cat-item:hover, .cat-item:focus-visible, .cat-group-btn:focus-visible { background: var(--bg); }
 .cat-item.on { background: var(--blue-soft); color: var(--blue-dark); font-weight: 700; }
 
+/* 연말정산 공제 현황 (CL-062) */
+.ded-wrap { display: flex; flex-direction: column; gap: 12px; }
+.ded-best { margin: 10px 0; padding: 12px 14px; border-radius: 14px; background: var(--blue-soft); color: var(--blue-dark); font-size: 15px; }
+.ded-best.none { background: var(--bg); color: var(--text); font-size: 14px; }
+.ded-best strong { font-weight: 700; }
+.ded .chips { margin: 4px 0 6px; }
+.ded-rates td { vertical-align: top; }
+.ded-rates td .ded-rate { display: block; font-size: 17px; font-weight: 700; }
+.ded-rates td.zero .ded-rate { color: var(--sub-on-white); }
+.ded-rates td.on .ded-rate { color: var(--blue); }
+.ded-rates td .sub { display: block; font-size: 11px; color: var(--sub-on-white); }
+.ded-lines li { padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.ded-person summary { cursor: pointer; font-weight: 700; min-height: 32px; }
+.ded-min { margin-top: 8px; }
+.ded-salary { font-weight: 700; margin-right: 6px; }
+.tax-salary-mask { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+.form-row { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.ded-min .bar-track { display: block; }
+button.chip { border: 1px solid var(--line); font: inherit; font-size: 14px; cursor: pointer; }
+button.chip.on { border-color: var(--text); }
 /* 가맹점별로 분류하기 (CL-061) */
 .mc-list { display: flex; flex-direction: column; gap: 10px; }
 .mc-item { background: var(--card); border-radius: var(--radius); padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }

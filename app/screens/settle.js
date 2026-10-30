@@ -2,6 +2,7 @@
 // 화면 9 정산 → 명의별 사용 (CL-058, 사용자 결정 10-30: 연말정산용. 5:5 몫·차이·누가 더 냈는지는 표시하지 않는다)
 //   사람(결제수단 주인)마다 신용카드 · 체크카드 · 그 밖 사용액, 그 달 + 올해 1월~그 달 누계 · 월 확인 · 지난 달
 // 조회: transactions(올해 1월~그 달, 휴지통·집계 제외 빼고 지출·환불만, 쪽 단위), payment_sources, members, v_monthly_review_status(모든 달)
+//       + 공제 현황 카드(deduction-card.js — v_deduction_status·v_deduction_txn, CL-062)
 // 쓰기: confirm_month(p_month) / unconfirm_month(p_month) — 기록 값은 서버가 정한다(v0.16 Q4)
 // - 확인 후 변경됨이면 "바뀐 거래 보기" → 내역(changed=1)
 // 의존: ui/dom.js, router.js, core/confirm.js, core/errors.js, screens/settle-model.js, screens/shell.js
@@ -13,6 +14,7 @@ import { confirmDialog } from '../core/confirm.js';
 import { STAGES, ACTIONS } from '../core/errors.js';
 import { ownerSpend, reviewView, confirmMonthText, unconfirmMonthText, pastMonths } from './settle-model.js';
 import { errorView } from './shell.js';
+import { renderDeductionCard } from './deduction-card.js';
 
 const PAGE_SIZE = 1000;
 const MAX_ROWS = 20000;
@@ -67,7 +69,10 @@ export async function loadSettle(db, monthStart) {
  * @param {{ db, monthStart, reload(), isCurrent(), onError(err, extra) → string }} ctx
  */
 export async function renderSettle({ db, monthStart, reload, isCurrent, onError }, doc = globalThis.document) {
+  // 공제 현황 카드(CL-062)는 함께 읽는다(실패해도 그 카드만 오류 줄)
+  const deduction = renderDeductionCard({ db, monthStart, onError }, doc);
   const res = await loadSettle(db, monthStart);
+  const dedCard = await deduction;
   if (!isCurrent()) return null;
   const ym = (m) => m.slice(0, 7);
   const nav = (n, label, text) => h('a', { class: 'icon-btn', text, attrs: { href: buildHash('settle', { query: { month: ym(addMonths(monthStart, n)) } }), 'aria-label': label } }, [], doc);
@@ -143,5 +148,5 @@ export async function renderSettle({ db, monthStart, reload, isCurrent, onError 
       ], doc)), doc),
   ], doc);
 
-  return h('main', { class: 'screen' }, [head, statusLine, ...people, info, review, pastCard], doc);
+  return h('main', { class: 'screen' }, [head, statusLine, dedCard, ...people, info, review, pastCard], doc);
 }
