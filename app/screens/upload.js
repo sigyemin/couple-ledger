@@ -1,7 +1,8 @@
 // =====================================================================
 // 화면 2·4 올리기 (화면 설계 v0.1 4-2 ①·③·④, 보정 CL-029 2판)
-// ① 파일 고르기: 여러 파일, 대상 달(기본 지난달 — 주소 ?month), 그 달 안 올린 결제수단(missing_uploads)
-//    휴대폰이면 "PC에서 올리는 것을 권해요" 띠(막지 않음)
+// ① 파일 고르기: 여러 파일, 고르기 버튼 또는 끌어다 놓기(같은 경로 addFiles). 대상 달은 고르지 않는다(CL-051) —
+//    묶음의 target_month = 그 파일 거래 중 가장 늦은 달(없으면 지난달), 거래는 각자 날짜의 달로 들어간다. 주소 ?month는 무시
+//    '아직 안 올린 결제수단'은 홈 할 일에서만 보인다. 휴대폰이면 "PC에서 올리는 것을 권해요" 띠(막지 않음)
 // 판별: 파일 바이트 → SHA-256 → Worker detect(형식 id) → 그 형식을 쓰는 켜진 결제수단(1개면 자동, 여러 개면 고르기, 없으면 건너뜀)
 // ③ 미리보기: Worker parse(정규화 행) + DB에 이미 있는 중복 키 조회 → 새로 넣을 건수·이미 있음·행 오류·집계 제외 등
 // ④ 저장: 확인 대화상자 → 파일마다 묶음 찾기/만들기(ensureBatch) → import_transactions 200행씩(uploadRows) → 결과
@@ -13,7 +14,7 @@
 // 의존: ui/dom.js, router.js, core/confirm.js, core/errors.js, core/parse-worker.js, import/*, screens/upload-model.js, screens/shell.js
 // =====================================================================
 import { h } from '../ui/dom.js';
-import { addMonths, buildHash } from '../router.js';
+import { buildHash } from '../router.js';
 import { confirmDialog } from '../core/confirm.js';
 import { STAGES, ACTIONS } from '../core/errors.js';
 import { runParseWorker } from '../core/parse-worker.js';
@@ -22,7 +23,7 @@ import { isPhone } from '../import/env.js';
 import { ensureBatch, uploadRows, batchFileName } from '../import/upload.js';
 import { fileHash } from '../import/dedup.js';
 import {
-  MAX_FILES, KEY_CHUNK, TEST_SOURCE_WARNING, checkCancelMonths, suggestLineText, reviewText, applySourceChoice, counterpartyGroups, counterpartyRule, draftRule, withDrafts, matchSources, previewOf, previewLines, readErrorText, resultLines, failedRows, monthTitle,
+  MAX_FILES, KEY_CHUNK, TEST_SOURCE_WARNING, checkCancelMonths, suggestLineText, reviewText, applySourceChoice, counterpartyGroups, counterpartyRule, draftRule, withDrafts, matchSources, previewOf, previewLines, readErrorText, resultLines, failedRows, targetMonthOf, isFileDrag,
 } from './upload-model.js';
 import { errorView } from './shell.js';
 import { choiceCard } from './counterparty-card.js';
@@ -40,7 +41,7 @@ const CP_COLUMNS = [
 const RULE_COLUMNS = 'id,pattern,match_type,category_id,is_ambiguous,priority,is_active,created_at';
 const ACCEPT = '.xls,.xlsx,.html,.htm,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/html';
 
-export async function loadUpload(db, monthStart) {
+export async function loadUpload(db) {
   const res = await Promise.all([
     db.select('payment_sources', { columns: 'id,label,kind,institution,import_format_id,owner_member_id,is_active,is_test' }),
     db.select('import_formats', { columns: FORMAT_COLUMNS }),
@@ -48,7 +49,6 @@ export async function loadUpload(db, monthStart) {
     // 순서는 서버 정렬 그대로 쓴다(DB apply_counterparty_rule의 앞선 규칙 순서와 같음 — CL-046)
     db.select('counterparty_rules', { columns: CP_COLUMNS, filters: [{ col: 'is_active', op: 'eq', value: true }],
       order: [{ col: 'priority' }, { col: 'created_at' }, { col: 'id' }] }),
-    db.rpc('missing_uploads', { p_month: monthStart }, { retry: true }),
     db.select('members', { columns: 'id,member_slot,display_name' }),
     // 순서는 서버 정렬 그대로 쓴다(DB reapply_category_rule의 앞선 규칙 순서와 같음)
     db.select('category_rules', { columns: RULE_COLUMNS, filters: [{ col: 'is_active', op: 'eq', value: true }],
@@ -59,7 +59,7 @@ export async function loadUpload(db, monthStart) {
   return {
     data: {
       sources: res[0].data ?? [], formats: res[1].data ?? [], categories: res[2].data ?? [],
-      cpRules: res[3].data ?? [], missing: res[4].data ?? [], members: res[5].data ?? [], categoryRules: res[6].data ?? [],
+      cpRules: res[3].data ?? [], members: res[4].data ?? [], categoryRules: res[5].data ?? [],
     },
   };
 }
@@ -77,18 +77,14 @@ async function existingKeys(db, rows) {
 }
 
 /**
- * @param {{ db, guard, member, monthStart, isCurrent(), onError(err, extra) → string }} ctx
+ * @param {{ db, guard, member, fallbackMonth, isCurrent(), onError(err, extra) → string }} ctx
+ *   fallbackMonth = 거래 0건 파일의 묶음 대상 달(지난달)
  */
-export async function renderUpload({ db, guard, member, monthStart, isCurrent, onError }, doc = globalThis.document, env = globalThis) {
-  const res = await loadUpload(db, monthStart);
+export async function renderUpload({ db, guard, member, fallbackMonth, isCurrent, onError }, doc = globalThis.document, env = globalThis) {
+  const res = await loadUpload(db);
   if (!isCurrent()) return null;
   const ym = (m) => m.slice(0, 7);
-  const nav = (n, label, text) => h('a', { class: 'icon-btn', text, attrs: { href: buildHash('upload', { query: { month: ym(addMonths(monthStart, n)) } }), 'aria-label': label } }, [], doc);
-  const head = h('header', { class: 'screen-head' }, [
-    h('nav', { class: 'month-nav', attrs: { 'aria-label': '대상 달' } }, [
-      nav(-1, '이전 달', '‹'), h('h1', { class: 'title', text: `${monthTitle(monthStart)} 올리기` }, [], doc), nav(1, '다음 달', '›'),
-    ], doc),
-  ], doc);
+  const head = h('header', { class: 'screen-head' }, [h('h1', { class: 'title', text: '파일 올리기' }, [], doc)], doc);
   const phone = isPhone(env);
   const banner = phone ? h('section', { class: 'card banner', attrs: { role: 'note' } }, [
     h('strong', { text: 'PC에서 올리는 것을 권해요.' }, [], doc),
@@ -98,7 +94,7 @@ export async function renderUpload({ db, guard, member, monthStart, isCurrent, o
     onError?.(res.error, { stage: STAGES.db_select });
     return h('main', { class: 'screen' }, [head, banner, errorView(res.error.message, res.error.detail?.sqlState ?? res.error.code, doc)], doc);
   }
-  const { sources, formats, categories, cpRules, missing, members } = res.data;
+  const { sources, formats, categories, cpRules, members } = res.data;
   // 가맹점 규칙(U-16 A안): 켜진 규칙 + 그 카테고리가 켜져 있는지(꺼졌으면 정규화가 분류하지 않음 — DB 재적용과 같게)
   const catActive = new Map(categories.map((c) => [c.id, c.is_active !== false]));
   const categoryRules = res.data.categoryRules.map((r) => ({ ...r, categoryActive: catActive.get(r.category_id) ?? false }));
@@ -306,7 +302,7 @@ export async function renderUpload({ db, guard, member, monthStart, isCurrent, o
     const confirmed = ready.reduce((s, f) => s + (f.preview.confirmed ?? 0), 0);
     if (!(await confirmDialog({
       title: '올리기',
-      message: `${ready.length}개 파일에서 새로 ${total}건을 ${monthTitle(monthStart).replace(' 파일', '')}분으로 넣어요. ${reviewText(total, confirmed)}.`,
+      message: `${ready.length}개 파일에서 새로 ${total}건을 넣어요. 거래는 각자 날짜의 달로 들어가요. ${reviewText(total, confirmed)}.`,
       undoNote: '잘못 넣은 거래는 거래 상세에서 휴지통으로 옮길 수 있어요.',
       confirmLabel: '저장', doc,
     }))) return;
@@ -320,9 +316,11 @@ export async function renderUpload({ db, guard, member, monthStart, isCurrent, o
           const r = await db.insert('counterparty_rules', { ...c.rule, created_by: member.memberId });
           if (r.error && r.error.code !== 'duplicate') throw r.error; // 같은 이름·범위 규칙이 이미 있으면 그대로 진행
         }
+        const targetMonth = targetMonthOf(f.parsed.rows, fallbackMonth);
+        f.targetMonth = targetMonth;
         const { batchId } = await ensureBatch(db, guard, {
-          sourceId: src.id, targetMonth: monthStart, fileHash: f.hash,
-          fileName: batchFileName(src.institution, monthStart, f.fileType),
+          sourceId: src.id, targetMonth, fileHash: f.hash,
+          fileName: batchFileName(src.institution, targetMonth, f.fileType),
         });
         f.result = await uploadRows(db, batchId, f.parsed.rows, {
           onProgress: ({ sentRows, total: n }) => say(`${f.name} 저장 중… ${sentRows}/${n}`),
@@ -341,6 +339,9 @@ export async function renderUpload({ db, guard, member, monthStart, isCurrent, o
     const okCount = files.filter((f) => f.state === 'saved').length;
     say(okCount === ready.length ? `${okCount}개 파일을 저장했어요.` : `${okCount}/${ready.length}개 파일을 저장했어요. 멈춘 파일은 다시 올리면 이어서 넣어요.`, okCount !== ready.length);
     draw();
+    // 내역에서 보기: 저장한 파일들 중 가장 늦은 달의 검토 대기
+    const lastMonth = files.filter((f) => f.state === 'saved').map((f) => f.targetMonth).sort().pop() ?? fallbackMonth;
+    done.setAttribute('href', buildHash('list', { query: { month: ym(lastMonth), status: 'needs_review' } }));
     done.hidden = okCount === 0;
     // 체크카드 취소가 들어갔으면 그 달들의 연결 제안 수(실패하면 줄을 보이지 않음 — 결과에는 영향 없음)
     const months = checkCancelMonths(files.filter((f) => f.state === 'saved'));
@@ -368,22 +369,33 @@ export async function renderUpload({ db, guard, member, monthStart, isCurrent, o
   picker.addEventListener('click', () => input.click());
   const suggestLine = h('div', { class: 'card', attrs: { role: 'status' } }, [], doc);
   suggestLine.hidden = true;
-  const done = h('a', { class: 'btn secondary', text: '내역에서 보기', attrs: { href: buildHash('list', { query: { month: ym(monthStart), status: 'needs_review' } }) } }, [], doc);
+  const done = h('a', { class: 'btn secondary', text: '내역에서 보기', attrs: { href: buildHash('list', { query: { month: ym(fallbackMonth), status: 'needs_review' } }) } }, [], doc);
   done.hidden = true;
 
-  const missingCard = h('section', { class: 'card' }, [
-    h('h2', { class: 'card-title', text: missing.length ? `아직 안 올린 결제수단 ${missing.length}개` : '이 달 파일은 다 올렸어요' }, [], doc),
-    missing.length ? h('ul', { class: 'plain-list' }, missing.map((m) => h('li', { text: m.label }, [], doc)), doc) : null,
+  // 끌어다 놓기(CL-051): 고르기 카드가 놓기 영역. 놓은 파일은 고르기와 같은 경로(addFiles)
+  const dropZone = h('section', { class: 'card drop-zone', attrs: { 'aria-label': '파일 놓는 곳' } }, [
+    h('p', { text: '카드·통장 파일을 여기에 끌어다 놓거나 골라 주세요. 여러 개를 한 번에 올려도 돼요.' }, [], doc),
+    h('p', { class: 'muted small', text: '거래는 각자 날짜의 달로 들어가요. 파일은 이 기기 밖으로 나가지 않고, 읽은 거래만 저장해요.' }, [], doc),
+    picker, input,
   ], doc);
+  let dragDepth = 0;
+  const setDragging = (on) => dropZone.classList.toggle('dragging', on);
+  dropZone.addEventListener('dragenter', (e) => { if (!isFileDrag(e.dataTransfer)) return; e.preventDefault(); dragDepth++; setDragging(true); });
+  dropZone.addEventListener('dragover', (e) => {
+    if (!isFileDrag(e.dataTransfer)) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = picker.disabled ? 'none' : 'copy';
+  });
+  dropZone.addEventListener('dragleave', () => { dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) setDragging(false); });
+  dropZone.addEventListener('drop', (e) => {
+    if (!isFileDrag(e.dataTransfer)) return;
+    e.preventDefault();
+    dragDepth = 0; setDragging(false);
+    if (picker.disabled) { say('지금은 파일을 더할 수 없어요. 읽기·저장이 끝난 뒤 다시 놓아 주세요.', true); return; }
+    const fl = e.dataTransfer?.files;
+    if (fl?.length) addFiles(fl);
+  });
 
   draw();
-  return h('main', { class: 'screen' }, [
-    head, banner, status,
-    h('section', { class: 'card' }, [
-      h('p', { text: `${monthTitle(monthStart)}을 골라 주세요. 여러 개를 한 번에 골라도 돼요.` }, [], doc),
-      h('p', { class: 'muted small', text: '파일은 이 기기 밖으로 나가지 않아요. 읽은 거래만 저장해요.' }, [], doc),
-      picker, input,
-    ], doc),
-    missingCard, list, save, suggestLine, done,
-  ], doc);
+  return h('main', { class: 'screen' }, [head, banner, status, dropZone, list, save, suggestLine, done], doc);
 }

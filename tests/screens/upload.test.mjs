@@ -119,3 +119,16 @@ test('결제수단 고르기를 빈 값으로 되돌리면 고른 값·미리보
     assert.equal(f.sourceId, id);
   }
 });
+
+test('묶음 대상 달 자동(CL-051): 파일 거래 중 가장 늦은 달, 0건이면 지난달', async () => {
+  const { targetMonthOf, isFileDrag } = await import('../../app/screens/upload-model.js');
+  const rows = (...ds) => ds.map((d) => ({ occurred_on: d }));
+  assert.equal(targetMonthOf(rows('2026-01-05', '2026-09-30', '2026-03-01'), '2026-09-01'), '2026-09-01'); // 1~9월이 한 파일
+  assert.equal(targetMonthOf(rows('2026-08-01', '2026-08-31'), '2026-09-01'), '2026-08-01'); // 한 달 파일
+  assert.equal(targetMonthOf(rows('2025-12-31', '2026-01-01'), '2026-09-01'), '2026-01-01'); // 해 넘김
+  assert.equal(targetMonthOf([], '2026-09-01'), '2026-09-01'); // 0건 → 지난달
+  assert.equal(targetMonthOf(null, '2026-09-01'), '2026-09-01');
+  assert.equal(isFileDrag({ types: ['Files'] }), true);
+  assert.equal(isFileDrag({ types: ['text/plain'] }), false);
+  assert.equal(isFileDrag(null), false);
+});

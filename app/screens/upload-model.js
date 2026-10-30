@@ -204,6 +204,24 @@ export function reviewText(newCount, confirmed) {
   return `가맹점 규칙으로 분류된 ${confirmed}건은 확인함, 나머지 ${newCount - confirmed}건은 검토 대기로 들어가요`;
 }
 
+/**
+ * 묶음의 대상 달(import_batches.target_month) — 화면에서 고르지 않는다(CL-051): 그 파일에서 읽은 거래 중 가장 늦은 달.
+ * 거래가 하나도 없으면 fallbackMonth(지난달). 거래는 대상 달과 상관없이 각자 날짜의 달로 들어간다
+ */
+export function targetMonthOf(rows, fallbackMonth) {
+  let max = null;
+  for (const r of rows ?? []) {
+    const m = `${String(r.occurred_on ?? '').slice(0, 7)}-01`;
+    if (/^[0-9]{4}-[0-9]{2}-01$/.test(m) && (max === null || m > max)) max = m;
+  }
+  return max ?? fallbackMonth;
+}
+
+/** 끌어다 놓는 것이 파일인가(글자·링크 끌기는 무시) */
+export function isFileDrag(dataTransfer) {
+  return Array.from(dataTransfer?.types ?? []).includes('Files');
+}
+
 export const TEST_SOURCE_WARNING = '시험용 결제수단이에요(집계 제외, 나중에 일괄 삭제됨). 실제 파일이면 다른 결제수단을 골라 주세요.';
 
 export const monthTitle = (m) => `${monthLabel(m).replace(/^[0-9]+년 /, '')} 파일`;

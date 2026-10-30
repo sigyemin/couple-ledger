@@ -159,7 +159,7 @@ async function boot() {
       } else if (route.screen === 'settle') {
         view = await renderSettle({ db, monthStart: monthParam(route.query.get('month'), defaultSettleMonth()), reload, isCurrent, onError });
       } else if (route.screen === 'upload') {
-        view = await renderUpload({ db, guard, member, monthStart: monthParam(route.query.get('month'), defaultSettleMonth()), isCurrent, onError });
+        view = await renderUpload({ db, guard, member, fallbackMonth: defaultSettleMonth(), isCurrent, onError }); // ?month는 무시(CL-051)
       } else if (route.screen === 'refund') {
         view = await renderRefundFind({ db, member, id: route.id, query: route.query, go, isCurrent, onError });
       } else if (route.screen === 'add') {
@@ -175,7 +175,14 @@ async function boot() {
       view = h('main', { class: 'screen' }, [errorView('화면을 그리지 못했어요.', displayCode(err))]);
     }
     if (!view || !isCurrent()) return;
-    replaceChildren(root, view, tabBar(route.screen));
+    replaceChildren(root, tabBar(route.screen), view); // 메뉴를 먼저(읽기 순서·키보드 이동). 위치는 CSS가 정함
+  });
+}
+
+// 놓기 영역 밖에 파일을 떨어뜨려도 브라우저가 그 파일을 열지 않게(CL-051). 파일 끌기만 막고, 놓기 영역은 자기가 처리한다
+for (const type of ['dragover', 'drop']) {
+  globalThis.addEventListener?.(type, (e) => {
+    if (Array.from(e.dataTransfer?.types ?? []).includes('Files')) e.preventDefault();
   });
 }
 
