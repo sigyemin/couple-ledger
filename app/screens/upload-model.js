@@ -139,6 +139,20 @@ export function draftRule(rule, n) {
   return { ...rule, id: `draft-${n}`, txn_type: null, priority: 100, is_active: true, created_at: '9999-12-31T00:00:00Z' };
 }
 
+/**
+ * 결제수단 고르기 반영. 빈 값으로 되돌리면 고른 결제수단·미리보기를 지우고 '고르기' 상태(저장 불가)로 — PR #29 재리뷰
+ * @returns {'prepare'|'cleared'}
+ */
+export function applySourceChoice(f, value) {
+  f.result = null;
+  if (!value) {
+    Object.assign(f, { sourceId: null, parsed: null, preview: null, cards: [], state: 'choose' });
+    return 'cleared';
+  }
+  f.sourceId = value;
+  return 'prepare';
+}
+
 export const TEST_SOURCE_WARNING = '시험용 결제수단이에요(집계 제외, 나중에 일괄 삭제됨). 실제 파일이면 다른 결제수단을 골라 주세요.';
 
 export const monthTitle = (m) => `${monthLabel(m).replace(/^[0-9]+년 /, '')} 파일`;
