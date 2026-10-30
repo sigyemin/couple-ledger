@@ -176,6 +176,7 @@ export async function renderUpload({ db, guard, member, fallbackMonth, isCurrent
     }) : [];
     f.cardsBuilt = false;
     f.state = 'ready';
+    f.open = decisionCount(f) > 0;
     draw();
   }
 
@@ -292,7 +293,8 @@ export async function renderUpload({ db, guard, member, fallbackMonth, isCurrent
     f.ui = ui;
     return ui;
   }
-  const isOpen = (f) => f.open ?? (f.state !== 'ready' || decisionCount(f) > 0);
+  // 펼침 여부는 미리보기가 처음 나올 때 한 번 정한다(고르는 중에 결정 수가 0이 되어도 저절로 접히지 않게)
+  const isOpen = (f) => f.open ?? true;
   const put = (el, kids) => el.replaceChildren(...kids.filter(Boolean));
 
   function sourceSelect(f) {
@@ -401,7 +403,10 @@ export async function renderUpload({ db, guard, member, fallbackMonth, isCurrent
   }
 
   async function saveAll() {
+    // 저장 직전에 카드 값을 다시 읽는다(보일 이름 등 마지막 입력까지 규칙에 — #59 리뷰 중간 1)
+    for (const f of files) if (f.state === 'ready') f.cards?.forEach((c) => readCard(f, c));
     const ready = files.filter((f) => f.state === 'ready' && f.sourceId);
+    if (ready.some((f) => f.cards?.some((c) => c.error))) { draw(); return; }
     const total = ready.reduce((s, f) => s + f.preview.newCount, 0);
     const confirmed = ready.reduce((s, f) => s + (f.preview.confirmed ?? 0), 0);
     if (!(await confirmDialog({

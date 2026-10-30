@@ -71,3 +71,14 @@ test('화면 소스: 카드는 한 번 만들고 고침(목록 전체 다시 그
   assert.match(css, /\.upload-savebar \{ position: sticky;/);
   assert.match(css, /\.upload-screen \.small, \.upload-screen \.muted \{ font-size: 14px; color: var\(--sub\); \}/);
 });
+
+test('리뷰 #59: 보일 이름도 규칙에(저장 직전 다시 읽음), 일반 지출이 아니면 카테고리 없음, 고르는 중 저절로 접히지 않음', () => {
+  const row = src('screens/upload-cp-row.js');
+  assert.match(row, /alias\.addEventListener\('change', fire\);/);
+  assert.match(row, /categoryId: select\.value === 'expense' \? \(cat\.value \|\| null\) : null/);
+  const u = src('screens/upload.js');
+  const save = u.slice(u.indexOf('async function saveAll()'));
+  assert.ok(save.indexOf('readCard(f, c)') > -1 && save.indexOf('readCard(f, c)') < save.indexOf('confirmDialog'), '확인 창 전에 카드 값을 다시 읽음');
+  assert.match(u, /const isOpen = \(f\) => f\.open \?\? true;/);
+  assert.match(u, /f\.state = 'ready';\n {4}f\.open = decisionCount\(f\) > 0;/, '펼침은 미리보기가 처음 나올 때 한 번만 정함');
+});

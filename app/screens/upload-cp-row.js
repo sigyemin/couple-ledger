@@ -46,6 +46,7 @@ export function cpRow({ g, categories }, doc = globalThis.document) {
   const fire = () => listeners.forEach((fn) => fn());
   select.addEventListener('change', () => { refresh(); fire(); });
   cat.addEventListener('change', fire);
+  alias.addEventListener('change', fire); // 보일 이름도 규칙 값(저장 때 counterparty_rules.alias)
 
   const meta = `${out ? '보냄' : '받음'} · ${g.count}건 · ${g.totalText}`;
   const el = h('div', { class: 'cp-row' }, [
@@ -65,7 +66,8 @@ export function cpRow({ g, categories }, doc = globalThis.document) {
 
   return {
     el,
-    read: () => ({ choice: select.value, categoryId: cat.value || null, alias: aliasBox.hidden ? '' : alias.value }),
+    // 카테고리는 '일반 지출'일 때만(다른 것으로 바꾸면 숨은 지출 카테고리가 남지 않게)
+    read: () => ({ choice: select.value, categoryId: select.value === 'expense' ? (cat.value || null) : null, alias: aliasBox.hidden ? '' : alias.value }),
     onChange(fn) { listeners.push(fn); },
     setDisabled(on) { select.disabled = !!on; cat.setDisabled(on); alias.disabled = !!on; rename.disabled = !!on; },
     get choice() { return select.value; },
