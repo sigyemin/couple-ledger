@@ -138,7 +138,8 @@ test('총급여 가림(리뷰 #51 중): 최저사용금액 금액·막대 읽어
   assert.match(detailRows(r, { revealed: true }).map(([k, v]) => `${k} ${v}`).join(' | '), /최저사용금액\(총급여 25%\) 10,500,000원/);
   const bar = minimumBarView(r);
   assert.doesNotMatch(`${bar.text} ${bar.aria}`, /10,500,000/);
-  assert.equal(bar.aria, '최저사용금액의 50% 사용, 5,250,000원 남음');
+  assert.equal(bar.aria, '최저사용금액의 50% 사용, 525만 원 남음');
+  assert.equal(bar.text, '최저까지 525만 원 남음(50%)'); // 가림: 만 원 단위 한 숫자만(사용액 없음)
   assert.match(minimumBarView(r, true).aria, /^최저사용금액 10,500,000원 중 5,250,000원 사용\(50%\)$/);
 });
 

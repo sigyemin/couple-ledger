@@ -210,8 +210,9 @@ export function minimumBarView(r, revealed = false) {
     const min = won(num(r?.minimum_spend_amount) ?? 0);
     return { text: `최저사용금액 ${min} · 사용 ${used}`, aria: `최저사용금액 ${min} 중 ${used} 사용(${pctUsed}%)` };
   }
-  const left = won(num(r?.remaining_to_minimum_amount) ?? 0);
-  return { text: `사용 ${used} · 최저까지 ${left} 남음(${pctUsed}%)`, aria: `최저사용금액의 ${pctUsed}% 사용, ${left} 남음` };
+  // 가림 상태: 만 원 단위 한 숫자만(사용액 원 단위는 빼기 — 총괄 10-30, '언뜻 보기 방지' 수준)
+  const left = manWon(num(r?.remaining_to_minimum_amount) ?? 0);
+  return { text: `최저까지 ${left} 남음(${pctUsed}%)`, aria: `최저사용금액의 ${pctUsed}% 사용, ${left} 남음` };
 }
 
 /** 최저사용금액 막대 비율(0~1) */
@@ -279,6 +280,9 @@ export function baselineGroups(rows) {
   }
   return [...by].sort((a, b) => b[0].localeCompare(a[0])).map(([asOf, values]) => ({ asOf, values, complete: values.size === BASELINE_KINDS.length }));
 }
+
+/** 가림 안내(총괄 10-30: 가림은 '언뜻 보기 방지' 수준 — D3 두 사람 조회와 같은 취지) */
+export const MASK_NOTE = '총급여는 가려 두었어요. 다른 숫자로 짐작할 수 있어요(두 사람 모두 볼 수 있는 정보).';
 
 /** 총급여 가림 글: '●●●●만 원' / 없으면 '넣지 않음' */
 export function maskedSalary(amount) {

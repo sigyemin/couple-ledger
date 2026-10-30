@@ -12,7 +12,7 @@ import { addMonths, buildHash } from '../router.js';
 import { won } from '../core/format.js';
 import {
   CHIPS, RATE_ROWS, peopleView, bestChoice, rateText, rateSub, monthlyCardAverage, minimumLine, medicalLines, rentLines,
-  detailRows, sourceLine, minimumRatio, minimumBarView, maskedSalary,
+  detailRows, sourceLine, minimumRatio, minimumBarView, maskedSalary, MASK_NOTE,
 } from './deduction-model.js';
 
 const PAGE_SIZE = 1000;
@@ -184,6 +184,7 @@ export async function renderDeductionCard({ db, monthStart, onError }, doc = glo
           h('th', { text: k, attrs: { scope: 'row' } }, [], doc), h('td', { text: v }, [], doc),
         ], doc)), doc)], doc),
         h('p', { class: 'muted small', text: sourceLine(r) }, [], doc),
+        !shown && r?.total_salary_amount != null ? h('p', { class: 'muted small', text: MASK_NOTE }, [], doc) : null,
       ].filter(Boolean));
     };
     draw();
