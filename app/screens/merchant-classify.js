@@ -248,18 +248,29 @@ export async function renderMerchantClassify({ db, member, reload, isCurrent, on
     }
     say('');
     if (!(await confirmDialog({ ...reapplyAllText(total, pv.ranges), confirmLabel: '한 번에 분류', doc }))) { lockAll(false); return; }
-    const todo = pv.ranges.filter((r) => r.summary.changed > 0);
+    // 적용도 시간 초과(57014)·5,000건 초과(LG007)면 그 기간을 반씩 나눠 이어 적용(이미 적용한 기간은 다시 부르지 않음 — #60 리뷰 낮음)
+    const queue = pv.ranges.filter((r) => r.summary.changed > 0).map(({ from, to }) => ({ from, to }));
     let changed = 0;
     let doneRanges = 0;
-    for (const r of todo) {
-      if (todo.length > 1) say(`분류하는 중 ${doneRanges + 1}/${todo.length} · ${rangeText(r)}`);
+    while (queue.length) {
+      const r = queue.shift();
+      const many = doneRanges > 0 || queue.length > 0 || r.from;
+      if (many) say(`분류하는 중 ${doneRanges + 1}/${doneRanges + queue.length + 1} · ${rangeText(r)}`);
       // 설명에는 규칙 이름·가맹점 등 값을 넣지 않는다(기간만)
       const res = await db.rpc('reapply_all_category_rules', {
-        p_apply: true, p_from_month: r.from, p_to_month: r.to, p_description: `켜진 규칙 한 번에 분류 · ${rangeText(r)}`,
+        p_apply: true, p_from_month: r.from ?? null, p_to_month: r.to ?? null, p_description: `켜진 규칙 한 번에 분류 · ${rangeText(r)}`,
       });
+      if (res.error && shouldSplit(res.error)) {
+        let halves = r.from ? splitRange(r) : null;
+        if (!r.from) {
+          const span = await monthSpan();
+          halves = span.data ? splitRange(span.data) : null;
+        }
+        if (halves) { queue.unshift(...halves); continue; }
+      }
       if (res.error) {
         const code = onError?.(res.error, { stage: STAGES.db_rpc });
-        done(`${todo.length > 1 ? `기간 ${todo.length}개 중 ${doneRanges}개를 적용했어요(${changed}건). ${rangeText(r)}에서 멈췄어요: ` : '분류하지 못했어요: '}${reapplyErrorText(res.error) ?? res.error.message}${code ? ` (오류 번호 ${code})` : ''}`, true);
+        done(`${many ? `${doneRanges}개 기간을 적용했어요(${changed}건). ${rangeText(r)}에서 멈췄어요: ` : '분류하지 못했어요: '}${reapplyErrorText(res.error) ?? res.error.message}${code ? ` (오류 번호 ${code})` : ''}`, true);
         return;
       }
       doneRanges += 1;

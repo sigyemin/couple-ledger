@@ -12,9 +12,19 @@ test('A1: 한 번에 분류는 reapply_all_category_rules 미리보기 → 적�
   const c = src('screens/merchant-classify.js');
   assert.doesNotMatch(c, /reapply_category_rule'/, '규칙마다 부르던 RPC를 쓰지 않음');
   assert.match(c, /db\.rpc\('reapply_all_category_rules', \{ p_apply: false, p_from_month: r\.from \?\? null, p_to_month: r\.to \?\? null \}, \{ retry: true \}\)/);
-  assert.match(c, /p_apply: true, p_from_month: r\.from, p_to_month: r\.to, p_description: `켜진 규칙 한 번에 분류 · \$\{rangeText\(r\)\}`/);
+  assert.match(c, /p_apply: true, p_from_month: r\.from \?\? null, p_to_month: r\.to \?\? null, p_description: `켜진 규칙 한 번에 분류 · \$\{rangeText\(r\)\}`/);
   assert.doesNotMatch(c, /p_description: `[^`]*rule\.pattern/, '설명에 규칙 패턴(가맹점 글자)을 넣지 않음');
   assert.match(c, /const halves = shouldSplit\(pv\.error\) \? splitRange\(r\) : null;/);
+});
+
+test('#60 리뷰: 적용이 57014·LG007이면 그 기간을 반씩 나눠 이어 적용(전체 기간이면 처음·끝 달을 읽어 나눔)', () => {
+  const c = src('screens/merchant-classify.js');
+  const apply = c.slice(c.indexOf('const queue = pv.ranges'));
+  assert.match(apply, /if \(res\.error && shouldSplit\(res\.error\)\) \{/);
+  assert.match(apply, /let halves = r\.from \? splitRange\(r\) : null;/);
+  assert.match(apply, /const span = await monthSpan\(\);/);
+  assert.match(apply, /if \(halves\) \{ queue\.unshift\(\.\.\.halves\); continue; \}/);
+  assert.ok(apply.indexOf('doneRanges += 1;') > apply.indexOf('queue.unshift'), '나눈 기간은 적용 수에 들어가기 전에 다시 줄 세움(이미 적용한 기간은 다시 안 부름)');
 });
 
 test('A2: 상세 연말정산은 고친 값을 상세 행에서 읽고 v_deduction_txn만 조회', async () => {
