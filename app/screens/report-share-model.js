@@ -84,7 +84,8 @@ export function shareEntries(by, d, monthStart) {
 
 /**
  * 비중 조각: 큰 순 상위 top개 + '그 밖'(나머지 합), '분류 안 됨'은 따로 맨 끝
- * @returns {{ total, totalText, slices: { key, name, amount, amountText, ratio, pctText, tone, href, members? }[], negatives: { count, amount } }}
+ * @returns {{ total, totalText, net, netText, slices: { key, name, amount, amountText, ratio, pctText, tone, href, members? }[], negatives: { count, amount } }}
+ *   total = 원에 든 조각 합(비율의 분모), net = 모든 항목 합(순지출 = 홈 지출과 같은 값 — 도넛 가운데 숫자)
  *   tone: 'c0'~'c6'(색 순서) | 'etc' | 'none'. members: '그 밖'에 묶인 이름들
  */
 export function shareSlices(entries, { top = TOP } = {}) {
@@ -109,8 +110,9 @@ export function shareSlices(entries, { top = TOP } = {}) {
     });
   }
   if (none) slices.push(view(none, 'none'));
+  const net = total + neg.reduce((s, e) => s + e.amount, 0);
   return {
-    total, totalText: won(total), slices,
+    total, totalText: won(total), net, netText: won(net), slices,
     negatives: { count: neg.length, amount: neg.reduce((s, e) => s + e.amount, 0) },
   };
 }
@@ -141,8 +143,8 @@ export function donutArcs(slices) {
   });
 }
 
-/** 차트 읽어 주기 글: '대분류별 10월 지출 1,234,000원: 식비 45% 555,000원, …' */
+/** 차트 읽어 주기 글: '대분류별 10월 지출 합계 1,234,000원: 식비 45% 555,000원, …' */
 export function shareAria(byLabel, spanText, s) {
   if (!s.slices.length) return `${byLabel}별 ${spanText} 지출 없음`;
-  return `${byLabel}별 ${spanText} 지출 ${s.totalText}: ${s.slices.map((x) => `${x.name} ${x.pctText} ${x.amountText}`).join(', ')}`;
+  return `${byLabel}별 ${spanText} 지출 합계 ${s.netText}: ${s.slices.map((x) => `${x.name} ${x.pctText} ${x.amountText}`).join(', ')}`;
 }

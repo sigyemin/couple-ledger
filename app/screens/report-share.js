@@ -2,7 +2,7 @@
 // 리포트 › '어디에 얼마나 썼나' 비중 카드 (CL-059). 읽기만 한다
 // 조회: 대분류·세부분류 = v_monthly_category(기간), 결제수단·명의 = transactions(기간, 쪽 단위) + payment_sources + members
 //       (거래 조건은 v_monthly_summary 지출과 같게: 휴지통·집계 제외 빼고 지출·환불, 시험 결제수단은 앱에서 뺌)
-// 그리기: 도넛(svg.js circle, innerHTML 없음) + 범례(이름·금액·비율 글자), 가운데 총액. role="img" + aria-label에 모든 값
+// 그리기: 도넛(svg.js circle, innerHTML 없음) + 범례(이름·금액·비율 글자), 가운데 지출 합계(순지출 = 홈 지출). role="img" + aria-label에 모든 값
 // 의존: ui/dom.js, ui/svg.js, router.js, core/format.js, screens/report-share-model.js, screens/report-model.js(categoryMap)
 // =====================================================================
 import { h } from '../ui/dom.js';
@@ -74,8 +74,8 @@ function donutSvg(sl, aria, doc) {
       class: `donut-arc ${a.tone}`, cx: c, cy: c, r: DONUT.r,
       'stroke-dasharray': `${a.dash.toFixed(2)} ${a.rest.toFixed(2)}`, 'stroke-dashoffset': a.offset.toFixed(2),
     }, [], doc)), doc),
-    s('text', { class: 'donut-label', x: c, y: c - 6, 'text-anchor': 'middle' }, ['합계'], doc),
-    s('text', { class: 'donut-total', x: c, y: c + 14, 'text-anchor': 'middle' }, [sl.totalText], doc),
+    s('text', { class: 'donut-label', x: c, y: c - 6, 'text-anchor': 'middle' }, ['지출 합계'], doc),
+    s('text', { class: 'donut-total', x: c, y: c + 14, 'text-anchor': 'middle' }, [sl.netText], doc),
   ], doc);
 }
 

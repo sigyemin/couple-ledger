@@ -58,15 +58,15 @@ test('비중 조각: 큰 순, 상위 7 + 그 밖, 분류 안 됨은 따로 맨 �
   const etc = sl.slices[TOP];
   assert.deepEqual([etc.name, etc.amount, etc.tone, etc.href, etc.members], ['그 밖 3개', 6000, 'etc', null, ['항목2', '항목1', '항목0']]);
   assert.deepEqual([sl.slices.at(-1).name, sl.slices.at(-1).tone], ['항목n', 'none']);
-  assert.equal(sl.total, 58000);
-  assert.equal(sl.totalText, '58,000원');
+  assert.equal(sl.total, 58000); // 원에 든 조각 합(비율 분모)
+  assert.deepEqual([sl.net, sl.netText], [56000, '56,000원']); // 가운데 숫자 = 순지출(0원 이하 항목 포함)
   assert.deepEqual(sl.negatives, { count: 1, amount: -2000 });
   assert.ok(Math.abs(sl.slices.reduce((x, y) => x + y.ratio, 0) - 1) < 1e-9);
   // 묶을 게 하나뿐이면 묶지 않는다(8개 → 8개 그대로)
   const eight = shareSlices(Array.from({ length: 8 }, (_, i) => e(String(i), 1000 + i)));
   assert.equal(eight.slices.some((x) => x.tone === 'etc'), false);
   assert.equal(eight.slices.length, 8);
-  assert.deepEqual(shareSlices([]), { total: 0, totalText: '0원', slices: [], negatives: { count: 0, amount: 0 } });
+  assert.deepEqual(shareSlices([]), { total: 0, totalText: '0원', net: 0, netText: '0원', slices: [], negatives: { count: 0, amount: 0 } });
 });
 
 test('비율 글자·도넛 위치·읽어 주기 글', () => {
@@ -79,7 +79,7 @@ test('비율 글자·도넛 위치·읽어 주기 글', () => {
   assert.equal(arcs[0].offset === 0 || Object.is(arcs[0].offset, -0), true);
   assert.ok(Math.abs(arcs[1].offset + c * 0.75) < 1e-9);
   assert.equal(donutArcs([{ ratio: 1, tone: 'c0' }])[0].dash, c); // 하나면 틈 없음
-  assert.equal(shareAria('대분류', '10월', sl), '대분류별 10월 지출 100,000원: 식비 75% 75,000원, 생활 25% 25,000원');
+  assert.equal(shareAria('대분류', '10월', sl), '대분류별 10월 지출 합계 100,000원: 식비 75% 75,000원, 생활 25% 25,000원');
   assert.equal(shareAria('명의', '1~10월', shareSlices([])), '명의별 1~10월 지출 없음');
 });
 
