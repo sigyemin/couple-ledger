@@ -333,11 +333,17 @@ test('압축 폭탄: 쓰지 않는 둘째 시트(대량 행)는 풀지 않는다
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['일시', '금액', '적요'], ['2026-10-06 12:30:00', '-1,000', '가짜']]), 'A');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(Array.from({ length: 60000 }, () => ['2026-10-06 12:30:00', '-1,000', '가짜상점'])), 'B');
   const bytes = new Uint8Array(XLSX.write(wb, { type: 'array', bookType: 'xlsx', compression: true }));
+  // 주 판정 = 동작: SheetJS가 실제로 푼 시트(셀 범위가 있는 시트)가 첫 시트 하나뿐 (CL-072 ③ — 벽시계 판정은 병렬 실행에서 흔들림)
+  let opened = null;
+  const spy = { ...XLSX, read: (b, o) => { opened = XLSX.read(b, o); return opened; } };
   const t = Date.now();
-  const { grid } = readGridAgain(XLSX, bytes);
+  const { grid } = readGridAgain(spy, bytes);
   const ms = Date.now() - t;
-  assert.equal(grid.length, 2);
-  assert.ok(ms < 500, `${ms}ms`); // 고치기 전에는 둘째 시트까지 풀어 수백 ms~초 단위
+  const parsed = Object.entries(opened.Sheets ?? {}).filter(([, ws]) => ws?.['!ref']).map(([n]) => n);
+  assert.deepEqual(parsed, ['A'], `압축 폭탄: 푼 시트 ${JSON.stringify(parsed)} (${ms}ms)`);
+  assert.equal(grid.length, 2, `압축 폭탄: grid ${grid.length}줄 (${ms}ms)`);
+  // 보조: 넉넉한 상한(둘째 시트까지 풀면 수백 ms~초, 4병렬 실측 첫 호출 ~200ms)
+  assert.ok(ms < 5000, `압축 폭탄: ${ms}ms (상한 5000ms)`);
 });
 
 test('첫 시트가 MAX_ROWS를 넘으면 too_many_rows (넘는 줄은 읽지 않음)', () => {
