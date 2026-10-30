@@ -280,8 +280,9 @@ test('이체 상대 규칙: row_rules 다음, priority 순, 조건(결제수단�
   // 꺼진 규칙·구분 조건 불일치는 무시 → row_rules(체크카드) 또는 기본값
   assert.equal(r.rows.filter((x) => x.merchant_raw === '가짜마트')[0].card_kind, 'check_card');
   assert.equal(by('김가짜 [숫자 가림]').kind, 'expense');
-  // 모두 검토 대기
-  assert.ok(r.rows.every((x) => x.review_status === 'needs_review'));
+  // 이체 상대 규칙이 맞은 행은 확인함(O2), 나머지(row_rules만·규칙 없음)는 검토 대기
+  const cpHit = new Set(['이시험', '박샘플']);
+  for (const x of r.rows) assert.equal(x.review_status, cpHit.has(x.merchant_raw) ? 'confirmed' : 'needs_review', x.merchant_raw);
   // 카드 형식에는 이체 상대 규칙을 쓰지 않는다
   const b = await normalizeRows(sheetB(), FORMAT_B, findHeader(sheetB(), FORMAT_B), {
     sourceId: SOURCE, counterpartyRules: [{ match_field: 'merchant', match_text: '가짜식당', suggested_kind: 'transfer', suggested_exclude_reason: 'internal_transfer' }],

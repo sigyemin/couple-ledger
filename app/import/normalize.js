@@ -13,7 +13,8 @@
 // - 카드 취소(also_refund): 환불 금액 칸(refund_amount_key)이 정해져 있는데 비었거나 0이면 행 오류
 // - 모든 글자 칸은 민감번호 규칙으로 가린다('[숫자 가림]', 붙여 쓴 일시 단계는 끈 보수적 검사)
 // - 승인번호가 형식(영숫자 4~12자, 숫자 10개 연속 금지)에 맞지 않으면 행 오류
-// - 검토 상태는 needs_review. 단 가맹점 규칙(확정)으로 분류된 지출·수입 행은 confirmed(사용자 결정 U-16·Q3)
+// - 검토 상태는 needs_review. 단 가맹점 규칙(확정)으로 분류된 지출·수입 행, 이체 상대 규칙이 맞은 행(환불 제외)은 confirmed
+//   (사용자 결정 U-16·Q3·O2 — 과거 거래 적용 apply_counterparty_rule도 확인함). 모호 가맹점 규칙(suggestion)이 붙으면 검토 대기
 // - 가맹점 규칙(category_rules)은 형식 행 규칙·이체 상대 규칙으로 분류되지 않은 지출·환불·수입 행(집계 제외 빼고)에만,
 //   DB reapply_category_rule과 같은 일치·순서로. 환불은 분류만 하고 검토 대기 그대로(v_unlinked_refunds가 검토 대기 환불만 봄)
 // - 통장 행이 행 규칙·이체 상대 규칙 어디에도 안 맞으면 newCounterparty = true + merchantVariant(가림 전 설명의 파일 안 번호)
@@ -186,6 +187,7 @@ export async function normalizeRows(grid, format, header, ctx) {
     row.category_id = hit.category_id;
     row.category_source = hit.source;
     if (hit.source === 'rule' && row.kind !== 'refund') row.review_status = 'confirmed';
+    if (hit.source === 'suggestion') row.review_status = 'needs_review'; // 확인이 필요한 제안 분류
     row.merchantRule = hit.source;
   };
   const cpRules = format.kind === 'bank_account' && Array.isArray(ctx?.counterpartyRules) ? ctx.counterpartyRules : [];
@@ -321,6 +323,8 @@ export async function normalizeRows(grid, format, header, ctx) {
         : cp?.suggested_category_id && (kind === 'expense' || kind === 'income') ? cp.suggested_category_id : null,
     };
     if (base.category_id) base.category_source = 'rule';
+    // 이체 상대 규칙이 맞은 행은 확인함(O2). 환불은 검토 대기 유지(가맹점 규칙과 같음 — 이 경로에서 환불은 생기지 않지만 지켜 둔다)
+    if (cp && kind !== 'refund') base.review_status = 'confirmed';
     applyMerchantRule(base);
     // 통장 행인데 행 규칙·이체 상대 규칙에 안 맞았으면 "새 이체 상대" 후보(화면 4-2 ②). RPC로는 보내지 않는다(toRpcRows가 뺌)
     if (format.kind === 'bank_account' && !rule && !cp) {
