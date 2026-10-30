@@ -497,3 +497,15 @@ button.chip.on { border-color: var(--text); }
 .ded-advice-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .ded-advice-body strong { font-size: 15px; }
 .ded-advice-body .sub { font-size: 12px; color: var(--sub-on-white); overflow-wrap: anywhere; }
+
+/* 거래 상세 분류 줄 (CL-067): 지금 카테고리가 주인공 — 이름 크고 굵게, 줄을 누르면 고르기. 미분류면 '분류하기'가 눈에 띄게 */
+.line-name { font-size: 17px; font-weight: 700; min-width: 0; overflow-wrap: anywhere; }
+.line-btn { width: 100%; min-height: 48px; padding: 6px 0; border: 0; background: none; color: var(--text); font: inherit;
+  text-align: left; cursor: pointer; flex-wrap: wrap; row-gap: 2px; }
+.line-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 10px; }
+.line-btn:disabled { cursor: default; opacity: .6; }
+.line-act { flex: none; font-size: 13px; color: var(--blue); white-space: nowrap; }
+.line-list li + li .line { border-top: 1px solid var(--line); }
+.line-btn.uncat { padding: 10px 14px; border-radius: 14px; background: var(--blue-soft); }
+.line-btn.uncat .line-name { font-weight: 400; color: var(--sub-on-white); }
+.line-btn.uncat .line-act { margin-left: auto; font-size: 15px; font-weight: 700; color: var(--blue-dark); }

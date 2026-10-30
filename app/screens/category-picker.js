@@ -2,7 +2,8 @@
 // 카테고리 고르기 부품 (CL-060): <select> 대신 쓰는 버튼 + 대화상자
 // - 버튼에 지금 고른 '대분류 > 소분류'. 누르면 <dialog>(showModal): 위에 검색칸, 최근 쓴 것, 대분류 목록(누르면 그 아래 소분류 펼침)
 // - <select>처럼 쓴다: el.value(읽기·쓰기, 고를 수 없는 id는 ''), el.selectedName(소분류 이름), 고르면 el에 'change' 이벤트,
-//   el.setKind(kind), el.setDisabled(on)
+//   el.setKind(kind), el.setDisabled(on), el.open(focusBack) — 다른 요소(예: 거래 상세의 카테고리 줄)에서 대화상자를 열 때.
+//   닫히면 focusBack(없으면 부품 버튼)으로 초점을 돌린다
 // - 키보드: Tab으로 이동, Enter·Space로 고르기, Esc로 닫기(고르지 않음). 대분류 버튼은 aria-expanded, 고른 항목은 aria-current
 // - 글자는 textContent로만(innerHTML 금지). 최근 목록은 이 기기 저장소(키 접두 cl- — 로그아웃 때 지워짐), 실패해도 동작
 // 의존: ui/dom.js, config.js(APP_STORAGE_PREFIX), screens/category-pick-model.js
@@ -46,7 +47,7 @@ function defaultStorage() {
  * @param {string|null} [o.emptyLabel] 값 없음도 고를 수 있으면 그 이름(예: '미분류로 두기')
  * @param {string} [o.placeholder='카테고리 고르기']
  * @param {{ id, name, items: {id, name, label}[] }[]} [o.extra] 목록 맨 앞에 더할 묶음(예: 규칙의 '지금 값' — 꺼진 카테고리도 그대로 둘 수 있게)
- * @returns {HTMLElement & { value: string, readonly selectedName: string, setKind(kind): void, setDisabled(on): void }}
+ * @returns {HTMLElement & { value: string, readonly selectedName: string, setKind(kind): void, setDisabled(on): void, open(focusBack?): void }}
  */
 export function categoryPicker({
   categories, kind = 'expense', value = '', label = '카테고리', emptyLabel = null, placeholder = '카테고리 고르기',
@@ -55,6 +56,7 @@ export function categoryPicker({
   let groups = [...extra, ...pickGroups(categories, kind)];
   let current = labelOf(groups, value) ? value : '';
   const id = `cat-pick-${++seq}`;
+  let focusBack = null; // el.open(focusBack)로 열었을 때 닫힌 뒤 초점 둘 곳
 
   const text = () => (current ? labelOf(groups, current) : (emptyLabel ?? placeholder));
   const trigger = h('button', {
@@ -94,7 +96,9 @@ export function categoryPicker({
         refresh();
         fire();
       }
-      trigger.focus();
+      const back = focusBack ?? trigger;
+      focusBack = null;
+      back.focus();
     };
     const itemBtn = (it, text = it.label) => h('button', {
       class: it.id === current ? 'cat-item on' : 'cat-item', text,
@@ -174,5 +178,6 @@ export function categoryPicker({
     refresh();
   };
   el.setDisabled = (on) => { trigger.disabled = !!on; };
+  el.open = (back = null) => { if (trigger.disabled) return; focusBack = back; open(); };
   return el;
 }

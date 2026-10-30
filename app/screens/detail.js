@@ -240,21 +240,39 @@ export async function renderDetail({ db, member, id, go, reload, isCurrent, onEr
   }
   const linkCard = links.length ? h('section', { class: 'card' }, [h('h2', { class: 'card-title', text: '연결' }, [], doc), ...links], doc) : null;
 
-  // 분류
+  // 분류 (CL-067: 지금 카테고리 줄이 주인공 — 줄을 누르면 고르기 대화상자. 미분류면 '분류하기'가 주인공)
   const c = m.classification;
+  const pick = m.canChangeCategory ? categoryPicker({ categories, kind: row.kind, label: '카테고리 바꾸기', doc }) : null;
+  const lineKids = (l) => [
+    h('span', { class: 'line-name', text: l.name }, [], doc),
+    c.tag ? h('span', { class: 'tag', text: c.tag }, [], doc) : (l.source ? h('span', { class: 'tag', text: l.source }, [], doc) : null),
+    h('span', { class: 'line-amount', text: l.amount }, [], doc),
+  ];
+  // 고칠 수 있으면 줄 전체가 버튼(오른쪽에 작은 '바꾸기 ›'). 나눈 거래도 줄마다 같은 모양(어느 줄이든 거래 전체를 한 카테고리로 — 확인 창이 알림)
+  const lineButton = (kids, aria, action, cls = '') => {
+    const b = h('button', { class: `line line-btn${cls}`, attrs: { type: 'button', 'aria-haspopup': 'dialog', 'aria-label': aria } }, [
+      ...kids, h('span', { class: 'line-act', text: action, attrs: { 'aria-hidden': 'true' } }, [], doc),
+    ], doc);
+    b.addEventListener('click', () => pick.open(b));
+    return b;
+  };
+  let classBody;
+  if (c.lines.length) {
+    classBody = h('ul', { class: 'line-list' }, c.lines.map((l) => h('li', {}, [
+      pick ? lineButton(lineKids(l), `카테고리 바꾸기, 지금 ${l.name}`, '바꾸기 ›') : h('div', { class: 'line' }, lineKids(l), doc),
+    ], doc)), doc);
+  } else if (pick) {
+    classBody = h('ul', { class: 'line-list' }, [h('li', {}, [
+      lineButton([h('span', { class: 'line-name muted', text: '미분류' }, [], doc)], '분류하기, 지금 미분류', '분류하기 ›', ' uncat'),
+    ], doc)], doc);
+  } else classBody = c.note ? null : h('p', { class: 'muted', text: '미분류' }, [], doc);
   const classCard = h('section', { class: 'card' }, [
     h('h2', { class: 'card-title', text: '분류' }, [], doc),
-    c.lines.length === 0 && !c.note ? h('p', { class: 'muted', text: '미분류' }, [], doc) : null,
-    c.lines.length ? h('ul', { class: 'line-list' }, c.lines.map((l) => h('li', { class: 'line' }, [
-      h('span', { text: l.name }, [], doc),
-      c.tag ? h('span', { class: 'tag', text: c.tag }, [], doc) : (l.source ? h('span', { class: 'tag', text: l.source }, [], doc) : null),
-      h('span', { class: 'line-amount', text: l.amount }, [], doc),
-    ], doc)), doc) : null,
+    classBody,
     c.note ? h('p', { class: 'muted small', text: c.note }, [], doc) : null,
     linesMismatch(row) ? h('p', { class: 'notice small', text: '나눈 금액이 안 맞아요. 금액 나누기로 거래 금액에 맞춰 주세요.' }, [], doc) : null,
   ], doc);
-  if (m.canChangeCategory) {
-    const pick = categoryPicker({ categories, kind: row.kind, label: '카테고리 바꾸기', placeholder: '카테고리 바꾸기…', doc });
+  if (pick) {
     pick.addEventListener('change', async () => {
       const catId = pick.value;
       if (!catId) return;
@@ -268,7 +286,6 @@ export async function renderDetail({ db, member, id, go, reload, isCurrent, onEr
       if (r.error) { pick.value = ''; fail(r.error, { stage: STAGES.db_rpc, action: ACTIONS.bulk_edit }); return; }
       reload();
     });
-    classCard.append(h('div', { class: 'filter-field' }, [pick], doc));
   }
   if (ed.canSplit) classCard.append(splitEditor());
   if (ed.canRevertToOriginal) {
