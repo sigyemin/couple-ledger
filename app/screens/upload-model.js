@@ -105,6 +105,20 @@ export function failedRows(res) {
   return (res?.failures ?? []).filter((f) => f.result !== 'refund_unlinked').slice(0, 20).map((f) => f.rowNo).filter((n) => n != null);
 }
 
+/**
+ * 결제수단 고르기 반영. 빈 값으로 되돌리면 고른 결제수단·미리보기를 지우고 '고르기' 상태(저장 불가)로 — PR #29 재리뷰
+ * @returns {'prepare'|'cleared'}
+ */
+export function applySourceChoice(f, value) {
+  f.result = null;
+  if (!value) {
+    Object.assign(f, { sourceId: null, parsed: null, preview: null, state: 'choose' });
+    return 'cleared';
+  }
+  f.sourceId = value;
+  return 'prepare';
+}
+
 export const TEST_SOURCE_WARNING = '시험용 결제수단이에요(집계 제외, 나중에 일괄 삭제됨). 실제 파일이면 다른 결제수단을 골라 주세요.';
 
 export const monthTitle = (m) => `${monthLabel(m).replace(/^[0-9]+년 /, '')} 파일`;

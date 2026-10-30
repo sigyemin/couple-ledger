@@ -19,7 +19,7 @@ import { isPhone } from '../import/env.js';
 import { ensureBatch, uploadRows, batchFileName } from '../import/upload.js';
 import { fileHash } from '../import/dedup.js';
 import {
-  MAX_FILES, KEY_CHUNK, TEST_SOURCE_WARNING, matchSources, previewOf, previewLines, readErrorText, resultLines, failedRows, monthTitle,
+  MAX_FILES, KEY_CHUNK, TEST_SOURCE_WARNING, applySourceChoice, matchSources, previewOf, previewLines, readErrorText, resultLines, failedRows, monthTitle,
 } from './upload-model.js';
 import { errorView } from './shell.js';
 
@@ -164,7 +164,7 @@ export async function renderUpload({ db, guard, monthStart, isCurrent, onError }
       ], doc);
       sel.value = f.sourceId ?? '';
       sel.disabled = busy;
-      sel.addEventListener('change', () => { if (sel.value) { f.sourceId = sel.value; f.result = null; prepare(f); } });
+      sel.addEventListener('change', () => { if (applySourceChoice(f, sel.value) === 'prepare') prepare(f); else draw(); });
       body.push(sel);
       if (f.choices.find((c) => c.id === f.sourceId)?.isTest) body.push(h('p', { class: 'notice small', text: TEST_SOURCE_WARNING }, [], doc));
     }
@@ -195,7 +195,7 @@ export async function renderUpload({ db, guard, monthStart, isCurrent, onError }
 
   function draw() {
     list.replaceChildren(...files.map(fileCard));
-    const ready = files.filter((f) => f.state === 'ready');
+    const ready = files.filter((f) => f.state === 'ready' && f.sourceId);
     const total = ready.reduce((s, f) => s + f.preview.newCount, 0);
     save.textContent = ready.length ? `${ready.length}개 파일 · 새로 ${total}건 저장` : '저장';
     save.disabled = busy || ready.length === 0 || files.some((f) => f.state === 'reading');
@@ -203,7 +203,7 @@ export async function renderUpload({ db, guard, monthStart, isCurrent, onError }
   }
 
   async function saveAll() {
-    const ready = files.filter((f) => f.state === 'ready');
+    const ready = files.filter((f) => f.state === 'ready' && f.sourceId);
     const total = ready.reduce((s, f) => s + f.preview.newCount, 0);
     if (!(await confirmDialog({
       title: '올리기',

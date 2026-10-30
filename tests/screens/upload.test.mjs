@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { isPhone } from '../../app/import/env.js';
 import {
-  matchSources, previewOf, previewLines, readErrorText, resultLines, failedRows, monthTitle,
+  applySourceChoice, matchSources, previewOf, previewLines, readErrorText, resultLines, failedRows, monthTitle,
 } from '../../app/screens/upload-model.js';
 import { parseHash } from '../../app/router.js';
 
@@ -72,4 +72,14 @@ test('저장 결과 문장: 넣음·건너뜀·못 넣음·원거래 못 찾은 
 test('주소·제목', () => {
   assert.equal(parseHash('#/upload?month=2026-09').query.get('month'), '2026-09');
   assert.equal(monthTitle('2026-09-01'), '9월 파일');
+});
+
+test('결제수단 고르기를 빈 값으로 되돌리면 고른 값·미리보기를 지우고 고르기 상태(저장 불가) — 시험용·일반 모두', () => {
+  for (const id of [ID(4), ID(1)]) {
+    const f = { sourceId: id, parsed: { rows: [1] }, preview: { newCount: 1 }, state: 'ready', result: { x: 1 } };
+    assert.equal(applySourceChoice(f, ''), 'cleared');
+    assert.deepEqual([f.sourceId, f.parsed, f.preview, f.state, f.result], [null, null, null, 'choose', null]);
+    assert.equal(applySourceChoice(f, id), 'prepare');
+    assert.equal(f.sourceId, id);
+  }
 });
