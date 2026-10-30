@@ -37,7 +37,7 @@ test('허용 칸 목록: 거래 update는 이 15칸만(+ 연말정산 2칸, CL-0
   const calls = readdirSync(dir).filter((f) => f.endsWith('.js'))
     .flatMap((f) => [...readFileSync(new URL(f, dir), 'utf8').matchAll(/db\.update\('transactions', [^,]+, ([^)]+\)?)\)/g)].map((m) => `${f}: ${m[1]}`));
   assert.deepEqual(calls.sort(), [
-    'detail-deduction.js: patch', 'detail.js: patch', 'detail.js: patch', 'detail.js: v.patch', 'refund.js: confirmPatch(member.memberId)', 'refund.js: confirmPatch(memberId)',
+    'detail-deduction.js: patch', 'detail.js: patch', 'detail.js: patch', 'detail.js: v.patch', 'merchant-classify.js: confirmBothPatch(member.memberId)', 'refund.js: confirmPatch(member.memberId)', 'refund.js: confirmPatch(memberId)',
     'review.js: confirmBothPatch(member.memberId)', 'review.js: confirmBothPatch(member.memberId)', 'trash.js: patch',
   ]);
 });

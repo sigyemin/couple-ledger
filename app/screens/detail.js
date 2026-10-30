@@ -19,7 +19,7 @@ import { todaySeoul } from '../core/format.js';
 import { STAGES, ACTIONS } from '../core/errors.js';
 import { categoryIndex } from './list-model.js';
 import {
-  buildDetailModel, categoryOptions, TRASHED_EDIT_TEXT, RANGE_TEXT, categoryChangeText, changeDescription, trashPlan, trashPatch,
+  buildDetailModel, categoryOptions, keptLineCategories, TRASHED_EDIT_TEXT, RANGE_TEXT, categoryChangeText, changeDescription, trashPlan, trashPatch,
   editability, settlementChangeText, sharePatch, excludePatch, confirmPatch, linesDraft, validateLines, MAX_LINES,
 } from './detail-model.js';
 import { errorView } from './shell.js';
@@ -374,6 +374,9 @@ export async function renderDetail({ db, member, id, go, reload, isCurrent, onEr
     const options = categoryOptions(categories, row.kind);
     const allowed = new Set(options.flatMap((g) => g.items.map((it) => it.id)));
     const draft = linesDraft(row);
+    // 지금 줄의 카테고리가 꺼졌거나 고를 수 없으면 '지금 값'으로 버튼에 보이고 그대로 저장할 수 있게(규칙 편집과 같은 방식, CL-060 리뷰)
+    const keep = keptLineCategories(draft, allowed, categories);
+    for (const g of keep) for (const it of g.items) allowed.add(it.id);
     const box = h('div', { class: 'split', attrs: { hidden: true } }, [], doc);
     const sumLine = h('p', { class: 'muted small split-sum', attrs: { 'aria-live': 'polite' } }, [], doc);
     const check = () => validateLines(draft, row.amount, allowed, { amount: checkAmount, text: checkText });
@@ -382,7 +385,7 @@ export async function renderDetail({ db, member, id, go, reload, isCurrent, onEr
       sumLine.textContent = v.ok ? v.sumText : `${v.sumText} · ${v.message}`;
     };
     const lineRow = (d, i) => {
-      const sel = categoryPicker({ categories, kind: row.kind, value: d.categoryId, label: `${i + 1}번째 줄 카테고리`, placeholder: '카테고리', doc });
+      const sel = categoryPicker({ categories, kind: row.kind, value: d.categoryId, label: `${i + 1}번째 줄 카테고리`, placeholder: '카테고리', extra: keep, doc });
       sel.addEventListener('change', () => { d.categoryId = sel.value; showSum(); });
       const amt = h('input', { class: 'field', attrs: { inputmode: 'numeric', 'aria-label': `${i + 1}번째 줄 금액`, maxlength: '20' } }, [], doc);
       amt.value = d.amountText;
