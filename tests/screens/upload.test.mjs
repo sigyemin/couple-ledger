@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { isPhone } from '../../app/import/env.js';
 import {
-  sha256Hex, matchSources, previewOf, previewLines, readErrorText, resultLines, failedRows, monthTitle,
+  matchSources, previewOf, previewLines, readErrorText, resultLines, failedRows, monthTitle,
 } from '../../app/screens/upload-model.js';
 import { parseHash } from '../../app/router.js';
 
@@ -17,11 +17,6 @@ test('휴대폰 판별: userAgentData.mobile 값이 먼저, 없으면 pointer: c
   assert.equal(isPhone({ navigator: {}, matchMedia: mq(false) }), false);
   assert.equal(isPhone({ navigator: {}, matchMedia: () => { throw new Error('x'); } }), false);
   assert.equal(isPhone({}), false);
-});
-
-test('파일 해시: SHA-256 hex 64자', async () => {
-  const h = await sha256Hex(new TextEncoder().encode('abc'));
-  assert.equal(h, 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
 });
 
 test('결제수단 맞춤: 켜진 것·형식 일치만, 1개면 자동, 여러 개면 고르기(시험용은 뒤·표시), 없으면 빈 목록', () => {

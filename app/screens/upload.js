@@ -17,8 +17,9 @@ import { runParseWorker } from '../core/parse-worker.js';
 import { MAX_FILE_BYTES } from '../import/detect.js';
 import { isPhone } from '../import/env.js';
 import { ensureBatch, uploadRows, batchFileName } from '../import/upload.js';
+import { fileHash } from '../import/dedup.js';
 import {
-  MAX_FILES, KEY_CHUNK, sha256Hex, matchSources, previewOf, previewLines, readErrorText, resultLines, failedRows, monthTitle,
+  MAX_FILES, KEY_CHUNK, matchSources, previewOf, previewLines, readErrorText, resultLines, failedRows, monthTitle,
 } from './upload-model.js';
 import { errorView } from './shell.js';
 
@@ -135,7 +136,7 @@ export async function renderUpload({ db, guard, monthStart, isCurrent, onError }
       if (file.size > MAX_FILE_BYTES) { fail(f, 'too_big'); draw(); continue; }
       try {
         f.bytes = new Uint8Array(await file.arrayBuffer());
-        f.hash = await sha256Hex(f.bytes, env);
+        f.hash = await fileHash(f.bytes);
         const d = await runParseWorker({ op: 'detect', bytes: f.bytes.slice().buffer, formats }, { env });
         f.fileType = d.fileType;
         const m = matchSources(d.formatIds, sources);

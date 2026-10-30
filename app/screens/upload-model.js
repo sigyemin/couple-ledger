@@ -1,6 +1,6 @@
 // =====================================================================
 // 올리기 — 화면 없이 계산하는 부분 (화면 설계 v0.1 4-2 ①·③·④, 보정 CL-029 2판)
-// - 파일 해시: SHA-256 hex(파일 바이트). 같은 결제수단·같은 해시면 이어 올리기("빠진 행만")
+// - 파일 해시: import/dedup.js fileHash(SHA-256 hex). 같은 결제수단·같은 해시면 이어 올리기("빠진 행만")
 // - 결제수단 맞춤: 파일 내용(헤더)이 맞는 형식 → 그 형식을 쓰는 켜진 결제수단. 1개면 자동, 여러 개면 고르기, 없으면 건너뜀
 // - 미리보기: 새로 넣을 건수(이미 DB에 같은 중복 키가 있으면 뺌), 이미 있음, 행 오류(사유별), 꼬리 줄, 집계 제외,
 //   체크카드 사용, 숫자 가림. 검토 상태는 모두 검토 대기(정규화 규칙)
@@ -11,12 +11,6 @@ import { won, month as monthLabel } from '../core/format.js';
 
 export const MAX_FILES = 12;
 export const KEY_CHUNK = 100; // 중복 키 조회 한 번에 넣는 수
-
-/** 파일 바이트 → SHA-256 hex */
-export async function sha256Hex(bytes, env = globalThis) {
-  const digest = await env.crypto.subtle.digest('SHA-256', bytes);
-  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
-}
 
 /**
  * 맞는 형식 id → 결제수단 후보(켜진 것만, 이름 순)
