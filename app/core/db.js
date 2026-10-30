@@ -26,11 +26,13 @@ export const UPDATE_TABLES = Object.freeze(['transactions', 'categories', 'categ
 export const DELETE_TABLES = Object.freeze(['categories', 'payment_sources']);
 // upsert(넣거나 같은 키면 고치기)를 허용하는 표와 키 칸·넣을 수 있는 칸 (CL-062 연말정산 — 본인 행만, 실제로 막는 것은 RLS)
 // - member_tax_profiles: 사람·연도별 총급여·자녀 수·월세 요건·실손보험금(민감 — 값은 기록·주소에 남기지 않는다)
+//   + 전세자금대출(CL-065, v0.21): 요건 확인·원금 상환액·상환증명서 원리금·주택마련저축 공제액
 // - deduction_baselines: 국세청 기준값(사람 × 연도 × 기준일 × 공제 항목)
 export const UPSERT_TABLES = Object.freeze({
   member_tax_profiles: Object.freeze({
     key: 'member_id,tax_year',
-    columns: Object.freeze(['member_id', 'tax_year', 'total_salary_amount', 'child_count', 'is_rent_eligible', 'medical_reimbursed_amount']),
+    columns: Object.freeze(['member_id', 'tax_year', 'total_salary_amount', 'child_count', 'is_rent_eligible', 'medical_reimbursed_amount',
+      'is_housing_loan_eligible', 'housing_loan_principal_amount', 'housing_loan_certified_amount', 'housing_savings_deduction_amount']),
   }),
   deduction_baselines: Object.freeze({
     key: 'member_id,tax_year,as_of_on,deduction_kind',
@@ -65,6 +67,8 @@ export const UPDATE_COLUMNS = Object.freeze({
 // 표·칸별로 허용하는 값(insert·update 모두). 배열 = 허용 값 목록, 함수 = 검사 함수
 // - category_rules.match_type: 정규식 가맹점 규칙은 화면에서 만들거나 바꿀 수 없다(결정 C2). DB는 regex를 허용 → DB 쪽 제한은 v0.18 후보
 // - payment_sources.kind: 화면 선택지만(check_card 없음). last4: 정확히 숫자 4개 또는 없음(DB CHECK와 같음)
+const WON_MAX = 1e10 - 1; // DB numeric(14,0) CHECK 상한(열 자리 9)
+const wonAmount = (v) => Number.isInteger(v) && v >= 0 && v <= WON_MAX;
 export const COLUMN_VALUES = Object.freeze({
   category_rules: Object.freeze({ match_type: Object.freeze(['contains', 'exact']) }),
   counterparty_rules: Object.freeze({ match_type: Object.freeze(['exact', 'contains']) }), // DB CHECK와 같음
@@ -78,7 +82,14 @@ export const COLUMN_VALUES = Object.freeze({
   }),
   categories: Object.freeze({
     default_deduction_kind: (v) => v === null || ['public_transit', 'traditional_market', 'culture', 'excluded'].includes(v),
-    tax_credit_kind: (v) => v === null || ['medical', 'rent', 'insurance'].includes(v),
+    tax_credit_kind: (v) => v === null || ['medical', 'rent', 'insurance', 'housing_rent_loan'].includes(v), // v0.21 DB CHECK와 같음
+  }),
+  // 전세자금대출 입력(v0.21 ck_taxprof_housing_amounts와 같음): 0~(열 자리 9) 정수, 상환증명서는 비우기(null)도
+  member_tax_profiles: Object.freeze({
+    is_housing_loan_eligible: (v) => typeof v === 'boolean',
+    housing_loan_principal_amount: (v) => wonAmount(v),
+    housing_loan_certified_amount: (v) => v === null || wonAmount(v),
+    housing_savings_deduction_amount: (v) => wonAmount(v),
   }),
   deduction_baselines: Object.freeze({
     deduction_kind: Object.freeze(['credit_card', 'check_card', 'cash_receipt', 'public_transit', 'traditional_market', 'culture']),

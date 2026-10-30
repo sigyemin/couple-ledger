@@ -2,7 +2,8 @@
 // 더보기 › 연말정산 설정 #/taxset (CL-062 E2)
 // 조회: deduction_rules(올해 규칙 있는지), member_tax_profiles·deduction_baselines(본인 행, 올해)
 // 쓰기(본인 행만 — RLS): member_tax_profiles upsert(총급여 만 원 단위·자녀 수·월세 요건·실손보험금),
-//                       deduction_baselines upsert(기준일 하나 × 6개 항목 한 번에 — 재리뷰 P-6)
+//                       deduction_baselines upsert(기준일 하나 × 6개 항목 한 번에 — 재리뷰 P-6),
+//                       전세자금대출(CL-065 H2): member_tax_profiles upsert(키 + 요건 확인·원금·상환증명서·청약 공제액만 — 다른 칸은 그대로)
 // - 총급여는 기본 가림(●●●●만 원). 고칠 때만 입력칸. 값은 오류 기록·주소·콘솔에 남기지 않는다(오류는 코드만 기록)
 // - 기준값 지우기는 두지 않는다(같은 기준일로 다시 넣으면 덮어씀)
 // 의존: ui/dom.js, router.js, core/confirm.js, core/format.js, core/errors.js, screens/deduction-model.js, screens/shell.js
@@ -12,7 +13,9 @@ import { buildHash, currentMonth } from '../router.js';
 import { confirmDialog } from '../core/confirm.js';
 import { todaySeoul, won } from '../core/format.js';
 import { STAGES } from '../core/errors.js';
-import { BASELINE_KINDS, MAN, checkProfile, checkBaselines, baselineGroups, maskedSalary } from './deduction-model.js';
+import {
+  BASELINE_KINDS, MAN, checkProfile, checkBaselines, baselineGroups, maskedSalary, checkHousing, HOUSING_REQUIREMENTS, HOUSING_SAVINGS_NOTE,
+} from './deduction-model.js';
 import { errorView } from './shell.js';
 
 const eq = (col, value) => ({ col, op: 'eq', value });
@@ -33,7 +36,8 @@ export async function renderTaxSettings({ db, member, reload, isCurrent, onError
   const [rules, prof, base] = await Promise.all([
     db.select('deduction_rules', { columns: 'tax_year', filters: [eq('tax_year', taxYear)] }),
     db.select('member_tax_profiles', {
-      columns: 'member_id,tax_year,total_salary_amount,child_count,is_rent_eligible,medical_reimbursed_amount',
+      columns: 'member_id,tax_year,total_salary_amount,child_count,is_rent_eligible,medical_reimbursed_amount,'
+        + 'is_housing_loan_eligible,housing_loan_principal_amount,housing_loan_certified_amount,housing_savings_deduction_amount',
       filters: [eq('member_id', me), eq('tax_year', taxYear)],
     }),
     db.select('deduction_baselines', {
@@ -124,6 +128,35 @@ export async function renderTaxSettings({ db, member, reload, isCurrent, onError
     saveProfile,
   ], doc);
 
+  // ---- 전세자금대출 원리금 상환액 소득공제 (CL-065 H2) — 본인 행만, 요건은 본인이 읽고 켠다
+  const loanOk = h('input', { attrs: { type: 'checkbox', 'aria-label': '전세자금대출 공제 요건을 모두 확인했어요' } }, [], doc);
+  loanOk.checked = Boolean(p?.is_housing_loan_eligible);
+  const amountText = (v, blankIfNull = false) => (v == null ? (blankIfNull ? '' : '0') : String(Number(v)));
+  const principal = input('원금 상환액(원)', { inputmode: 'numeric', maxlength: '13', placeholder: '0' }, amountText(p?.housing_loan_principal_amount));
+  const certified = input('상환증명서 원리금 합계(원)', { inputmode: 'numeric', maxlength: '13', placeholder: '없으면 비워 두기' }, amountText(p?.housing_loan_certified_amount, true));
+  const savings = input('주택마련저축 공제액(원)', { inputmode: 'numeric', maxlength: '13', placeholder: '모르면 비워 두기(0)' }, amountText(p?.housing_savings_deduction_amount));
+  const saveLoan = h('button', { class: 'btn primary', text: '전세자금대출 저장', attrs: { type: 'button' } }, [], doc);
+  saveLoan.addEventListener('click', async () => {
+    const v = checkHousing({ eligible: loanOk.checked, principal: principal.value, certified: certified.value, savings: savings.value }, me, taxYear);
+    if (!v.ok) { say(v.message, true); return; }
+    saveLoan.disabled = true;
+    const r = await db.upsert('member_tax_profiles', v.row);
+    saveLoan.disabled = false;
+    if (r.error) { fail(r.error); return; }
+    done('전세자금대출 공제 설정을 저장했어요. 정산 탭 공제 현황(사람별)에 반영돼요.');
+  });
+  const loanCard = h('section', { class: 'card form' }, [
+    h('h2', { class: 'card-title', text: '전세자금대출 원리금 상환(소득공제)' }, [], doc),
+    h('p', { class: 'muted small', text: '카드 선택과는 상관없어요. 가계부의 대출이자 거래 + 아래 원금으로 계산하고, 상환증명서 값을 넣으면 그 값을 써요.' }, [], doc),
+    h('p', { class: 'field-label', text: '요건(모두 맞아야 해요)' }, [], doc),
+    h('ul', { class: 'req-list' }, HOUSING_REQUIREMENTS.map((t) => h('li', { text: t }, [], doc)), doc),
+    h('label', { class: 'filter-check' }, [loanOk, h('span', { text: '위 요건을 모두 확인했어요(본인)' }, [], doc)], doc),
+    field('원금 상환액(원, 올해)', principal, '이자만 냈으면 0. 가계부는 원금 상환을 몰라요.'),
+    field('상환증명서 원리금 합계(원)', certified, '연말에 은행에서 받은 증명서 값. 넣으면 가계부보다 우선해요.'),
+    field('주택마련저축(청약) 공제액(원)', savings, `납입액이 아니라 공제액이에요. ${HOUSING_SAVINGS_NOTE}`),
+    saveLoan,
+  ], doc);
+
   // ---- 국세청 기준값
   const today = todaySeoul();
   const asOf = input('기준일', { type: 'date', min: `${taxYear}-01-01`, max: today < `${taxYear}-12-31` ? today : `${taxYear}-12-31` }, defaultAsOf(taxYear, today));
@@ -172,7 +205,7 @@ export async function renderTaxSettings({ db, member, reload, isCurrent, onError
   ], doc);
 
   return h('main', { class: 'screen' }, [
-    head, status, profileCard, baseCard,
+    head, status, profileCard, loanCard, baseCard,
     h('p', { class: 'muted small', text: '모든 공제 숫자는 가계부 기준 추정이에요. 최종은 홈택스 간소화 자료로 확인해 주세요.' }, [], doc),
   ], doc);
 }
