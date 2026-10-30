@@ -181,8 +181,9 @@ test('상세 모델: 연결 환불(원거래 카테고리)·미연결 환불·�
 });
 
 test('카테고리 고르기: 켜진 것만, 수입은 수입 그룹만', () => {
-  assert.deepEqual(categoryOptions(categories, 'expense'), [{ group: '식비', items: [{ id: C_DINING, name: '외식' }] }]);
-  assert.deepEqual(categoryOptions(categories, 'income'), [{ group: '수입', items: [{ id: C_SALARY, name: '급여' }] }]);
+  const strip = (gs) => gs.map(({ id, ...g }) => (assert.ok(id), g)); // 그룹 id(카테고리 고르기 부품용)는 있기만 확인
+  assert.deepEqual(strip(categoryOptions(categories, 'expense')), [{ group: '식비', items: [{ id: C_DINING, name: '외식' }] }]);
+  assert.deepEqual(strip(categoryOptions(categories, 'income')), [{ group: '수입', items: [{ id: C_SALARY, name: '급여' }] }]);
   assert.match(categoryChangeText({ lines: [{}, {}] }, '외식').message, /2개로 나눈 금액이 모두 '외식'/);
   assert.match(categoryChangeText({ lines: [] }, '외식').message, /'외식'\(으\)로 분류/);
   assert.equal(changeDescription({ merchant_raw: '가'.repeat(300) }, '외식').length, 200);

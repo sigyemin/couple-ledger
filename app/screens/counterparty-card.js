@@ -7,7 +7,7 @@
 // =====================================================================
 import { h } from '../ui/dom.js';
 import { CHOICES, choiceOf } from './counterparty-model.js';
-import { categoryOptions } from './detail-model.js';
+import { categoryPicker } from './category-picker.js';
 
 let seq = 0;
 
@@ -29,7 +29,7 @@ export function choiceCard({ categories, cats, initial = null, direction = null,
     return { key: c.key, input: r, label: h('label', { class: 'radio' }, [r, c.label], doc) };
   });
   const pre = labelPrefix ? `${labelPrefix} ` : '';
-  const catSel = h('select', { class: 'field', attrs: { 'aria-label': `${pre}카테고리` } }, [], doc);
+  const catSel = categoryPicker({ categories, kind: 'expense', label: `${pre}카테고리`, doc });
   const catWrap = h('div', { class: 'form' }, [h('label', { class: 'field-label', text: '카테고리' }, [], doc), catSel], doc);
   const alias = h('input', { class: 'field', attrs: { 'aria-label': `${pre}보일 이름(선택)`, maxlength: '50', placeholder: '예: 집주인' } }, [], doc);
   alias.value = initial?.alias ?? '';
@@ -46,13 +46,9 @@ export function choiceCard({ categories, cats, initial = null, direction = null,
     const kind = c === 'income' ? 'income' : 'expense';
     if (catKind !== kind) {
       catKind = kind;
-      catSel.replaceChildren(
-        h('option', { text: '카테고리 고르기', attrs: { value: '' } }, [], doc),
-        ...categoryOptions(categories, kind).map((g) => h('optgroup', { attrs: { label: g.group } },
-          g.items.map((it) => h('option', { text: it.name, attrs: { value: it.id } }, [], doc)), doc)),
-      );
+      catSel.setKind(kind);
       const cur = initial?.suggested_category_id;
-      if (cur && [...catSel.options].some((o) => o.value === cur)) catSel.value = cur;
+      if (cur && !catSel.value) catSel.value = cur; // 고를 수 없는 id면 setter가 ''로 둔다
     }
     catWrap.hidden = !(c === 'expense' || c === 'income');
   };
@@ -75,7 +71,8 @@ export function choiceCard({ categories, cats, initial = null, direction = null,
     setDirection(d) { dir = d ?? ''; refresh(); },
     setDisabled(on) {
       disabled = on;
-      for (const x of [...radios.map((r) => r.input), catSel, alias]) x.disabled = on;
+      for (const x of [...radios.map((r) => r.input), alias]) x.disabled = on;
+      catSel.setDisabled(on);
       refresh();
     },
     /** 선택·카테고리가 바뀔 때 부를 함수(업로드 미리보기 다시 계산) */

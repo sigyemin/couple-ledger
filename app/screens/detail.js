@@ -23,6 +23,7 @@ import {
   editability, settlementChangeText, sharePatch, excludePatch, confirmPatch, linesDraft, validateLines, MAX_LINES,
 } from './detail-model.js';
 import { errorView } from './shell.js';
+import { categoryPicker } from './category-picker.js';
 import { readCandidates, readReviewStates, linkOne } from './refund.js';
 import {
   canEditValues, valuesDraft, linesPlan, buildValuesPatch, valuesConfirmText, chosenLines, valuesErrorText, editedFromFile, linesMismatch,
@@ -249,11 +250,7 @@ export async function renderDetail({ db, member, id, go, reload, isCurrent, onEr
     linesMismatch(row) ? h('p', { class: 'notice small', text: '나눈 금액이 안 맞아요. 금액 나누기로 거래 금액에 맞춰 주세요.' }, [], doc) : null,
   ], doc);
   if (m.canChangeCategory) {
-    const options = categoryOptions(categories, row.kind);
-    const pick = h('select', { class: 'field', attrs: { 'aria-label': '카테고리 고르기' } }, [
-      h('option', { text: '카테고리 바꾸기…', attrs: { value: '' } }, [], doc),
-      ...options.map((g) => h('optgroup', { attrs: { label: g.group } }, g.items.map((it) => h('option', { text: it.name, attrs: { value: it.id } }, [], doc)), doc)),
-    ], doc);
+    const pick = categoryPicker({ categories, kind: row.kind, label: '카테고리 바꾸기', placeholder: '카테고리 바꾸기…', doc });
     pick.addEventListener('change', async () => {
       const catId = pick.value;
       if (!catId) return;
@@ -267,7 +264,7 @@ export async function renderDetail({ db, member, id, go, reload, isCurrent, onEr
       if (r.error) { pick.value = ''; fail(r.error, { stage: STAGES.db_rpc, action: ACTIONS.bulk_edit }); return; }
       reload();
     });
-    classCard.append(h('label', { class: 'filter-field' }, [pick], doc));
+    classCard.append(h('div', { class: 'filter-field' }, [pick], doc));
   }
   if (ed.canSplit) classCard.append(splitEditor());
   if (ed.canRevertToOriginal) {
@@ -306,11 +303,7 @@ export async function renderDetail({ db, member, id, go, reload, isCurrent, onEr
     };
     const merge = radio('merge', '한 카테고리로 합치기');
     const resplit = radio('resplit', '저장 뒤 나누기 다시');
-    const options = categoryOptions(categories, row.kind);
-    const mergeCat = h('select', { class: 'field', attrs: { 'aria-label': '합칠 카테고리' } }, [
-      h('option', { text: '카테고리 고르기', attrs: { value: '' } }, [], doc),
-      ...options.map((g) => h('optgroup', { attrs: { label: g.group } }, g.items.map((it) => h('option', { text: it.name, attrs: { value: it.id } }, [], doc)), doc)),
-    ], doc);
+    const mergeCat = categoryPicker({ categories, kind: row.kind, label: '합칠 카테고리', doc });
     const choose = h('div', { class: 'form', attrs: { hidden: true, role: 'radiogroup', 'aria-label': '나눈 금액 처리' } }, [
       h('p', { class: 'notice small', text: '나눠 둔 금액의 합이 새 금액과 달라져요. 어떻게 할까요?' }, [], doc),
       merge.el, mergeCat, resplit.el,
@@ -385,14 +378,7 @@ export async function renderDetail({ db, member, id, go, reload, isCurrent, onEr
       sumLine.textContent = v.ok ? v.sumText : `${v.sumText} · ${v.message}`;
     };
     const lineRow = (d, i) => {
-      const sel = h('select', { class: 'field', attrs: { 'aria-label': `${i + 1}번째 줄 카테고리` } }, [
-        h('option', { text: '카테고리', attrs: { value: '' } }, [], doc),
-        ...options.map((g) => h('optgroup', { attrs: { label: g.group } }, g.items.map((it) => {
-          const o = h('option', { text: it.name, attrs: { value: it.id } }, [], doc);
-          if (it.id === d.categoryId) o.selected = true;
-          return o;
-        }), doc)),
-      ], doc);
+      const sel = categoryPicker({ categories, kind: row.kind, value: d.categoryId, label: `${i + 1}번째 줄 카테고리`, placeholder: '카테고리', doc });
       sel.addEventListener('change', () => { d.categoryId = sel.value; showSum(); });
       const amt = h('input', { class: 'field', attrs: { inputmode: 'numeric', 'aria-label': `${i + 1}번째 줄 금액`, maxlength: '20' } }, [], doc);
       amt.value = d.amountText;

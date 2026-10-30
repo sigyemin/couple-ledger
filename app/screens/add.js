@@ -14,6 +14,7 @@ import { todaySeoul } from '../core/format.js';
 import { dateRange } from '../core/validate.js';
 import { ADD_KINDS, sourceOptions, buildManualRow, manualRpcArgs, rpcRowId, monthOf, addConfirmText } from './add-model.js';
 import { categoryOptions, RANGE_TEXT } from './detail-model.js';
+import { categoryPicker } from './category-picker.js';
 import { noteForTxn } from './detail.js';
 import { errorView } from './shell.js';
 
@@ -81,19 +82,8 @@ export async function renderAdd({ db, member, query, go, isCurrent, onError }, d
   const time = input('시각(선택)', { type: 'time' });
   const merchant = input('가맹점·내용', { maxlength: '200', placeholder: '예: 동네 시장' });
   const amount = input('금액', { inputmode: 'numeric', maxlength: '20', placeholder: '원' });
-  const cat = h('select', { class: 'field', attrs: { 'aria-label': '카테고리(선택)' } }, [], doc);
-  const fillCats = () => {
-    const keep = cat.value;
-    cat.replaceChildren(
-      h('option', { text: '미분류로 두기', attrs: { value: '' } }, [], doc),
-      ...categoryOptions(categories, kind.value).map((g) => h('optgroup', { attrs: { label: g.group } },
-        g.items.map((it) => h('option', { text: it.name, attrs: { value: it.id } }, [], doc)), doc)),
-    );
-    cat.value = keep;
-    if (cat.value !== keep) cat.value = '';
-  };
-  fillCats();
-  kind.addEventListener('change', fillCats);
+  const cat = categoryPicker({ categories, kind: kind.value, label: '카테고리(선택)', emptyLabel: '미분류로 두기', doc });
+  kind.addEventListener('change', () => cat.setKind(kind.value));
   const shared = h('input', { attrs: { type: 'checkbox' } }, [], doc);
   shared.checked = true;
   const memo = h('textarea', { class: 'field memo', attrs: { 'aria-label': '메모(선택)', maxlength: '500', rows: '2' } }, [], doc);

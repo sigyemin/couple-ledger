@@ -18,6 +18,7 @@ import {
   periodRange, previewSummary, changeLine, applyResult, reapplyErrorText,
 } from './rules-model.js';
 import { errorView, rulesTabs } from './shell.js';
+import { categoryPicker } from './category-picker.js';
 import { subjectParticle } from './home-model.js';
 
 const RULE_COLUMNS = 'id,pattern,match_type,category_id,is_ambiguous,priority,is_active,created_by,created_at';
@@ -134,12 +135,10 @@ export async function renderRuleEdit({ db, member, id = null, go, isCurrent, onE
   const matchGroup = h('div', { class: 'radio-group', attrs: { role: 'radiogroup', 'aria-label': '일치 방식' } }, isRegex
     ? [h('p', { class: 'muted small', text: '정규식 규칙이에요. 화면에서는 글자와 방식을 바꿀 수 없어요(카테고리·우선 순서·끄기만).' }, [], doc)]
     : [radio('contains', '이 글자가 들어 있으면'), radio('exact', '이름이 똑같으면')], doc);
-  const cat = h('select', { class: 'field', attrs: { 'aria-label': '이 카테고리로' } }, [
-    h('option', { text: '카테고리 고르기', attrs: { value: '' } }, [], doc),
-    ...ruleCategoryOptions(categories, original?.category_id).map((g) => h('optgroup', { attrs: { label: g.group } },
-      g.items.map((it) => h('option', { text: it.name, attrs: { value: it.id } }, [], doc)), doc)),
-  ], doc);
-  cat.value = original?.category_id ?? '';
+  // 지금 규칙의 카테고리가 꺼졌거나 수입이면 '지금 값'으로 맨 앞에 남긴다(ruleCategoryOptions와 같은 규칙)
+  const keep = ruleCategoryOptions(categories, original?.category_id).filter((g) => g.group === '지금 값')
+    .map((g) => ({ id: 'keep', name: g.group, items: g.items.map((it) => ({ ...it, label: `지금 값 > ${it.name}` })) }));
+  const cat = categoryPicker({ categories, kind: 'expense', value: original?.category_id ?? '', label: '이 카테고리로', extra: keep, doc });
   const amb = h('input', { attrs: { type: 'checkbox', 'aria-label': '검토 대기로 두기' } }, [], doc);
   amb.checked = Boolean(original?.is_ambiguous);
   const pri = h('input', { class: 'field narrow', attrs: { 'aria-label': '우선 순서 (작을수록 먼저)', inputmode: 'numeric', maxlength: '4' } }, [], doc);
