@@ -74,7 +74,10 @@ test('화면 소스: 카드는 한 번 만들고 고침(목록 전체 다시 그
 
 test('리뷰 #59: 보일 이름도 규칙에(저장 직전 다시 읽음), 일반 지출이 아니면 카테고리 없음, 고르는 중 저절로 접히지 않음', () => {
   const row = src('screens/upload-cp-row.js');
-  assert.match(row, /alias\.addEventListener\('change', fire\);/);
+  // CL-072 ①: 보일 이름 change는 다시 정규화(fire)하지 않고 값 검사만 — 입력 직후 저장 첫 클릭이 잠긴 버튼에 버려지지 않게
+  assert.match(row, /alias\.addEventListener\('change', \(\) => aliasListeners\.forEach\(\(fn\) => fn\(\)\)\);/);
+  assert.doesNotMatch(row, /alias\.addEventListener\('change', fire\)/);
+  assert.match(src('screens/upload.js'), /card\.onAliasChange\(\(\) => \{ readCard\(f, c\); draw\(\); \}\);/);
   assert.match(row, /categoryId: select\.value === 'expense' \? \(cat\.value \|\| null\) : null/);
   const u = src('screens/upload.js');
   const save = u.slice(u.indexOf('async function saveAll()'));

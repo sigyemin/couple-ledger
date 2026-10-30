@@ -39,6 +39,7 @@ export const DETAIL_COLUMNS = [
   'refund_of_txn_id', 'batch_id', 'created_at', 'created_by', 'updated_at', 'updated_by', 'deleted_at', 'source_label',
   'payer_member_id', 'payer_name', 'lines', 'month_reviewed_at', 'is_changed_after_review',
   'is_uncategorized', 'inherited_category_id', 'card_kind', 'is_test_source',
+  'deduction_kind', 'beneficiary_member_id', // v0.22: v_transaction_detail에 생김(연말정산 카드가 따로 읽지 않게)
 ].join(',');
 const MINI = 'id,occurred_on,merchant_raw,amount';
 

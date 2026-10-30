@@ -2,7 +2,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  merchantGroups, groupSub, ruleFor, classifyText, classifyDescription, isTransferLike, sameRuleExists, samePatternRule, reapplyOrder, reapplyCount, bulkReapplyText,
+  merchantGroups, groupSub, ruleFor, classifyText, classifyDescription, isTransferLike, sameRuleExists, samePatternRule,
+  reapplyAllSummary, addSummary, monthList, splitRange, shouldSplit, rangeText, reapplyAllText,
 } from '../../app/screens/merchant-classify-model.js';
 import { readUncategorized } from '../../app/screens/merchant-classify.js';
 import { MAX_BULK } from '../../app/screens/list-model.js';
@@ -106,21 +107,25 @@ test('같은 규칙 있음: 방식·정리값 패턴·카테고리가 같고 켜
   assert.deepEqual(samePatternRule([], v), { same: null, other: null });
 });
 
-test('켜진 규칙 한 번에: 카테고리 켜진 규칙만, 적용 순서(priority, created_at, id), 바뀌는 건수, 문구', () => {
-  const cats = [{ id: 'c1', is_active: true }, { id: 'c2', is_active: false }];
-  const rule = (id, priority, created_at, o = {}) => ({ id, priority, created_at, category_id: 'c1', is_active: true, ...o });
-  const plan = reapplyOrder([
-    rule('r3', 10, '2026-10-02'), rule('r1', 10, '2026-10-01'), rule('r2', 5, '2026-10-09'),
-    rule('rx', 1, '2026-10-01', { category_id: 'c2' }), rule('ry', 1, '2026-10-01', { is_active: false }), rule('rz', 1, '2026-10-01', { category_id: null }),
-    rule('r0', 10, '2026-10-01'),
-  ], cats);
-  assert.deepEqual(plan.map((r) => r.id), ['r2', 'r0', 'r1', 'r3']);
-  assert.equal(reapplyCount([{ result: 'created' }, { result: 'updated' }, { result: 'unchanged' }, { result: 'manual_kept' }, { result: 'skipped_priority' }]), 2);
-  assert.equal(reapplyCount(null), 0);
-  const t = bulkReapplyText(66, 120, 10);
-  assert.match(t.message, /규칙 66개를 우선 순서대로/);
-  assert.match(t.message, /120건이 분류돼요/);
-  assert.match(t.message, /규칙 10개는 건너뛰어요/);
-  assert.doesNotMatch(bulkReapplyText(3, 5, 0).message, /건너뛰어요/);
-  assert.match(t.undoNote, /규칙별로 되돌릴/);
+test('켜진 규칙 한 번에(v0.22): result별 건수, 더하기, 달 목록·기간 반 나누기, 나눌 오류, 기간 글자, 확인 문구', () => {
+  const rows = ['created', 'created', 'updated', 'unchanged', 'manual_kept', 'skipped_no_category', 'skipped_no_category', 'mystery'].map((result) => ({ result }));
+  const s = reapplyAllSummary(rows);
+  assert.deepEqual(s, { created: 2, updated: 1, unchanged: 1, manual_kept: 1, skipped_no_category: 2, changed: 3 });
+  assert.deepEqual(reapplyAllSummary(null).changed, 0);
+  assert.equal(addSummary(s, s).changed, 6);
+  assert.equal(addSummary(null, s).created, 2);
+  assert.deepEqual(monthList('2025-11-01', '2026-02-01'), ['2025-11-01', '2025-12-01', '2026-01-01', '2026-02-01']);
+  assert.deepEqual(splitRange({ from: '2026-01-01', to: '2026-05-01' }), [{ from: '2026-01-01', to: '2026-03-01' }, { from: '2026-04-01', to: '2026-05-01' }]);
+  assert.equal(splitRange({ from: '2026-03-01', to: '2026-03-01' }), null, '한 달이면 더 못 나눔');
+  assert.equal(shouldSplit({ code: 'unknown', detail: { sqlState: '57014' } }), true);
+  assert.equal(shouldSplit({ code: 'bulk_invalid', detail: { sqlState: 'LG007' } }), true);
+  assert.equal(shouldSplit({ code: 'forbidden', detail: { sqlState: '42501' } }), false);
+  assert.equal(shouldSplit(null), false);
+  assert.deepEqual([rangeText({}), rangeText({ from: '2026-01-01', to: '2026-03-01' }), rangeText({ from: '2026-03-01', to: '2026-03-01' })], ['모든 달', '2026-01~2026-03', '2026-03']);
+  const one = reapplyAllText(s, [{ summary: s }]);
+  assert.match(one.message, /3건이 분류돼요\(새로 2건 · 바뀜 1건\)/);
+  assert.match(one.message, /직접 고친 거래 1건은 그대로/);
+  assert.match(one.message, /2건은 건너뛰어요/);
+  assert.match(one.undoNote, /하나로 남아요/);
+  assert.match(reapplyAllText(s, [{ summary: s }, { summary: s }, { summary: { changed: 0 } }]).undoNote, /기간을 2개로 나눠/);
 });

@@ -172,6 +172,7 @@ export async function renderUpload({ db, guard, member, fallbackMonth, isCurrent
       const card = cpRow({ g, categories }, doc);
       const c = { g, card, error: null, rule: null, get choice() { return card.choice; } };
       card.onChange(() => reparse(f));
+      card.onAliasChange(() => { readCard(f, c); draw(); }); // 다시 정규화하지 않음(저장 버튼을 잠그지 않게)
       return c;
     }) : [];
     f.cardsBuilt = false;

@@ -4,8 +4,8 @@
 // 쓰기(묶음마다): bulk_set_category(변경 기록 — 되돌리기 가능) → 확인함으로(transactions update, 월 검토와 같음)
 //               → '앞으로 같은 가맹점 자동 분류'면 category_rules insert(정리값 똑같으면, 확정 — 또는 사용자가 줄인 글자가 들어가면). 같은 규칙이 이미 있으면 건너뜀
 //               (만들기 전에 같은 규칙 — 방식·정리값 패턴·카테고리 — 이 켜져 있는지 조회: DB에 유일 제약 없음, 리뷰 ④)
-// - 맨 위 '켜진 규칙으로 한 번에 분류': 켜진 규칙을 적용 순서대로 reapply_category_rule 미리보기(p_apply=false) → 합계 확인 →
-//   바뀌는 게 있는 규칙만 적용(p_apply=true), 기간 전체. 중간 실패면 멈추고 몇 개 했는지 안내. 변경 묶음은 규칙마다 하나
+// - 맨 위 '켜진 규칙으로 한 번에 분류'(v0.22): reapply_all_category_rules 미리보기(p_apply=false) → result별 건수 확인 →
+//   적용(p_apply=true) — 변경 묶음 하나. 시간 초과(57014)·5,000건 초과(LG007)면 귀속월 기간을 반씩 나눠 다시(기간마다 묶음 하나)
 // - 통장 이체 행 묶음은 이름을 보여 주되 규칙은 이체 상대 규칙 쪽으로 안내
 // 의존: ui/dom.js, router.js, core/confirm.js, core/errors.js, screens/merchant-classify-model.js, screens/category-picker.js,
 //       screens/review-model.js(confirmBothPatch), screens/merchant-rule.js(규칙 저장), screens/shell.js
@@ -15,7 +15,8 @@ import { buildHash } from '../router.js';
 import { confirmDialog } from '../core/confirm.js';
 import { STAGES, ACTIONS } from '../core/errors.js';
 import {
-  merchantGroups, groupSub, ruleFor, classifyText, classifyDescription, reapplyOrder, reapplyCount, bulkReapplyText,
+  merchantGroups, groupSub, ruleFor, classifyText, classifyDescription,
+  reapplyAllSummary, addSummary, splitRange, shouldSplit, rangeText, reapplyAllText,
 } from './merchant-classify-model.js';
 import { reapplyErrorText } from './rules-model.js';
 import { categoryPicker } from './category-picker.js';
@@ -188,49 +189,83 @@ export async function renderMerchantClassify({ db, member, reload, isCurrent, on
       locked = null;
     }
   };
+  // 거래가 든 귀속월 처음·끝(기간을 나눌 때만 읽는다)
+  async function monthSpan() {
+    const one = (ascending) => db.select('v_transaction_detail', {
+      columns: 'period_month', filters: [{ col: 'deleted_at', op: 'is', value: null }, eq('is_test_source', false)],
+      order: [{ col: 'period_month', ascending }], range: { from: 0, to: 0 },
+    });
+    const [a, b] = await Promise.all([one(true), one(false)]);
+    if (a.error || b.error) return { error: a.error ?? b.error };
+    const from = a.data?.[0]?.period_month;
+    const to = b.data?.[0]?.period_month;
+    return from && to ? { data: { from: String(from).slice(0, 10), to: String(to).slice(0, 10) } } : { data: null };
+  }
+
+  /**
+   * 미리보기: 모든 달을 한 번에. 시간 초과(57014)·5,000건 초과(LG007)면 기간을 반씩 나눠 다시(달 하나까지)
+   * @returns {{ ranges: { from, to, summary }[] } | { error, range }}
+   */
+  async function previewAll() {
+    const call = (r) => db.rpc('reapply_all_category_rules', { p_apply: false, p_from_month: r.from ?? null, p_to_month: r.to ?? null }, { retry: true });
+    const first = await call({});
+    if (!first.error) return { ranges: [{ from: null, to: null, summary: reapplyAllSummary(first.data) }] };
+    if (!shouldSplit(first.error)) return { error: first.error, range: {} };
+    const span = await monthSpan();
+    if (span.error) return { error: span.error, range: {} };
+    if (!span.data) return { error: first.error, range: {} };
+    const ranges = [];
+    const queue = splitRange(span.data) ?? [];
+    if (!queue.length) return { error: first.error, range: span.data };
+    while (queue.length) {
+      const r = queue.shift();
+      say(`거래가 많아 기간을 나눠 미리 보는 중… ${rangeText(r)}`);
+      const pv = await call(r);
+      if (!pv.error) { ranges.push({ ...r, summary: reapplyAllSummary(pv.data) }); continue; }
+      const halves = shouldSplit(pv.error) ? splitRange(r) : null;
+      if (!halves) return { error: pv.error, range: r };
+      queue.unshift(...halves);
+    }
+    return { ranges };
+  }
+
+  // 켜진 규칙으로 한 번에 분류(v0.22): reapply_all_category_rules 미리보기(p_apply=false) → 확인 → 적용(p_apply=true). 변경 묶음은 기간마다 하나
   bulkBtn.addEventListener('click', async () => {
     lockAll(true);
-    const rr = await db.select('category_rules', {
-      columns: 'id,pattern,match_type,category_id,is_active,priority,created_at',
-      filters: [eq('is_active', true)],
-      order: [{ col: 'priority', ascending: true }, { col: 'created_at', ascending: true }, { col: 'id', ascending: true }],
-    });
-    if (rr.error) { lockAll(false); fail(rr.error, { stage: STAGES.list }); return; }
-    const plan = reapplyOrder(rr.data, categories);
-    if (!plan.length) { lockAll(false); say('켜진 가맹점 규칙이 없어요. 규칙·카테고리에서 만들어 주세요.', true); return; }
-    const counts = [];
-    for (const [i, rule] of plan.entries()) {
-      say(`미리보기 ${i + 1}/${plan.length} · “${rule.pattern}”`);
-      const pv = await db.rpc('reapply_category_rule', { p_rule_id: rule.id, p_apply: false, p_from_month: null, p_to_month: null }, { retry: true });
-      if (pv.error) {
-        lockAll(false);
-        const code = onError?.(pv.error, { stage: STAGES.db_rpc });
-        say(`규칙 “${rule.pattern}” 미리보기에서 멈췄어요: ${reapplyErrorText(pv.error) ?? pv.error.message}${code ? ` (오류 번호 ${code})` : ''}`, true);
-        return;
-      }
-      counts.push(reapplyCount(pv.data));
+    say('미리 보는 중…');
+    const pv = await previewAll();
+    if (pv.error) {
+      lockAll(false);
+      const code = onError?.(pv.error, { stage: STAGES.db_rpc });
+      say(`미리보기에서 멈췄어요(${rangeText(pv.range)}): ${reapplyErrorText(pv.error) ?? pv.error.message}${code ? ` (오류 번호 ${code})` : ''}`, true);
+      return;
     }
-    const todo = plan.filter((_, i) => counts[i] > 0);
-    const total = counts.reduce((s, n) => s + n, 0);
-    if (!todo.length) { lockAll(false); say(`켜진 규칙 ${plan.length}개로 바뀌는 거래가 없어요.`); return; }
+    const total = pv.ranges.reduce((acc, r) => addSummary(acc, r.summary), null);
+    if (!total.changed) {
+      lockAll(false);
+      say(`켜진 규칙으로 바뀌는 거래가 없어요.${total.manual_kept ? ` (직접 고친 거래 ${total.manual_kept}건은 그대로)` : ''}${total.skipped_no_category ? ` (카테고리가 꺼진 규칙 때문에 ${total.skipped_no_category}건 건너뜀)` : ''}`);
+      return;
+    }
     say('');
-    if (!(await confirmDialog({ ...bulkReapplyText(plan.length, total, plan.length - todo.length), confirmLabel: '한 번에 분류', doc }))) { lockAll(false); return; }
-    let doneRules = 0;
+    if (!(await confirmDialog({ ...reapplyAllText(total, pv.ranges), confirmLabel: '한 번에 분류', doc }))) { lockAll(false); return; }
+    const todo = pv.ranges.filter((r) => r.summary.changed > 0);
     let changed = 0;
-    for (const rule of todo) {
-      say(`분류하는 중 ${doneRules + 1}/${todo.length} · “${rule.pattern}”`);
-      const r = await db.rpc('reapply_category_rule', {
-        p_rule_id: rule.id, p_apply: true, p_from_month: null, p_to_month: null, p_description: `규칙 “${rule.pattern}” 한 번에 분류`.slice(0, 200),
+    let doneRanges = 0;
+    for (const r of todo) {
+      if (todo.length > 1) say(`분류하는 중 ${doneRanges + 1}/${todo.length} · ${rangeText(r)}`);
+      // 설명에는 규칙 이름·가맹점 등 값을 넣지 않는다(기간만)
+      const res = await db.rpc('reapply_all_category_rules', {
+        p_apply: true, p_from_month: r.from, p_to_month: r.to, p_description: `켜진 규칙 한 번에 분류 · ${rangeText(r)}`,
       });
-      if (r.error) {
-        const code = onError?.(r.error, { stage: STAGES.db_rpc });
-        done(`규칙 ${todo.length}개 중 ${doneRules}개를 적용했어요(${changed}건). “${rule.pattern}”에서 멈췄어요: ${reapplyErrorText(r.error) ?? r.error.message}${code ? ` (오류 번호 ${code})` : ''}`, true);
+      if (res.error) {
+        const code = onError?.(res.error, { stage: STAGES.db_rpc });
+        done(`${todo.length > 1 ? `기간 ${todo.length}개 중 ${doneRanges}개를 적용했어요(${changed}건). ${rangeText(r)}에서 멈췄어요: ` : '분류하지 못했어요: '}${reapplyErrorText(res.error) ?? res.error.message}${code ? ` (오류 번호 ${code})` : ''}`, true);
         return;
       }
-      doneRules += 1;
-      changed += reapplyCount(r.data);
+      doneRanges += 1;
+      changed += reapplyAllSummary(res.data).changed;
     }
-    done(`켜진 규칙 ${doneRules}개로 ${changed}건 분류했어요. 변경 기록에서 규칙별로 되돌릴 수 있어요.`);
+    done(`켜진 규칙으로 ${changed}건 분류했어요. 변경 기록에서 되돌릴 수 있어요.`);
   });
 
   const total = groups.reduce((s, g) => s + g.total, 0);
