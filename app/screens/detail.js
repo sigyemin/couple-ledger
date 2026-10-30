@@ -24,6 +24,8 @@ import {
 } from './detail-model.js';
 import { errorView } from './shell.js';
 import { categoryPicker } from './category-picker.js';
+import { renderTxnDeduction } from './detail-deduction.js';
+import { canEditDeduction } from './deduction-edit-model.js';
 import { readCandidates, readReviewStates, linkOne } from './refund.js';
 import {
   canEditValues, valuesDraft, linesPlan, buildValuesPatch, valuesConfirmText, chosenLines, valuesErrorText, editedFromFile, linesMismatch,
@@ -140,6 +142,8 @@ export async function renderDetail({ db, member, id, go, reload, isCurrent, onEr
     say(carryNotice.get(row.id), true);
     carryNotice.delete(row.id);
   }
+  // 연말정산 카드(CL-062 ②)는 함께 읽기 시작(실패해도 그 카드만)
+  const deduction = canEditDeduction(row) ? renderTxnDeduction({ db, row, members, member, reload, onError, say }, doc) : null;
   // text: 경로에 맞는 안내(없으면 휴지통 LG005 안내 또는 일반 문구). v0.18·v0.19: 휴지통 거래는 값·메모·라인 모두 LG005
   const fail = (err, extra, text = null) => {
     const code = onError?.(err, { txnId: row.id, ...extra });
@@ -511,8 +515,10 @@ export async function renderDetail({ db, member, id, go, reload, isCurrent, onEr
     ? button('확인했어요', 'primary', () => updateRow(confirmPatch(member.memberId)))
     : null;
 
+  const dedCard = deduction ? await deduction : null;
+  if (!isCurrent()) return null;
   const main = h('main', { class: 'screen' }, [
-    headOf('거래 상세'), hero, status, info, linkCard, classCard, settleCard, memoCard, historyCard, confirmBtn,
+    headOf('거래 상세'), hero, status, info, linkCard, classCard, settleCard, dedCard, memoCard, historyCard, confirmBtn,
     m.deleted
       ? h('a', { class: 'row-link soft', attrs: { href: buildHash('trash') } }, [
         h('span', { text: '휴지통에 있는 거래예요' }, [], doc), h('strong', { text: '휴지통에서 되살리기 ›' }, [], doc),

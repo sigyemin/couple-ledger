@@ -38,9 +38,10 @@ export const INSERT_COLUMNS = Object.freeze({
 export const UPDATE_COLUMNS = Object.freeze({
   // 거래 상세·휴지통·월 검토·환불 연결이 쓰는 칸 + 금액·날짜·시각·가맹점 고치기(U-17 D2, CL-045).
   // 종류·결제수단·공동 비율·dedup_key·raw·연결 칸은 고치지 않는다(dedup_key를 두면 같은 파일을 다시 올려도 다시 안 들어옴)
+  // + 연말정산 공제 항목·의료비 대상자(CL-062 ② — 정산 값 아님)
   transactions: Object.freeze(['memo', 'review_status', 'is_shared', 'is_excluded', 'exclude_reason', 'deleted_at', 'deleted_by', 'updated_by',
-    'amount', 'occurred_on', 'occurred_time', 'merchant_raw', 'merchant_norm']),
-  categories: Object.freeze(['name', 'sort_order', 'is_active', 'parent_id']),
+    'amount', 'occurred_on', 'occurred_time', 'merchant_raw', 'merchant_norm', 'deduction_kind', 'beneficiary_member_id']),
+  categories: Object.freeze(['name', 'sort_order', 'is_active', 'parent_id', 'default_deduction_kind', 'tax_credit_kind']),
   category_rules: Object.freeze(['pattern', 'match_type', 'category_id', 'is_ambiguous', 'priority', 'is_active']),
   // 이름·범위(match_*·source_id·direction)는 고치지 않는다 — 바꾸려면 끄고 새로 추가
   counterparty_rules: Object.freeze(['alias', 'member_id', 'suggested_kind', 'suggested_exclude_reason', 'suggested_category_id',
@@ -55,6 +56,15 @@ export const COLUMN_VALUES = Object.freeze({
   category_rules: Object.freeze({ match_type: Object.freeze(['contains', 'exact']) }),
   counterparty_rules: Object.freeze({ match_type: Object.freeze(['exact', 'contains']) }), // DB CHECK와 같음
   payment_sources: Object.freeze({ kind: Object.freeze(['credit_card', 'bank_account', 'cash']), last4: (v) => v === null || /^[0-9]{4}$/.test(v) }),
+  // 연말정산 칸(CL-062 ②): DB CHECK와 같은 목록 + null(자동)
+  transactions: Object.freeze({
+    deduction_kind: (v) => v === null
+      || ['credit_card', 'check_card', 'cash_receipt', 'public_transit', 'traditional_market', 'culture', 'excluded', 'none'].includes(v),
+  }),
+  categories: Object.freeze({
+    default_deduction_kind: (v) => v === null || ['public_transit', 'traditional_market', 'culture', 'excluded'].includes(v),
+    tax_credit_kind: (v) => v === null || ['medical', 'rent', 'insurance'].includes(v),
+  }),
 });
 function assertValues(table, row) {
   for (const [col, allowed] of Object.entries(COLUMN_VALUES[table] ?? {})) {
