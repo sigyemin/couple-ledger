@@ -137,6 +137,7 @@ export function valuesErrorText(err, row) {
   }
   if (code === 'LG002') return '가맹점에 카드·계좌·전화번호로 보이는 숫자가 있어 저장하지 않았어요.';
   if (code === 'LG005') return '휴지통에 있는 거래라 바꿀 수 없어요. 새로고침해 확인해 주세요.'; // v0.18
+  if (code === '23514') return '날짜는 2000-01-01부터 오늘에서 1년 뒤까지만 넣을 수 있어요.'; // v0.19 CHECK·트리거
   return null;
 }
 

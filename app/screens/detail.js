@@ -19,7 +19,7 @@ import { todaySeoul } from '../core/format.js';
 import { STAGES, ACTIONS } from '../core/errors.js';
 import { categoryIndex } from './list-model.js';
 import {
-  buildDetailModel, categoryOptions, TRASHED_EDIT_TEXT, categoryChangeText, changeDescription, trashPlan, trashPatch,
+  buildDetailModel, categoryOptions, TRASHED_EDIT_TEXT, RANGE_TEXT, categoryChangeText, changeDescription, trashPlan, trashPatch,
   editability, settlementChangeText, sharePatch, excludePatch, confirmPatch, linesDraft, validateLines, MAX_LINES,
 } from './detail-model.js';
 import { errorView } from './shell.js';
@@ -27,7 +27,7 @@ import { readCandidates, readReviewStates, linkOne } from './refund.js';
 import {
   canEditValues, valuesDraft, linesPlan, buildValuesPatch, valuesConfirmText, chosenLines, valuesErrorText, editedFromFile, linesMismatch,
 } from './detail-edit-model.js';
-import { isSuggestTarget, suggestFrom, suggestionText, reviewedNote } from './refund-model.js';
+import { isSuggestTarget, suggestFrom, suggestionText, reviewedNote, unlinkConfirmText } from './refund-model.js';
 import { historyEntries, HISTORY_NOTE, EDIT_LIMIT, ITEM_LIMIT } from './history-model.js';
 
 export const DETAIL_COLUMNS = [
@@ -141,7 +141,9 @@ export async function renderDetail({ db, member, id, go, reload, isCurrent, onEr
   }
   const fail = (err, extra) => {
     const code = onError?.(err, { txnId: row.id, ...extra });
-    say(`${err.message}${code ? ` (오류 번호 ${code})` : ''}`, true);
+    // v0.18·v0.19: 휴지통 거래는 값·메모·라인 모두 바꿀 수 없음(LG005), 날짜 범위·메모 길이는 DB가 23514
+    const text = err.code === 'immutable' ? TRASHED_EDIT_TEXT : err.detail?.sqlState === '23514' ? RANGE_TEXT : err.message;
+    say(`${text}${code ? ` (오류 번호 ${code})` : ''}`, true);
   };
   const busy = (on) => {
     for (const el of main.querySelectorAll('button, select, textarea, input')) el.disabled = on;
@@ -215,6 +217,20 @@ export async function renderDetail({ db, member, id, go, reload, isCurrent, onEr
     links.push(h('a', { class: 'row-link soft', attrs: { href: buildHash('refund', { id: row.id }) } }, [
       h('span', { text: unlinkedRefund ? '원거래 연결 안 됨 · 원거래 찾기' : '원거래 바꾸기' }, [], doc), h('strong', { text: '›' }, [], doc),
     ], doc));
+    // 연결 끊기(v0.19 unlink_refund, 사용자 결정 D5): 확인 창 → 끊고 다시 읽기. 이미 끊겼으면(hint not_linked) 안내 후 다시 읽기
+    if (!unlinkedRefund) {
+      links.push(h('div', { class: 'btn-row' }, [button('연결 끊기', 'secondary', async () => {
+        busy(true);
+        const states = await readReviewStates(db);
+        if (!(await confirmDialog({ ...unlinkConfirmText(row, states), confirmLabel: '끊기', doc }))) { busy(false); return; }
+        const r = await db.rpc('unlink_refund', { p_refund_id: row.id });
+        busy(false);
+        if (r.error?.detail?.hint === 'not_linked') { carryNotice.set(row.id, '이미 연결이 없어요. 다시 읽었어요.'); reload(); return; }
+        if (r.error) { fail(r.error, { stage: STAGES.db_rpc }); return; }
+        carryNotice.set(row.id, '연결을 끊었어요. 원거래 찾기로 다시 연결할 수 있어요.');
+        reload();
+      })], doc));
+    }
   }
   const linkCard = links.length ? h('section', { class: 'card' }, [h('h2', { class: 'card-title', text: '연결' }, [], doc), ...links], doc) : null;
 

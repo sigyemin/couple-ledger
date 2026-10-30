@@ -106,7 +106,7 @@ export function deleteErrorText(err) {
 export function categoryErrorText(err) {
   const s = err?.detail?.sqlState;
   if (s === 'LG004') return '기본 카테고리는 지울 수 없어요. 끄기(사용 안 함)로 바꿔 주세요.';
-  if (s === 'LG005') return '기본 카테고리는 다른 그룹으로 옮기거나 시스템 값을 바꿀 수 없어요.';
+  if (s === 'LG005') return '기본 카테고리는 다른 그룹으로 옮기거나 시스템 값을 바꿀 수 없고, 카테고리 번호는 바꿀 수 없어요.'; // v0.19: id 변경도 LG005
   if (s === '23514') return '카테고리는 그룹 → 항목 2단계까지만 되고, 지출과 수입 사이로는 옮길 수 없어요.';
   return null;
 }

@@ -13,7 +13,7 @@ import { STAGES } from '../core/errors.js';
 import { todaySeoul } from '../core/format.js';
 import { dateRange } from '../core/validate.js';
 import { ADD_KINDS, sourceOptions, buildManualRow, manualRpcArgs, rpcRowId, monthOf, addConfirmText } from './add-model.js';
-import { categoryOptions } from './detail-model.js';
+import { categoryOptions, RANGE_TEXT } from './detail-model.js';
 import { noteForTxn } from './detail.js';
 import { errorView } from './shell.js';
 
@@ -145,7 +145,11 @@ export async function renderAdd({ db, member, query, go, isCurrent, onError }, d
     const id = rpcRowId(ins.data);
     if (ins.error || !id) {
       busy(false);
-      if (ins.error) say(`${ins.error.message} (오류 번호 ${onError?.(ins.error, { stage: STAGES.db_rpc }) ?? ''})`, true);
+      if (ins.error) {
+        // v0.19 CHECK(23514): 날짜 범위·메모 길이 — 화면 검사와 같지만 DB가 최종 판정
+        const text = ins.error.detail?.sqlState === '23514' ? RANGE_TEXT : ins.error.message;
+        say(`${text} (오류 번호 ${onError?.(ins.error, { stage: STAGES.db_rpc }) ?? ''})`, true);
+      }
       else say('추가하지 못했어요. 새로고침해 주세요.', true);
       return;
     }
