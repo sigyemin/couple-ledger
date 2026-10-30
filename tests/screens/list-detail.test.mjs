@@ -5,7 +5,7 @@ import {
   capNotice, MAX_ROWS, parseListFilter, filterQuery, categoryIndex, filterRows, summarize, categoryLabel, rowView, groupByDay, hasFilter,
 } from '../../app/screens/list-model.js';
 import {
-  buildDetailModel, categoryOptions, categoryChangeText, changeDescription, trashPlan, trashPatch, monthState, classification,
+  buildDetailModel, categoryOptions, keptLineCategories, categoryChangeText, changeDescription, trashPlan, trashPatch, monthState, classification,
   editability, settlementChangeText, sharePatch, excludePatch, confirmPatch, linesDraft, validateLines, MAX_LINES,
 } from '../../app/screens/detail-model.js';
 import { amount as checkAmount, text as checkText, exclusion } from '../../app/core/validate.js';
@@ -178,6 +178,18 @@ test('상세 모델: 연결 환불(원거래 카테고리)·미연결 환불·�
   const ex = buildDetailModel({ ...detailRow, ...rows[3], exclude_reason: 'card_bill' }, { cats: ctx.cats, members });
   assert.deepEqual([ex.settle, ex.canChangeCategory, ex.tone], [[['집계', '제외 · 카드 대금']], false, 'excluded']);
   assert.equal(monthState({ period_month: '2026-10-01', month_reviewed_at: 'x', is_changed_after_review: false }), '10월 확인 완료');
+});
+
+test('나누기 줄의 고를 수 없는 지금 카테고리 → 지금 값 묶음(꺼짐 표시), 고를 수 있는 것은 빼고', () => {
+  const rows = [
+    { id: 'g1', parent_id: null, name: '식비', is_active: true }, { id: 'c1', parent_id: 'g1', name: '야식', is_active: false },
+    { id: 'c2', parent_id: 'g1', name: '외식', is_active: true }, { id: 'g9', parent_id: null, name: '수입', is_active: true },
+    { id: 'c9', parent_id: 'g9', name: '급여', is_active: true },
+  ];
+  const draft = [{ categoryId: 'c1' }, { categoryId: 'c2' }, { categoryId: 'c9' }, { categoryId: 'c1' }, { categoryId: '' }, { categoryId: 'gone' }];
+  assert.deepEqual(keptLineCategories(draft, new Set(['c2']), rows), [{ id: 'keep', name: '지금 값', items: [
+    { id: 'c1', name: '(꺼짐) 야식', label: '(꺼짐) 식비 > 야식' }, { id: 'c9', name: '(지금 값) 급여', label: '(지금 값) 수입 > 급여' }] }]);
+  assert.deepEqual(keptLineCategories([{ categoryId: 'c2' }], new Set(['c2']), rows), []);
 });
 
 test('카테고리 고르기: 켜진 것만, 수입은 수입 그룹만', () => {

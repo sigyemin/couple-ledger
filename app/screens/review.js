@@ -117,6 +117,7 @@ export async function renderReview({ db, member, monthStart, reload, isCurrent, 
   // 분류가 필요해요
   const groups = uncategorizedGroups(rows);
   const classifyCard = card(`분류가 필요해요${groups.length ? ` · ${groups.reduce((s, g) => s + g.total, 0)}건` : ''}`, [
+    link('모든 달을 가맹점별로 분류하기(규칙도 함께)', buildHash('classify')), // CL-061
     groups.length === 0 ? h('p', { class: 'muted', text: '분류가 필요한 거래가 없어요' }, [], doc)
       : h('ul', { class: 'review-groups' }, groups.map((g) => {
         const sel = categoryPicker({ categories, kind: g.kind, label: `${g.merchant} 카테고리`, doc });

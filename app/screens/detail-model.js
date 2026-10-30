@@ -132,6 +132,27 @@ export function categoryOptions(categories, kind) {
   })).filter((g) => g.items.length > 0);
 }
 
+/**
+ * 나누기 줄의 지금 카테고리 중 고를 수 없는 것(꺼짐 등) → 카테고리 고르기 부품의 맨 앞 '지금 값' 묶음
+ * @param draft linesDraft 줄들 { categoryId }, allowed 고를 수 있는 id Set, categories categories 행
+ *   이름 앞 꼬리표: 꺼진 카테고리는 '(꺼짐)', 켜졌지만 이 종류에서 고를 수 없는 것(예: 지출 거래의 수입 카테고리)은 '(지금 값)'
+ */
+export function keptLineCategories(draft, allowed, categories) {
+  const byId = new Map((categories ?? []).map((c) => [c.id, c]));
+  const ids = [...new Set(draft.map((d) => d.categoryId).filter((id) => id && !allowed.has(id) && byId.has(id)))];
+  if (!ids.length) return [];
+  return [{
+    id: 'keep', name: '지금 값',
+    items: ids.map((id) => {
+      const c = byId.get(id);
+      const parent = c.parent_id ? byId.get(c.parent_id) : null;
+      const off = c.is_active === false || parent?.is_active === false;
+      const tag = off ? '(꺼짐)' : '(지금 값)';
+      return { id, name: `${tag} ${c.name}`, label: `${tag} ${parent ? `${parent.name} > ` : ''}${c.name}` };
+    }),
+  }];
+}
+
 /** 분류 바꾸기 확인 문구. 나눈 거래면 모든 라인이 한 카테고리가 됨을 알린다 */
 export function categoryChangeText(row, categoryName) {
   const n = Array.isArray(row.lines) ? row.lines.length : 0;
