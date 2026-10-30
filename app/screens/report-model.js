@@ -12,6 +12,8 @@ import { addMonths, buildHash } from '../router.js';
 import { compareText } from './home-model.js';
 
 export { compareText };
+// 기본 달 = 지난달(서울 기준, 1월이면 전년 12월) — 정산·월 검토와 같은 함수 (사용자 결정 10-30)
+export { defaultSettleMonth as defaultReportMonth } from './settle-model.js';
 
 const num = (v) => {
   const n = Number(v ?? 0);
