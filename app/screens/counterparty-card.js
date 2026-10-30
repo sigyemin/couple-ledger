@@ -14,10 +14,11 @@ let seq = 0;
 /**
  * @param {{ categories, cats(categoryIndex), initial?: 규칙 행, direction?: 'out'|'in'|null, later?: boolean }} o
  *   labelPrefix = 한 화면에 카드가 여러 장일 때 칸 이름 앞에 붙이는 말(예: 상대 이름)
+ *   rulesAllowed = false면 '나중에'만 고를 수 있다(규칙으로 쓰기엔 너무 짧은 이름 — 업로드 리뷰 PR #30)
  *   later = 맨 앞에 '나중에'(규칙 만들지 않음 — 업로드 미리보기, v0.1 4-2) 선택지를 두고 기본으로 고른다
  * @returns {{ el, read(): { choice, categoryId, alias }, setDirection(dir), setDisabled(on) }}
  */
-export function choiceCard({ categories, cats, initial = null, direction = null, later = false, labelPrefix = '' }, doc = globalThis.document) {
+export function choiceCard({ categories, cats, initial = null, direction = null, later = false, labelPrefix = '', rulesAllowed = true }, doc = globalThis.document) {
   const name = `cp-choice-${++seq}`;
   const now = initial ? choiceOf(initial, cats) : { key: later ? 'later' : 'expense', label: '' };
   let dir = direction ?? '';
@@ -38,7 +39,8 @@ export function choiceCard({ categories, cats, initial = null, direction = null,
   const picked = () => radios.find((r) => r.input.checked)?.key ?? null;
   const refresh = () => {
     const income = radios.find((r) => r.key === 'income').input;
-    income.disabled = disabled || dir === 'out';
+    income.disabled = disabled || dir === 'out' || !rulesAllowed;
+    for (const r of radios) if (r.key !== 'later') r.input.disabled = disabled || !rulesAllowed || (r.key === 'income' && dir === 'out');
     if (dir === 'out' && income.checked) income.checked = false;
     const c = picked();
     const kind = c === 'income' ? 'income' : 'expense';

@@ -10,6 +10,7 @@
 // =====================================================================
 import { won, month as monthLabel } from '../core/format.js';
 import { matchNorm } from '../import/formats.js';
+import { MASK_TEXT } from '../core/sensitive.js';
 
 export const MAX_FILES = 12;
 export const KEY_CHUNK = 100; // 중복 키 조회 한 번에 넣는 수
@@ -109,7 +110,9 @@ export function failedRows(res) {
 /**
  * 새 이체 상대 묶음(v0.1 4-2 ②): 통장 행 중 규칙에 안 맞은 행(newCounterparty)을 (방향, 설명 정리값)으로 묶는다. 건수 많은 순
  * 방향은 정규화 기본값에서 온다(규칙이 없으면 out → 지출, in → 수입)
- * @returns {{ key, text, direction, count, totalText }[]}
+ * variantCount = 가림 전 설명이 몇 가지였는지(2 이상이면 숫자 가림으로 서로 다른 설명이 한 카드가 됨 — 경고, 리뷰 PR #30)
+ * ruleAllowed = 가림 표시를 빼고 2글자 이상일 때만 규칙을 만들 수 있다(너무 넓은 규칙 방지)
+ * @returns {{ key, text, direction, count, totalText, variantCount, ruleAllowed }[]}
  */
 export function counterpartyGroups(rows) {
   const groups = new Map();
@@ -119,13 +122,17 @@ export function counterpartyGroups(rows) {
     if (!norm) continue;
     const direction = r.kind === 'income' ? 'in' : 'out';
     const key = `${direction}|${norm}`;
-    const g = groups.get(key) ?? { key, text: r.merchant_raw, direction, count: 0, total: 0 };
+    const g = groups.get(key) ?? { key, text: r.merchant_raw, direction, count: 0, total: 0, variants: new Set() };
     g.count += 1;
     g.total += r.amount;
+    g.variants.add(r.merchantVariant ?? 0);
     groups.set(key, g);
   }
   return [...groups.values()].sort((a, b) => b.count - a.count || b.total - a.total || a.text.localeCompare(b.text))
-    .map(({ total, ...g }) => ({ ...g, totalText: won(total) }));
+    .map(({ total, variants, ...g }) => ({
+      ...g, totalText: won(total), variantCount: variants.size,
+      ruleAllowed: [...matchNorm(g.text.split(MASK_TEXT).join(''))].length >= 2,
+    }));
 }
 
 /** 고른 값 → 규칙 행(기본 범위 = 그 통장 + 같은 방향, 이름이 똑같으면). 미리보기용 draft는 id·created_at을 앞에 둬 기존 규칙보다 뒤에 온다 */

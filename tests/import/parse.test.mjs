@@ -310,7 +310,10 @@ test('새 이체 상대 후보: 통장 행 중 행 규칙·이체 상대 규칙�
   assert.equal(some.rows.filter((x) => x.newCounterparty).length, 1);
   const card = await parseFile(XLSX, bookBytes(sheetB(), 'xls'), { format: FORMAT_B, sourceId: SOURCE });
   assert.equal(card.rows.filter((x) => x.newCounterparty).length, 0); // 카드는 대상 아님
-  for (const row of toRpcRows(none.rows)) assert.ok(!('newCounterparty' in row));
+  for (const row of toRpcRows(none.rows)) assert.ok(!('newCounterparty' in row) && !('merchantVariant' in row));
+  // 가림 전 설명별 번호: 김가짜 + 가짜 번호(가려짐) 1개, 이시험 2행은 같은 번호
+  const v = none.rows.filter((x) => x.newCounterparty).map((x) => x.merchantVariant);
+  assert.deepEqual([v[0] !== v[1], v[1] === v[2]], [true, true]);
 });
 
 // ---------------------------------------------------------------- 리뷰 반영 (PR #6)

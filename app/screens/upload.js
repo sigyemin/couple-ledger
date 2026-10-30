@@ -131,7 +131,7 @@ export async function renderUpload({ db, guard, member, monthStart, isCurrent, o
     f.keys = keys.data;
     f.preview = previewOf(f.parsed, f.keys);
     f.cards = src.kind === 'bank_account' ? counterpartyGroups(f.parsed.rows).map((g) => {
-      const card = choiceCard({ categories, cats, direction: g.direction, later: true, labelPrefix: g.text }, doc);
+      const card = choiceCard({ categories, cats, direction: g.direction, later: true, labelPrefix: g.text, rulesAllowed: g.ruleAllowed }, doc);
       const c = { g, card, error: null, rule: null };
       card.onChange(() => reparse(f));
       return c;
@@ -147,7 +147,7 @@ export async function renderUpload({ db, guard, member, monthStart, isCurrent, o
     c.error = null;
     c.rule = null;
     if (input.choice === 'later') return;
-    const names = checkNames({ matchText: null, alias: input.alias });
+    const names = checkNames({ matchText: c.g.text, alias: input.alias }); // 이름도 길이(100자)·민감번호 검사(리뷰 PR #30 낮음 1)
     if (!names.ok) { c.error = names.message; return; }
     const v = choiceValues({
       choice: input.choice, categoryId: input.categoryId, direction: c.g.direction,
@@ -157,8 +157,27 @@ export async function renderUpload({ db, guard, member, monthStart, isCurrent, o
     c.rule = counterpartyRule(c.g, f.sourceId, v.value, names.value.alias);
   }
 
-  /** 카드 값으로 다시 정규화(미리보기 숫자 반영). 늦게 온 앞 결과는 버린다 */
+  /**
+   * 카드 값으로 다시 정규화(미리보기 숫자 반영). 한 파일에 Worker는 한 번에 하나만(리뷰 PR #30 낮음 2):
+   * 도는 중에 또 바뀌면 끝난 뒤 마지막 값으로 한 번 더. 도는 동안 저장 버튼은 꺼진다
+   */
   async function reparse(f) {
+    f.cards.forEach((c) => readCard(f, c));
+    if (f.reparsing) { f.reparseAgain = true; draw(); return; }
+    f.reparsing = true;
+    draw();
+    try {
+      do {
+        f.reparseAgain = false;
+        await reparseOnce(f);
+      } while (f.reparseAgain);
+    } finally {
+      f.reparsing = false;
+      draw();
+    }
+  }
+
+  async function reparseOnce(f) {
     f.cards.forEach((c) => readCard(f, c));
     const drafts = f.cards.filter((c) => c.rule).map((c, i) => draftRule(c.rule, i));
     const src = sources.find((s) => s.id === f.sourceId);
@@ -176,7 +195,6 @@ export async function renderUpload({ db, guard, member, monthStart, isCurrent, o
       if (f.token !== token) return;
       fail(f, e?.message);
     }
-    draw();
   }
 
   async function addFiles(fileList) {
@@ -237,6 +255,8 @@ export async function renderUpload({ db, guard, member, monthStart, isCurrent, o
           ...f.cards.map((c) => h('div', { class: 'cp-new-item' }, [
             h('p', { class: 'rule-title', text: c.g.text }, [], doc),
             h('p', { class: 'muted small', text: `${c.g.direction === 'out' ? '보낼 때' : '받을 때'} · ${c.g.count}건 · ${c.g.totalText}` }, [], doc),
+            c.g.variantCount > 1 ? h('p', { class: 'notice small', text: `서로 다른 설명 ${c.g.variantCount}개가 숫자 가림으로 같아졌어요. 규칙으로 저장하면 이 모양의 설명 모두에 적용돼요.` }, [], doc) : null,
+            c.g.ruleAllowed ? null : h('p', { class: 'muted small', text: '이름이 너무 짧아 규칙으로 저장할 수 없어요(이번엔 검토 대기로).' }, [], doc),
             c.card.el,
             c.error ? h('p', { class: 'notice small', text: c.error }, [], doc) : null,
           ], doc)),
@@ -265,7 +285,7 @@ export async function renderUpload({ db, guard, member, monthStart, isCurrent, o
     const total = ready.reduce((s, f) => s + f.preview.newCount, 0);
     save.textContent = ready.length ? `${ready.length}개 파일 · 새로 ${total}건 저장` : '저장';
     const cardErrors = ready.some((f) => f.cards?.some((c) => c.error));
-    save.disabled = busy || ready.length === 0 || cardErrors || files.some((f) => f.state === 'reading');
+    save.disabled = busy || ready.length === 0 || cardErrors || files.some((f) => f.state === 'reading' || f.reparsing);
     if (cardErrors) say('새 이체 상대에서 고를 값을 마저 골라 주세요.', true);
     picker.disabled = busy || files.some((f) => f.state === 'reading');
   }

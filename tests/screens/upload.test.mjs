@@ -84,6 +84,15 @@ test('새 이체 상대 묶음: 표시된 통장 행만, (방향, 띄어쓰기 �
     ['이시험', 'out', 2, '2,000원'], ['김가짜', 'out', 1, '50,000원'], ['이시험', 'in', 1, '300원']]);
 });
 
+test('숫자 가림으로 같아진 설명: 가림 전 가짓수 셈, 가림 표시 빼고 2글자 미만이면 규칙 못 만듦', () => {
+  const M = '[숫자 가림]';
+  const r = (merchant, variant) => ({ newCounterparty: true, merchant_raw: merchant, merchantVariant: variant, kind: 'expense', amount: 1000 });
+  const g = counterpartyGroups([r(`김가짜 ${M}`, 0), r(`김가짜 ${M}`, 1), r(`김가짜 ${M}`, 1), r(`가 ${M}`, 2), r(M, 3), r('이시험', 4)]);
+  const by = new Map(g.map((x) => [x.text, x]));
+  assert.deepEqual([by.get(`김가짜 ${M}`).variantCount, by.get(`김가짜 ${M}`).ruleAllowed], [2, true]);
+  assert.deepEqual([by.get(`가 ${M}`).ruleAllowed, by.get(M).ruleAllowed, by.get('이시험').ruleAllowed, by.get('이시험').variantCount], [false, false, true, 1]);
+});
+
 test('규칙 행: 기본 범위 = 그 통장 + 같은 방향 + 이름이 똑같으면, 미리보기용은 기존 규칙 뒤에 오도록', () => {
   const SRC = ID(804);
   const rule = counterpartyRule({ text: '이시험', direction: 'out' }, SRC, { suggested_kind: 'transfer', suggested_exclude_reason: 'personal_transfer', member_id: ID(72) }, '나리');
