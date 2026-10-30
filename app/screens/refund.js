@@ -11,7 +11,9 @@ import { buildHash } from '../router.js';
 import { won, day } from '../core/format.js';
 import { confirmDialog } from '../core/confirm.js';
 import { STAGES } from '../core/errors.js';
-import { isSuggestTarget, suggestFrom, candidateView, linkConfirmText, reviewedNote, confirmPatch } from './refund-model.js';
+import {
+  SUGGEST_CALL_LIMIT, isSuggestTarget, suggestFrom, monthSuggestions, candidateView, linkConfirmText, reviewedNote, confirmPatch,
+} from './refund-model.js';
 import { errorView } from './shell.js';
 
 export const REFUND_COLUMNS = [
@@ -22,6 +24,29 @@ export const REFUND_COLUMNS = [
 /** 후보 읽기(재시도 가능한 읽기 RPC) */
 export function readCandidates(db, refundId, { widen = false, limit = 50 } = {}) {
   return db.rpc('find_refund_candidates', { p_refund_id: refundId, p_widen: widen, p_limit: limit }, { retry: true });
+}
+
+/**
+ * 그 달 체크카드 취소 연결 제안 수(월 검토와 같은 조건 1~4). 홈 할 일·올리기 결과용 (CL-042)
+ * 호출 최소화: 먼저 미연결 체크카드 취소만 한 번 읽고, 있을 때만 그 수만큼 후보 RPC
+ * @returns {{ data: { count, refunds } } | { error }}
+ */
+export async function suggestionCount(db, monthStart) {
+  const eq = (col, value) => ({ col, op: 'eq', value });
+  const r = await db.select('v_transaction_detail', {
+    columns: 'id,kind,card_kind,refund_of_txn_id,review_status,deleted_at,is_test_source',
+    filters: [eq('period_month', monthStart), eq('kind', 'refund'), eq('card_kind', 'check_card'), eq('review_status', 'needs_review'),
+      { col: 'refund_of_txn_id', op: 'is', value: null }, { col: 'deleted_at', op: 'is', value: null }, eq('is_test_source', false)],
+    range: { from: 0, to: SUGGEST_CALL_LIMIT - 1 },
+  });
+  if (r.error) return { error: r.error };
+  const targets = (r.data ?? []).filter(isSuggestTarget);
+  if (!targets.length) return { data: { count: 0, refunds: 0 } };
+  const cands = await Promise.all(targets.map((t) => readCandidates(db, t.id)));
+  const failed = cands.find((c) => c.error);
+  if (failed) return { error: failed.error };
+  const s = monthSuggestions(new Map(targets.map((t, i) => [t.id, cands[i].data ?? []])));
+  return { data: { count: [...s.values()].filter((v) => v.suggest).length, refunds: targets.length } };
 }
 
 /** 확인 상태(모든 달) → Map(달 → review_state). 실패해도 연결은 막지 않는다(안내만 빠짐) */
