@@ -159,7 +159,7 @@ async function boot() {
       } else if (route.screen === 'settle') {
         view = await renderSettle({ db, monthStart: monthParam(route.query.get('month'), defaultSettleMonth()), reload, isCurrent, onError });
       } else if (route.screen === 'upload') {
-        view = await renderUpload({ db, guard, monthStart: monthParam(route.query.get('month'), defaultSettleMonth()), isCurrent, onError });
+        view = await renderUpload({ db, guard, member, monthStart: monthParam(route.query.get('month'), defaultSettleMonth()), isCurrent, onError });
       } else if (route.screen === 'refund') {
         view = await renderRefundFind({ db, member, id: route.id, query: route.query, go, isCurrent, onError });
       } else if (route.screen === 'add') {

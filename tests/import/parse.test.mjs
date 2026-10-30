@@ -302,6 +302,20 @@ test('파이프라인: 이체 상대 규칙을 넘기면 적용된다', async ()
   assert.deepEqual(r.rows.filter((x) => x.merchant_raw === '이시험').map((x) => x.exclude_reason), ['personal_transfer', 'personal_transfer']);
 });
 
+test('새 이체 상대 후보: 통장 행 중 행 규칙·이체 상대 규칙에 안 맞은 행만 표시, RPC로는 안 보냄', async () => {
+  const none = await parseFile(XLSX, bookBytes(sheetA(), 'xlsx'), { format: FORMAT_A, sourceId: SOURCE, counterpartyRules: [] });
+  assert.deepEqual(none.rows.filter((x) => x.newCounterparty).map((x) => x.merchant_raw.slice(0, 3)), ['김가짜', '이시험', '이시험']);
+  const rules = [{ match_field: 'merchant', match_text: '이시험', suggested_kind: 'transfer', suggested_exclude_reason: 'personal_transfer' }];
+  const some = await parseFile(XLSX, bookBytes(sheetA(), 'xlsx'), { format: FORMAT_A, sourceId: SOURCE, counterpartyRules: rules });
+  assert.equal(some.rows.filter((x) => x.newCounterparty).length, 1);
+  const card = await parseFile(XLSX, bookBytes(sheetB(), 'xls'), { format: FORMAT_B, sourceId: SOURCE });
+  assert.equal(card.rows.filter((x) => x.newCounterparty).length, 0); // 카드는 대상 아님
+  for (const row of toRpcRows(none.rows)) assert.ok(!('newCounterparty' in row) && !('merchantVariant' in row));
+  // 가림 전 설명별 번호: 김가짜 + 가짜 번호(가려짐) 1개, 이시험 2행은 같은 번호
+  const v = none.rows.filter((x) => x.newCounterparty).map((x) => x.merchantVariant);
+  assert.deepEqual([v[0] !== v[1], v[1] === v[2]], [true, true]);
+});
+
 // ---------------------------------------------------------------- 리뷰 반영 (PR #6)
 import { readGrid as readGridAgain, MAX_ROWS } from '../../app/import/pipeline.js';
 import { mapsSensitiveHeader } from '../../app/import/formats.js';
