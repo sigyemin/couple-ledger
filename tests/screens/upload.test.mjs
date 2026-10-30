@@ -52,7 +52,10 @@ test('미리보기: 이미 있는 키는 빼고 셈, 행 오류 사유별, 집�
 
 test('읽기 실패 안내: 코드별 문구, 휴대폰이면 PC에서 다시', () => {
   assert.equal(readErrorText('unsupported_file'), '엑셀(xls·xlsx)이나 은행 html 파일이 아니에요.');
-  assert.equal(readErrorText('worker_error', true), '파일을 읽지 못했어요. PC에서 다시 올려 주세요.');
+  assert.equal(readErrorText('worker_error', true), '파일을 읽는 중에 멈췄어요. PC에서 다시 올려 주세요.');
+  assert.equal(readErrorText('something_else'), '파일을 읽지 못했어요.');
+  assert.match(readErrorText('timeout'), /^파일을 읽지 못했어요\(시간 초과\)/);
+  assert.match(readErrorText('lookup_timeout'), /시간 초과/);
 });
 
 test('저장 결과 문장: 넣음·건너뜀·못 넣음·원거래 못 찾은 환불·환불 금액 다름·멈춤', () => {
@@ -131,4 +134,21 @@ test('묶음 대상 달 자동(CL-051): 파일 거래 중 가장 늦은 달, 0�
   assert.equal(isFileDrag({ types: ['Files'] }), true);
   assert.equal(isFileDrag({ types: ['text/plain'] }), false);
   assert.equal(isFileDrag(null), false);
+});
+
+test('진행 문구·기록할 읽기 오류(CL-051)', async () => {
+  const { progressText, LOGGED_READ_ERRORS } = await import('../../app/screens/upload-model.js');
+  assert.equal(progressText(1, 1, '가짜.xls', '거래 읽는 중…'), '가짜.xls · 거래 읽는 중…');
+  assert.equal(progressText(2, 3, '가짜.xls', '이미 들어온 거래 확인 중… 3/30'), '파일 2/3 · 가짜.xls · 이미 들어온 거래 확인 중… 3/30');
+  assert.deepEqual([...LOGGED_READ_ERRORS].sort(), ['lookup_timeout', 'parse_failed', 'timeout', 'worker_error']);
+  assert.ok(!LOGGED_READ_ERRORS.includes('format_mismatch')); // 사용자 파일 문제는 기록하지 않음
+});
+
+test('조회 시간 제한: 늦으면 lookup_timeout, 제때 오면 그 결과', async () => {
+  const { withTimeout } = await import('../../app/screens/upload.js');
+  const never = new Promise(() => {});
+  const r = await withTimeout(never, 20);
+  assert.equal(r.error.code, 'lookup_timeout');
+  const ok = await withTimeout(Promise.resolve({ data: [1], error: null }), 1000);
+  assert.deepEqual(ok, { data: [1], error: null });
 });

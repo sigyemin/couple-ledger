@@ -16,14 +16,14 @@
 import { h } from '../ui/dom.js';
 import { buildHash } from '../router.js';
 import { confirmDialog } from '../core/confirm.js';
-import { STAGES, ACTIONS } from '../core/errors.js';
+import { STAGES, ACTIONS, AppError } from '../core/errors.js';
 import { runParseWorker } from '../core/parse-worker.js';
 import { MAX_FILE_BYTES } from '../import/detect.js';
 import { isPhone } from '../import/env.js';
 import { ensureBatch, uploadRows, batchFileName } from '../import/upload.js';
 import { fileHash } from '../import/dedup.js';
 import {
-  MAX_FILES, KEY_CHUNK, TEST_SOURCE_WARNING, checkCancelMonths, suggestLineText, reviewText, applySourceChoice, counterpartyGroups, counterpartyRule, draftRule, withDrafts, matchSources, previewOf, previewLines, readErrorText, resultLines, failedRows, targetMonthOf, isFileDrag,
+  MAX_FILES, KEY_CHUNK, LOGGED_READ_ERRORS, progressText, TEST_SOURCE_WARNING, checkCancelMonths, suggestLineText, reviewText, applySourceChoice, counterpartyGroups, counterpartyRule, draftRule, withDrafts, matchSources, previewOf, previewLines, readErrorText, resultLines, failedRows, targetMonthOf, isFileDrag,
 } from './upload-model.js';
 import { errorView } from './shell.js';
 import { choiceCard } from './counterparty-card.js';
@@ -65,11 +65,22 @@ export async function loadUpload(db) {
 }
 
 /** DB에 이미 있는 중복 키(쪽 단위 in 조회) */
-async function existingKeys(db, rows) {
+export const LOOKUP_TIMEOUT_MS = 30 * 1000; // 조회 요청 하나의 시간 제한(응답이 없으면 화면이 '읽는 중'에 머물지 않게, CL-051)
+
+/** 요청이 ms 안에 끝나지 않으면 { error: { code: 'lookup_timeout' } } */
+export function withTimeout(promise, ms, env = globalThis) {
+  let timer;
+  const late = new Promise((resolve) => { timer = env.setTimeout(() => resolve({ data: null, error: { code: 'lookup_timeout', message: 'lookup_timeout' } }), ms); });
+  return Promise.race([promise, late]).finally(() => env.clearTimeout(timer));
+}
+
+async function existingKeys(db, rows, onStep = () => {}, env = globalThis) {
   const keys = [...new Set(rows.map((r) => r.dedup_key))];
   const found = new Set();
+  const chunks = Math.ceil(keys.length / KEY_CHUNK);
   for (let i = 0; i < keys.length; i += KEY_CHUNK) {
-    const r = await db.select('transactions', { columns: 'dedup_key', filters: [{ col: 'dedup_key', op: 'in', value: keys.slice(i, i + KEY_CHUNK) }] });
+    onStep(i / KEY_CHUNK + 1, chunks);
+    const r = await withTimeout(db.select('transactions', { columns: 'dedup_key', filters: [{ col: 'dedup_key', op: 'in', value: keys.slice(i, i + KEY_CHUNK) }] }), LOOKUP_TIMEOUT_MS, env);
     if (r.error) return { error: r.error };
     for (const x of r.data ?? []) found.add(x.dedup_key);
   }
@@ -109,10 +120,26 @@ export async function renderUpload({ db, guard, member, fallbackMonth, isCurrent
   const save = h('button', { class: 'btn primary', text: '저장', attrs: { type: 'button' } }, [], doc);
   let busy = false;
 
-  const fail = (f, code) => { f.state = 'error'; f.message = readErrorText(code, phone); };
+  // 읽기 실패: 사용자 파일 문제가 아닌 것(시간 초과·Worker 멈춤 등)은 오류 기록 + 오류 번호(CL-051)
+  const fail = (f, code) => {
+    f.state = 'error'; f.step = null;
+    f.message = readErrorText(code, phone);
+    if (LOGGED_READ_ERRORS.includes(code)) {
+      // 분류 코드 그대로(TIMEOUT·LOOKUP_TIMEOUT·WORKER_ERROR·PARSE_FAILED) — 어느 단계에서 멈췄는지 오류 번호로 구분
+      const num = onError?.(new AppError(code, f.message), { stage: STAGES.import_parse });
+      if (num) f.message = `${f.message} (오류 번호 ${num})`;
+    }
+  };
+  // 진행 문구(파일 카드 + 상태 줄, aria-live) — 읽는 동안 화면이 멈춘 것처럼 보이지 않게
+  const step = (f, text) => {
+    f.step = text;
+    say(progressText(files.indexOf(f) + 1, files.length, f.name, text));
+    draw();
+  };
 
   async function prepare(f) {
-    f.state = 'reading'; draw();
+    f.state = 'reading';
+    step(f, '거래 읽는 중…');
     const src = sources.find((s) => s.id === f.sourceId);
     const format = src && formatById.get(src.import_format_id);
     if (!format) { fail(f, 'format_mismatch'); draw(); return; }
@@ -123,11 +150,13 @@ export async function renderUpload({ db, guard, member, fallbackMonth, isCurrent
     } catch (e) {
       fail(f, e?.message); draw(); return;
     }
+    step(f, '이미 들어온 거래 확인 중…');
     const [batch, keys] = await Promise.all([
-      db.select('import_batches', { columns: 'id', filters: [{ col: 'source_id', op: 'eq', value: src.id }, { col: 'file_hash', op: 'eq', value: f.hash }] }),
-      existingKeys(db, f.parsed.rows),
+      withTimeout(db.select('import_batches', { columns: 'id', filters: [{ col: 'source_id', op: 'eq', value: src.id }, { col: 'file_hash', op: 'eq', value: f.hash }] }), LOOKUP_TIMEOUT_MS, env),
+      existingKeys(db, f.parsed.rows, (n, m) => { if (m > 1) step(f, `이미 들어온 거래 확인 중… ${n}/${m}`); }, env),
     ]);
     const err = batch.error ?? keys.error;
+    if (err?.code === 'lookup_timeout') { fail(f, 'lookup_timeout'); draw(); return; }
     if (err) {
       const code = onError?.(err, { stage: STAGES.db_select });
       f.state = 'error'; f.message = `${err.message}${code ? ` (오류 번호 ${code})` : ''}`;
@@ -135,6 +164,8 @@ export async function renderUpload({ db, guard, member, fallbackMonth, isCurrent
     }
     f.resumed = Boolean(batch.data?.length);
     f.keys = keys.data;
+    f.step = null;
+    say(`${f.name} 미리보기를 만들었어요.`);
     f.preview = previewOf(f.parsed, f.keys);
     f.cards = src.kind === 'bank_account' ? counterpartyGroups(f.parsed.rows).map((g) => {
       const card = choiceCard({ categories, cats, direction: g.direction, later: true, labelPrefix: g.text, rulesAllowed: g.ruleAllowed }, doc);
@@ -209,17 +240,19 @@ export async function renderUpload({ db, guard, member, fallbackMonth, isCurrent
       if (files.length >= MAX_FILES) { say(`한 번에 ${MAX_FILES}개까지 올릴 수 있어요.`, true); break; }
       const f = { key: `${files.length}-${file.name}`, name: file.name, state: 'reading', choices: [] };
       files.push(f);
-      draw();
       if (file.size > MAX_FILE_BYTES) { fail(f, 'too_big'); draw(); continue; }
       try {
+        step(f, '파일 여는 중…');
         f.bytes = new Uint8Array(await file.arrayBuffer());
         f.hash = await fileHash(f.bytes);
+        step(f, '어느 카드·통장 파일인지 확인 중…');
         const d = await runParseWorker({ op: 'detect', bytes: f.bytes.slice().buffer, formats }, { env });
         f.fileType = d.fileType;
         const m = matchSources(d.formatIds, sources);
         f.choices = m.choices;
-        if (!m.choices.length) { f.state = 'nomatch'; draw(); continue; }
-        if (!m.autoId) { f.state = 'choose'; draw(); continue; }
+        f.step = null;
+        if (!m.choices.length) { f.state = 'nomatch'; say(''); draw(); continue; }
+        if (!m.autoId) { f.state = 'choose'; say(`${f.name}: 어느 결제수단 파일인지 골라 주세요.`); draw(); continue; }
         f.sourceId = m.autoId;
       } catch (e) {
         fail(f, e?.message); draw(); continue;
@@ -231,7 +264,7 @@ export async function renderUpload({ db, guard, member, fallbackMonth, isCurrent
   function fileCard(f) {
     const title = h('p', { class: 'upload-name', text: f.name }, [], doc);
     const body = [];
-    if (f.state === 'reading') body.push(h('p', { class: 'muted small', text: '읽는 중…' }, [], doc));
+    if (f.state === 'reading') body.push(h('p', { class: 'muted small reading', text: f.step ?? '읽는 중…' }, [], doc));
     if (f.state === 'error') body.push(h('p', { class: 'notice small', text: f.message }, [], doc));
     if (f.state === 'nomatch') body.push(h('p', { class: 'notice small', text: '맞는 결제수단이 없어 건너뛰어요. 결제수단의 파일 형식을 확인해 주세요.' }, [], doc));
     if (f.state === 'choose' || ((f.choices.length > 1 || f.choices[0]?.isTest) && f.state !== 'reading' && f.state !== 'saved')) {
