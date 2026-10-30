@@ -83,7 +83,6 @@ export function candidateView(c, suggestedId = null) {
   };
 }
 
-/** 확인 완료한 달이면 '확인 후 변경됨'이 된다는 안내(원거래 달 기준) */
 /**
  * 환불 연결 끊기 확인 문구(v0.19 unlink_refund, 사용자 결정 D5)
  * 끊으면 귀속월 = 환불일의 달, 검토 대기, 공동 여부는 그대로(원거래에서 받은 값) — DB 함수 정의
@@ -103,6 +102,7 @@ export function unlinkConfirmText(refund, reviewStates) {
   return { title: '연결 끊기', message: parts.join(' ') };
 }
 
+/** 확인 완료한 달이면 '확인 후 변경됨'이 된다는 안내(원거래 달 기준) */
 export function reviewedNote(months, reviewStates) {
   const hit = [...new Set(months)].sort().filter((m) => reviewStates.get(m) === 'reviewed');
   return hit.length ? `${hit.map((m) => month(m).replace(/^[0-9]+년 /, '')).join(', ')}은 확인 완료한 달이라 연결하면 "확인 후 변경됨"으로 바뀌어요.` : null;
