@@ -38,6 +38,13 @@ export const RAW_KEYS = Object.freeze([
 const DATE_KEYS = new Set(['occurred_on', 'occurred_time', 'occurred_at']);
 const CARD_KINDS = new Set(['credit_card', 'check_card']);
 const DEFAULT_DATE_FORMAT = 'YYYY-MM-DD[ HH24:MI[:SS]]';
+const ISO_DATE = compileFormat(DEFAULT_DATE_FORMAT);
+const ISO_TIME = compileFormat('HH24:MI[:SS]');
+
+/** 날짜 칸 글자가 날짜처럼 보이는가: 숫자로 시작하고 숫자·구분자(. / - : 공백)만 (엑셀 일련번호 46268, 9/3/26, 2026.02.30 등) */
+export function looksLikeDate(v) {
+  return typeof v === 'string' && /^[0-9][0-9./\-: ]*$/.test(v.normalize('NFKC').trim());
+}
 
 /** 금액 문자열 → 정수 (빈 값 null, 형식 오류 NaN) */
 export function parseAmount(v) {
@@ -178,6 +185,10 @@ export async function normalizeRows(grid, format, header, ctx) {
   if (typeof sourceId !== 'string' || !sourceId) throw new TypeError('결제수단 id가 필요합니다');
   const dateFmt = compileFormat(format.date_format || DEFAULT_DATE_FORMAT);
   const timeFmt = format.time_format ? compileFormat(format.time_format) : null;
+  // 날짜형 셀은 읽을 때 ISO 글자로 바뀐다(pipeline.cellText) → 형식 date_format에 안 맞으면 ISO로 한 번 더 읽는다(CL-049)
+  const parseDate = (v) => parseWith(dateFmt, v) ?? parseWith(ISO_DATE, v);
+  const parseTime = (v) => parseWith(timeFmt, v) ?? parseWith(ISO_TIME, v);
+  const rowNums = Array.isArray(ctx?.rowNums) ? ctx.rowNums : null;
   const isCard = CARD_KINDS.has(format.kind);
   const rules = Array.isArray(format.row_rules) ? format.row_rules : [];
   const { columns } = header;
@@ -192,7 +203,7 @@ export async function normalizeRows(grid, format, header, ctx) {
 
   for (let r = header.headerIndex + 1; r < grid.length; r++) {
     const line = grid[r] ?? [];
-    const rowNo = r + 1;
+    const rowNo = rowNums?.[r] ?? r + 1; // 엑셀에서 보이는 행 번호(빈 줄 포함, CL-049)
     const cell = (key) => {
       const i = columns.get(key);
       if (i === undefined) return null;
@@ -202,17 +213,21 @@ export async function normalizeRows(grid, format, header, ctx) {
 
     // 일시
     let when = null;
+    const dateKey = columns.has('occurred_at') ? 'occurred_at' : 'occurred_on';
     if (columns.has('occurred_at')) {
-      when = parseWith(dateFmt, cell('occurred_at'));
+      when = parseDate(cell('occurred_at'));
     } else if (columns.has('occurred_on')) {
-      const d = parseWith(dateFmt, cell('occurred_on'));
+      const d = parseDate(cell('occurred_on'));
       if (d?.date) {
-        const t = timeFmt && cell('occurred_time') !== null ? parseWith(timeFmt, cell('occurred_time')) : null;
+        const t = timeFmt && cell('occurred_time') !== null ? parseTime(cell('occurred_time')) : null;
         when = { date: d.date, time: t?.time ?? d.time ?? null };
       }
     }
     if (!when?.date) {
-      skipped++; // 꼬리 줄(합계 등)·빈 줄
+      // 날짜 칸이 숫자·날짜 모양(엑셀 일련번호, 9/3/26, 없는 날짜 등)인데 못 읽었으면 거래가 빠지지 않게 행 오류로 보인다(CL-049).
+      // 그 밖(합계·안내 글·빈 칸)은 꼬리 줄로 건너뜀
+      if (looksLikeDate(cell(dateKey))) errors.push({ rowNo, reason: 'date' });
+      else skipped++;
       continue;
     }
 
