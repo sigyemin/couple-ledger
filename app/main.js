@@ -128,7 +128,7 @@ async function boot() {
       } else if (route.screen === 'review') {
         view = await renderReview({ db, member, monthStart: monthParam(route.query.get('month'), defaultReviewMonth()), reload, isCurrent, onError });
       } else if (route.screen === 'report') {
-        view = await renderReport({ db, monthStart: monthParam(route.query.get('month'), defaultReportMonth()), view: route.query.get('view') === 'income' ? 'income' : 'expense', isCurrent, onError });
+        view = await renderReport({ db, monthStart: monthParam(route.query.get('month'), defaultReportMonth()), view: route.query.get('view') === 'income' ? 'income' : 'expense', query: route.query, isCurrent, onError });
       } else if (route.screen === 'rgroup') {
         view = await renderReportGroup({ db, id: route.id, monthStart: monthParam(route.query.get('month'), defaultReportMonth()), isCurrent, onError });
       } else if (route.screen === 'ritem') {

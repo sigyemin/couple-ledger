@@ -391,3 +391,29 @@ a.btn.small-btn { display: inline-flex; }
   .bulk-bar { bottom: 0; }
   .screen.selecting { padding-bottom: 120px; }
 }
+
+/* 리포트 비중 차트 (CL-059): 도넛 + 범례. 색은 구분 보조일 뿐 — 범례에 이름·비율·금액 글자가 함께 있다 */
+:root { --s0: #1B64DA; --s1: #C2410C; --s2: #0F766E; --s3: #7C3AED; --s4: #B45309; --s5: #BE185D; --s6: #0369A1; --s-etc: #8B95A1; --s-none: #B0B8C1; }
+.seg.small { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 1fr; margin-top: 8px; }
+.seg.small a { min-height: 36px; font-size: 13px; }
+.share { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; margin-top: 12px; }
+.donut { width: 160px; height: 160px; flex: none; margin: 0 auto; }
+.donut-track { fill: none; stroke: var(--line); stroke-width: 26; }
+.donut-arc { fill: none; stroke-width: 26; }
+.donut-label { font-size: 12px; fill: var(--sub-on-white); }
+.donut-total { font-size: 15px; font-weight: 700; fill: var(--text); }
+.donut-arc.c0 { stroke: var(--s0); } .donut-arc.c1 { stroke: var(--s1); } .donut-arc.c2 { stroke: var(--s2); } .donut-arc.c3 { stroke: var(--s3); }
+.donut-arc.c4 { stroke: var(--s4); } .donut-arc.c5 { stroke: var(--s5); } .donut-arc.c6 { stroke: var(--s6); }
+.donut-arc.etc { stroke: var(--s-etc); } .donut-arc.none { stroke: var(--s-none); }
+.share-legend { flex: 1 1 240px; min-width: 0; }
+.share-row { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto auto; align-items: center; gap: 8px; min-height: 40px;
+  border-top: 1px solid var(--line); color: var(--text); text-decoration: none; font-size: 14px; }
+.share-legend li:first-child .share-row { border-top: 0; }
+.share-name { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
+.share-name .sub { font-size: 12px; color: var(--sub-on-white); }
+.share-pct { color: var(--sub-on-white); font-size: 13px; }
+.share-amount { font-weight: 700; text-align: right; }
+.swatch { width: 12px; height: 12px; border-radius: 3px; }
+.swatch.c0 { background: var(--s0); } .swatch.c1 { background: var(--s1); } .swatch.c2 { background: var(--s2); } .swatch.c3 { background: var(--s3); }
+.swatch.c4 { background: var(--s4); } .swatch.c5 { background: var(--s5); } .swatch.c6 { background: var(--s6); }
+.swatch.etc { background: var(--s-etc); } .swatch.none { background: var(--s-none); border: 1px solid var(--s-etc); }

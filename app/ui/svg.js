@@ -6,10 +6,11 @@
 // =====================================================================
 
 export const SVG_NS = 'http://www.w3.org/2000/svg';
-const TAGS = new Set(['svg', 'g', 'rect', 'line', 'text', 'title']);
+const TAGS = new Set(['svg', 'g', 'rect', 'line', 'circle', 'text', 'title']);
 const ATTRS = new Set([
   'class', 'viewBox', 'width', 'height', 'x', 'y', 'x1', 'y1', 'x2', 'y2', 'rx', 'role', 'aria-label', 'aria-hidden',
   'text-anchor', 'focusable', 'preserveAspectRatio',
+  'cx', 'cy', 'r', 'stroke-dasharray', 'stroke-dashoffset', 'transform', // 도넛(CL-059): 색·굵기는 클래스로
 ]);
 
 /**
