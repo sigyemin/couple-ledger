@@ -24,9 +24,10 @@ import { ensureBatch, uploadRows, batchFileName } from '../import/upload.js';
 import { fileHash } from '../import/dedup.js';
 import {
   MAX_FILES, KEY_CHUNK, LOGGED_READ_ERRORS, progressText, TEST_SOURCE_WARNING, checkCancelMonths, suggestLineText, reviewText, applySourceChoice, counterpartyGroups, counterpartyRule, draftRule, withDrafts, matchSources, previewOf, previewLines, readErrorText, resultLines, failedRows, targetMonthOf, isFileDrag,
+  nomatchLines, decisionCount, laterSummary, headParts,
 } from './upload-model.js';
 import { errorView } from './shell.js';
-import { choiceCard } from './counterparty-card.js';
+import { cpRow } from './upload-cp-row.js';
 import { suggestionCount } from './refund.js';
 import { categoryIndex, choiceValues, checkNames } from './counterparty-model.js';
 
@@ -168,12 +169,14 @@ export async function renderUpload({ db, guard, member, fallbackMonth, isCurrent
     say(`${f.name} 미리보기를 만들었어요.`);
     f.preview = previewOf(f.parsed, f.keys);
     f.cards = src.kind === 'bank_account' ? counterpartyGroups(f.parsed.rows).map((g) => {
-      const card = choiceCard({ categories, cats, direction: g.direction, later: true, labelPrefix: g.text, rulesAllowed: g.ruleAllowed }, doc);
-      const c = { g, card, error: null, rule: null };
+      const card = cpRow({ g, categories }, doc);
+      const c = { g, card, error: null, rule: null, get choice() { return card.choice; } };
       card.onChange(() => reparse(f));
       return c;
     }) : [];
+    f.cardsBuilt = false;
     f.state = 'ready';
+    f.open = decisionCount(f) > 0;
     draw();
   }
 
@@ -248,6 +251,7 @@ export async function renderUpload({ db, guard, member, fallbackMonth, isCurrent
         step(f, '어느 카드·통장 파일인지 확인 중…');
         const d = await runParseWorker({ op: 'detect', bytes: f.bytes.slice().buffer, formats }, { env });
         f.fileType = d.fileType;
+        f.detect = { fileType: d.fileType, formatIds: d.formatIds ?? [], diagnosis: d.diagnosis ?? null }; // 형식 쪽 이름·숫자만(셀 값 없음)
         const m = matchSources(d.formatIds, sources);
         f.choices = m.choices;
         f.step = null;
@@ -261,76 +265,148 @@ export async function renderUpload({ db, guard, member, fallbackMonth, isCurrent
     }
   }
 
-  function fileCard(f) {
-    const title = h('p', { class: 'upload-name', text: f.name }, [], doc);
-    const body = [];
-    if (f.state === 'reading') body.push(h('p', { class: 'muted small reading', text: f.step ?? '읽는 중…' }, [], doc));
-    if (f.state === 'error') body.push(h('p', { class: 'notice small', text: f.message }, [], doc));
-    if (f.state === 'nomatch') body.push(h('p', { class: 'notice small', text: '맞는 결제수단이 없어 건너뛰어요. 결제수단의 파일 형식을 확인해 주세요.' }, [], doc));
-    if (f.state === 'choose' || ((f.choices.length > 1 || f.choices[0]?.isTest) && f.state !== 'reading' && f.state !== 'saved')) {
-      const sel = h('select', { class: 'field', attrs: { 'aria-label': `${f.name} 결제수단` } }, [
+  // ---------------------------------------------------------------- 파일 카드 (CL-069)
+  // 카드는 파일마다 한 번 만들고 그 안의 글자만 고친다(선택 하나에 목록 전체를 다시 그리면 스크롤·초점이 튐 — ①)
+  // 머리 한 줄: 파일 이름 · 결제수단 · 새로 N건 · 지출, 정할 것이 있으면 '결정 N개'. 정할 것이 없으면 처음엔 접힘(펼치기 가능)
+  // 빨간 안내는 카드 맨 위 한 곳(warn)에 모은다
+  function ensureUi(f) {
+    if (f.ui) return f.ui;
+    const toggle = h('button', { class: 'upload-toggle', attrs: { type: 'button', 'aria-expanded': 'true' } }, [], doc);
+    const remove = h('button', { class: 'btn mini', text: '빼기', attrs: { type: 'button', 'aria-label': `${f.name} 빼기` } }, [], doc);
+    remove.addEventListener('click', () => { files.splice(files.indexOf(f), 1); f.ui.section.remove(); draw(); });
+    toggle.addEventListener('click', () => { f.open = !isOpen(f); draw(); });
+    const ui = {
+      toggle, remove,
+      warn: h('div', { class: 'upload-warn', attrs: { role: 'alert' } }, [], doc),
+      dest: h('div', { class: 'upload-dest' }, [], doc),
+      sourceBox: h('div', {}, [], doc),
+      body: h('div', { class: 'upload-body' }, [], doc),
+      stats: h('div', {}, [], doc),
+      cpBox: h('div', { class: 'cp-new' }, [], doc),
+      result: h('div', {}, [], doc),
+      sel: null,
+    };
+    ui.body.append(ui.stats, ui.cpBox, ui.result);
+    ui.section = h('section', { class: 'card upload-file' }, [
+      h('div', { class: 'card-head upload-head' }, [toggle, remove], doc), ui.warn, ui.dest, ui.sourceBox, ui.body,
+    ], doc);
+    f.ui = ui;
+    return ui;
+  }
+  // 펼침 여부는 미리보기가 처음 나올 때 한 번 정한다(고르는 중에 결정 수가 0이 되어도 저절로 접히지 않게)
+  const isOpen = (f) => f.open ?? true;
+  const put = (el, kids) => el.replaceChildren(...kids.filter(Boolean));
+
+  function sourceSelect(f) {
+    const ui = f.ui;
+    const need = f.state === 'choose' || ((f.choices.length > 1 || f.choices[0]?.isTest) && f.state !== 'reading' && f.state !== 'saved');
+    if (!need) { ui.sourceBox.replaceChildren(); return; }
+    if (!ui.sel) {
+      ui.sel = h('select', { class: 'field', attrs: { 'aria-label': `${f.name} 결제수단` } }, [
         h('option', { text: '어느 결제수단 파일인가요?', attrs: { value: '' } }, [], doc),
         ...f.choices.map((c) => h('option', { text: c.label, attrs: { value: c.id } }, [], doc)),
       ], doc);
-      sel.value = f.sourceId ?? '';
-      sel.disabled = busy;
-      sel.addEventListener('change', () => { if (applySourceChoice(f, sel.value) === 'prepare') prepare(f); else draw(); });
-      body.push(sel);
-      if (f.choices.find((c) => c.id === f.sourceId)?.isTest) body.push(h('p', { class: 'notice small', text: TEST_SOURCE_WARNING }, [], doc));
+      ui.sel.addEventListener('change', () => {
+        // 결제수단을 바꾸면 이체 상대 줄도 새로(그 통장 기준)
+        f.cardsBuilt = false;
+        if (applySourceChoice(f, ui.sel.value) === 'prepare') prepare(f); else draw();
+      });
     }
-    if (f.state === 'ready' || f.state === 'saved') {
-      const src = sources.find((s) => s.id === f.sourceId);
-      const p = f.preview;
-      body.push(
-        h('p', { class: 'muted small', text: `${src?.label ?? ''}${f.resumed ? ' · 이미 올린 파일이라 빠진 행만 넣어요' : ''}` }, [], doc),
-        h('p', { class: 'amount-l', text: `새로 ${p.newCount}건` }, [], doc),
-        h('p', { class: 'muted small', text: `지출 합계(집계 제외 빼고) ${p.spendText} · ${reviewText(p.newCount, p.confirmed)}` }, [], doc),
-        h('dl', { class: 'kv' }, previewLines(p).flatMap(([k, v]) => [h('dt', { text: k }, [], doc), h('dd', { text: v }, [], doc)]), doc),
-      );
-      if (f.cards?.length) {
-        body.push(h('div', { class: 'cp-new' }, [
+    ui.sel.value = f.sourceId ?? '';
+    ui.sel.disabled = busy;
+    if (ui.sel.parentNode !== ui.sourceBox) ui.sourceBox.replaceChildren(ui.sel);
+  }
+
+  function updateCard(f) {
+    const ui = ensureUi(f);
+    const src = sources.find((s) => s.id === f.sourceId);
+    const p = f.preview;
+    const ready = f.state === 'ready' || f.state === 'saved';
+    const open = isOpen(f);
+    ui.section.className = `card upload-file ${f.state}`;
+    // 머리 한 줄
+    const n = decisionCount(f);
+    put(ui.toggle, [
+      h('span', { class: 'upload-chev', text: open ? '▾' : '▸', attrs: { 'aria-hidden': 'true' } }, [], doc),
+      h('span', { class: 'upload-name', text: f.name }, [], doc),
+      ready ? h('span', { class: 'upload-head-sub', text: headParts(f, src?.label ?? '').join(' · ') }, [], doc) : null,
+      ready && n ? h('span', { class: 'tag warn', text: `결정 ${n}개` }, [], doc) : null,
+    ]);
+    ui.toggle.setAttribute('aria-expanded', String(open));
+    ui.toggle.setAttribute('aria-label', `${f.name}${ready ? ` · ${headParts(f, src?.label ?? '').join(' · ')}` : ''}${n ? ` · 결정 ${n}개` : ''} — ${open ? '접기' : '펼치기'}`);
+    ui.remove.disabled = busy || f.state === 'reading' || f.state === 'saved';
+    ui.remove.hidden = f.state === 'saved';
+    // 빨간 안내 한 곳
+    const warns = [];
+    if (f.state === 'error') warns.push(f.message);
+    if (f.state === 'nomatch') warns.push('맞는 결제수단이 없어 건너뛰어요.');
+    if (f.choices.find((c) => c.id === f.sourceId)?.isTest) warns.push(TEST_SOURCE_WARNING);
+    if (ready && p.errorCount) warns.push(`읽지 못한 행 ${p.errorCount}줄: ${p.errorLines.join(', ')} (행 ${p.errorRows.join(', ')}${p.errorCount > p.errorRows.length ? ' …' : ''})`);
+    for (const c of f.cards ?? []) if (c.error) warns.push(`${c.g.text}: ${c.error}`);
+    put(ui.warn, warns.map((t) => h('p', { text: t }, [], doc)));
+    ui.warn.hidden = !warns.length;
+    // 어느 결제수단으로 들어가는지 크게(④) + 진단(③)
+    const dest = [];
+    if (f.state === 'reading') dest.push(h('p', { class: 'upload-step', text: f.step ?? '읽는 중…' }, [], doc));
+    if (f.state === 'nomatch') {
+      dest.push(...nomatchLines(f.detect, formats, sources).map((t) => h('p', { class: 'upload-diag', text: t }, [], doc)));
+      dest.push(h('p', { class: 'upload-hint', text: '이 화면을 캡처해 알려 주시면 형식을 고칠 수 있어요(파일 내용은 보이지 않아요).' }, [], doc));
+    }
+    if (ready && src) {
+      dest.push(h('p', { class: 'upload-into' }, ['→ ', h('strong', { text: src.label }, [], doc), '(으)로 들어가요'], doc));
+      if (f.resumed) dest.push(h('p', { class: 'upload-hint', text: '이미 올린 파일이라 빠진 행만 넣어요.' }, [], doc));
+      if (f.state === 'ready' && f.choices.length <= 1) dest.push(h('p', { class: 'upload-hint', text: '같은 기관의 다른 계좌(예: 연금·적금) 파일이면 이 결제수단이 아니에요 — 빼기를 눌러 주세요.' }, [], doc));
+    }
+    put(ui.dest, dest);
+    sourceSelect(f);
+    // 본문(접기 대상)
+    ui.body.hidden = !open || !ready;
+    if (ready) {
+      put(ui.stats, [
+        h('p', { class: 'upload-sum', text: `새로 ${p.newCount}건 · 지출 합계(집계 제외 빼고) ${p.spendText}` }, [], doc),
+        h('p', { class: 'upload-hint', text: reviewText(p.newCount, p.confirmed) }, [], doc),
+        h('dl', { class: 'kv upload-kv' }, previewLines(p).flatMap(([k, v]) => [h('dt', { text: k }, [], doc), h('dd', { text: v }, [], doc)]), doc),
+      ]);
+      if (f.cards?.length && !f.cardsBuilt) {
+        put(ui.cpBox, [
           h('h3', { class: 'card-title', text: `새 이체 상대 ${f.cards.length}` }, [], doc),
-          h('p', { class: 'muted small', text: '고른 값은 규칙으로 저장돼 다음 달부터 자동으로 적용돼요. 나중에 고르면 검토 대기로 들어가요.' }, [], doc),
-          ...f.cards.map((c) => h('div', { class: 'cp-new-item' }, [
-            h('p', { class: 'rule-title', text: c.g.text }, [], doc),
-            h('p', { class: 'muted small', text: `${c.g.direction === 'out' ? '보낼 때' : '받을 때'} · ${c.g.count}건 · ${c.g.totalText}` }, [], doc),
-            c.g.variantCount > 1 ? h('p', { class: 'notice small', text: `서로 다른 설명 ${c.g.variantCount}개가 숫자 가림으로 같아졌어요. 규칙으로 저장하면 이 모양의 설명 모두에 적용돼요.` }, [], doc) : null,
-            c.g.ruleAllowed ? null : h('p', { class: 'muted small', text: '이름이 너무 짧아 규칙으로 저장할 수 없어요(이번엔 검토 대기로).' }, [], doc),
-            c.card.el,
-            c.error ? h('p', { class: 'notice small', text: c.error }, [], doc) : null,
-          ], doc)),
-        ], doc));
-        f.cards.forEach((c) => c.card.setDisabled(busy || f.state === 'saved'));
+          h('p', { class: 'upload-hint', text: '고르면 규칙으로 저장돼 다음부터 자동으로 적용돼요. 나중에 두면 검토 대기로 들어가요.' }, [], doc),
+          ...f.cards.map((c) => c.card.el),
+        ]);
+        f.cardsBuilt = true;
       }
-      if (p.errorCount) {
-        body.push(h('p', { class: 'notice small', text: `읽지 못한 행 ${p.errorCount}줄: ${p.errorLines.join(', ')} (행 ${p.errorRows.join(', ')}${p.errorCount > p.errorRows.length ? ' …' : ''})` }, [], doc));
-      }
+      ui.cpBox.hidden = !f.cards?.length;
+      f.cards?.forEach((c) => c.card.setDisabled(busy || f.state === 'saved'));
     }
-    if (f.result) {
-      body.push(h('div', { class: 'upload-result', attrs: { role: 'status' } }, [
-        ...resultLines(f.result).map((t) => h('p', { class: f.result.error ? 'notice small' : 'small', text: t }, [], doc)),
-        failedRows(f.result).length ? h('p', { class: 'muted small', text: `넣지 못한 행: ${failedRows(f.result).join(', ')}` }, [], doc) : null,
-      ], doc));
-    }
-    const remove = h('button', { class: 'btn mini', text: '빼기', attrs: { type: 'button', 'aria-label': `${f.name} 빼기` } }, [], doc);
-    remove.disabled = busy || f.state === 'reading' || f.state === 'saved';
-    remove.addEventListener('click', () => { files.splice(files.indexOf(f), 1); draw(); });
-    return h('section', { class: `card upload-file ${f.state}` }, [h('div', { class: 'card-head' }, [title, f.state === 'saved' ? null : remove], doc), ...body], doc);
+    put(ui.result, f.result ? [h('div', { class: 'upload-result', attrs: { role: 'status' } }, [
+      ...resultLines(f.result).map((t) => h('p', { class: f.result.error ? 'notice' : 'upload-sum', text: t }, [], doc)),
+      failedRows(f.result).length ? h('p', { class: 'upload-hint', text: `넣지 못한 행: ${failedRows(f.result).join(', ')}` }, [], doc) : null,
+    ], doc)] : []);
+    if (f.result) ui.body.hidden = false;
+    return ui.section;
   }
 
   function draw() {
-    list.replaceChildren(...files.map(fileCard));
+    // 파일이 더해지거나 빠졌을 때만 목록 순서를 다시 놓는다(있는 카드는 옮기지 않음)
+    const sections = files.map((f) => ensureUi(f).section);
+    if (sections.length !== list.children.length || sections.some((el, i) => list.children[i] !== el)) list.replaceChildren(...sections);
+    files.forEach(updateCard);
     const ready = files.filter((f) => f.state === 'ready' && f.sourceId);
     const total = ready.reduce((s, f) => s + f.preview.newCount, 0);
     save.textContent = ready.length ? `${ready.length}개 파일 · 새로 ${total}건 저장` : '저장';
     const cardErrors = ready.some((f) => f.cards?.some((c) => c.error));
     save.disabled = busy || ready.length === 0 || cardErrors || files.some((f) => f.state === 'reading' || f.reparsing);
-    if (cardErrors) say('새 이체 상대에서 고를 값을 마저 골라 주세요.', true);
+    saveNote.textContent = cardErrors ? '새 이체 상대에서 고를 값을 마저 골라 주세요(카드 위 빨간 글).' : laterSummary(files);
+    saveNote.className = `savebar-note${cardErrors ? ' error' : ''}`;
+    saveBar.hidden = files.length === 0;
     picker.disabled = busy || files.some((f) => f.state === 'reading');
   }
 
   async function saveAll() {
+    // 저장 직전에 카드 값을 다시 읽는다(보일 이름 등 마지막 입력까지 규칙에 — #59 리뷰 중간 1)
+    for (const f of files) if (f.state === 'ready') f.cards?.forEach((c) => readCard(f, c));
     const ready = files.filter((f) => f.state === 'ready' && f.sourceId);
+    if (ready.some((f) => f.cards?.some((c) => c.error))) { draw(); return; }
     const total = ready.reduce((s, f) => s + f.preview.newCount, 0);
     const confirmed = ready.reduce((s, f) => s + (f.preview.confirmed ?? 0), 0);
     if (!(await confirmDialog({
@@ -395,6 +471,9 @@ export async function renderUpload({ db, guard, member, fallbackMonth, isCurrent
     }
   }
   save.addEventListener('click', saveAll);
+  // 저장은 아래에 붙어 있다(긴 미리보기에서도 보이게 — ②) + 결정 안 한 이체 상대 요약
+  const saveNote = h('p', { class: 'savebar-note', attrs: { 'aria-live': 'polite' } }, [], doc);
+  const saveBar = h('div', { class: 'upload-savebar' }, [saveNote, save], doc);
 
   const input = h('input', { class: 'visually-hidden', attrs: { type: 'file', multiple: true, accept: ACCEPT, id: 'upload-input', 'aria-label': '파일 고르기' } }, [], doc);
   input.addEventListener('change', () => { const fl = input.files; if (fl?.length) addFiles(fl); input.value = ''; });
@@ -430,5 +509,5 @@ export async function renderUpload({ db, guard, member, fallbackMonth, isCurrent
   });
 
   draw();
-  return h('main', { class: 'screen' }, [head, banner, status, dropZone, list, save, suggestLine, done], doc);
+  return h('main', { class: 'screen upload-screen' }, [head, banner, status, dropZone, list, saveBar, suggestLine, done], doc);
 }

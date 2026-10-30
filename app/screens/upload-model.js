@@ -235,3 +235,64 @@ export function progressText(index, total, name, step) {
 export const TEST_SOURCE_WARNING = '시험용 결제수단이에요(집계 제외, 나중에 일괄 삭제됨). 실제 파일이면 다른 결제수단을 골라 주세요.';
 
 export const monthTitle = (m) => `${monthLabel(m).replace(/^[0-9]+년 /, '')} 파일`;
+
+// ---------------------------------------------------------------- 미리보기 정리 (CL-069)
+const KIND_LABEL = { credit_card: '카드', bank_account: '통장', cash: '현금' };
+
+/** 형식 이름: '가상기관A 통장 형식' (기관·종류만 — 형식 정의 값) */
+export function formatName(format) {
+  if (!format) return '알 수 없는 형식';
+  return `${format.institution ?? ''} ${KIND_LABEL[format.kind] ?? ''} 형식`.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * 맞는 결제수단이 없는 파일의 진단 줄(CL-069 ③). 형식 쪽 이름·숫자만 — 파일 셀 값은 쓰지 않는다
+ * @param d detect 결과 { fileType, formatIds, diagnosis }
+ * @param formats import_formats 행, sources 결제수단 행
+ * @returns {string[]}
+ */
+export function nomatchLines(d, formats, sources) {
+  const byId = new Map((formats ?? []).map((f) => [f.id, f]));
+  const type = d?.fileType ?? '?';
+  const lines = [`파일 종류: ${type}`];
+  if (d?.formatIds?.length) {
+    // 형식은 맞았는데 그 형식을 쓰는 켜진 결제수단이 없음
+    const names = d.formatIds.map((id) => formatName(byId.get(id)));
+    const off = (sources ?? []).filter((s) => d.formatIds.includes(s.import_format_id) && !s.is_active);
+    lines.push(`${names.join(', ')}에 맞지만, 이 형식을 쓰는 켜진 결제수단이 없어요.${off.length ? ' 꺼진 결제수단을 켜면 올릴 수 있어요.' : ' 결제수단에서 이 형식을 골라 주세요.'}`);
+    return lines;
+  }
+  const g = d?.diagnosis;
+  const best = g?.sameType?.[0];
+  if (best) {
+    const f = byId.get(best.formatId);
+    lines.push(`가장 비슷한 형식: ${formatName(f)} — 머리글 ${best.total}개 중 ${best.matched}개 맞음`);
+    if (best.missing.length) lines.push(`못 찾은 머리글: ${best.missing.join(', ')}`);
+    if (best.sensitive) lines.push('이 형식은 가려야 할 열을 읽도록 되어 있어 쓰지 않아요(형식 설정 확인 필요).');
+    const scan = f?.header_scan_limit ?? 20;
+    if (best.matched === 0) lines.push(`위에서 ${scan}줄 안에 이 형식의 머리글이 하나도 없어요. 다른 기관·다른 화면에서 받은 파일인지 확인해 주세요.`);
+    return lines;
+  }
+  const others = (g?.otherTypes ?? []).map((o) => `${formatName(byId.get(o.formatId))}은 ${o.fileTypes.join('·') || '없음'}만`);
+  lines.push(others.length ? `이 파일은 ${type}이에요 — ${others.join(', ')} 받아요.` : '등록된 파일 형식이 없어요.');
+  return lines;
+}
+
+/** 이 파일에서 아직 정할 것: 결제수단 고르기 + '나중에'로 둔 새 이체 상대(규칙으로 저장할 수 있는 것만) */
+export function decisionCount(f) {
+  let n = f.state === 'choose' ? 1 : 0;
+  for (const c of f.cards ?? []) if (c.g.ruleAllowed && c.choice === 'later') n += 1;
+  return n;
+}
+
+/** 저장 막대 요약: 결정 안 한 이체 상대 수 */
+export function laterSummary(files) {
+  const n = (files ?? []).filter((f) => f.state === 'ready').reduce((s, f) => s + (f.cards ?? []).filter((c) => c.choice === 'later').length, 0);
+  return n ? `결정 안 한 이체 상대 ${n}개는 검토 대기로 들어가요.` : '';
+}
+
+/** 파일 카드 머리 한 줄 조각: [결제수단, '새로 N건', '지출 ○원'] */
+export function headParts(f, sourceLabel) {
+  if (!f.preview) return [sourceLabel].filter(Boolean);
+  return [sourceLabel, `새로 ${f.preview.newCount}건`, `지출 ${f.preview.spendText}`].filter(Boolean);
+}

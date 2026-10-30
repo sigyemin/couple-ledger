@@ -60,3 +60,32 @@ export function matchFormats(grid, formats, fileType) {
   }
   return out;
 }
+
+/**
+ * 형식을 못 찾은 파일의 진단(CL-069 ③): 형식마다 위 header_scan_limit줄 안에서 머리글이 가장 많이 맞은 줄의 맞은 수.
+ * 돌려주는 것은 형식 쪽 이름(column_map 값)과 숫자뿐 — 파일 셀 값은 담지 않는다(화면·기록에 남지 않게)
+ * @returns {{ fileType, sameType: { formatId, matched, total, missing: string[], sensitive: boolean }[], otherTypes: { formatId, fileTypes: string[] }[] }}
+ *   sameType: 이 파일 종류를 받는 형식, 맞은 수 많은 순. otherTypes: 이 파일 종류를 받지 않는 형식
+ */
+export function diagnoseFormats(grid, formats, fileType) {
+  const sameType = [];
+  const otherTypes = [];
+  for (const f of formats ?? []) {
+    const types = Array.isArray(f.file_types) ? f.file_types : [];
+    if (!types.includes(fileType)) { otherTypes.push({ formatId: f.id, fileTypes: [...types] }); continue; }
+    const wanted = Object.values(f.column_map ?? {}).map(String);
+    const limit = Math.min(grid.length, f.header_scan_limit ?? 20);
+    let best = new Set();
+    for (let r = 0; r < limit; r++) {
+      const cells = new Set((grid[r] ?? []).map(matchNorm).filter(Boolean));
+      const hit = new Set(wanted.filter((w) => cells.has(matchNorm(w))));
+      if (hit.size > best.size) best = hit;
+    }
+    sameType.push({
+      formatId: f.id, matched: best.size, total: wanted.length,
+      missing: wanted.filter((w) => !best.has(w)), sensitive: mapsSensitiveHeader(f),
+    });
+  }
+  sameType.sort((a, b) => b.matched / (b.total || 1) - a.matched / (a.total || 1) || b.matched - a.matched);
+  return { fileType, sameType, otherTypes };
+}

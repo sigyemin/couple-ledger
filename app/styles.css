@@ -516,3 +516,45 @@ button.chip.on { border-color: var(--text); }
 .ded-loan .muted { margin: 0; }
 .req-list { margin: 0; padding-left: 20px; list-style: disc; font-size: 14px; color: var(--sub); display: flex; flex-direction: column; gap: 2px; }
 .ded-loan-tag { margin: 6px 0 0; padding: 8px 12px; border-radius: 12px; background: var(--blue-soft); color: var(--blue-dark); font-size: 14px; font-weight: 700; }
+
+/* 올리기 미리보기 (CL-069): 머리 한 줄·접기, 빨간 안내 한 곳, 이체 상대 한 줄, 아래 붙은 저장. 글자 14px 이상, 회색은 대비 4.5:1 이상(--sub) */
+.upload-screen { padding-bottom: 96px; }
+.upload-head { align-items: flex-start; gap: 8px; }
+.upload-toggle { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-height: 44px; padding: 4px 0;
+  border: 0; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.upload-toggle:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 8px; }
+.upload-chev { width: 14px; color: var(--sub); }
+.upload-toggle .upload-name { font-size: 16px; }
+.upload-head-sub { font-size: 14px; color: var(--sub); overflow-wrap: anywhere; }
+.tag.warn { background: var(--orange-soft); color: var(--orange); font-weight: 700; }
+.upload-warn { margin-top: 8px; padding: 10px 12px; border-radius: 12px; background: var(--orange-soft); color: var(--orange); font-size: 14px; }
+.upload-warn p { margin: 0; overflow-wrap: anywhere; }
+.upload-warn p + p { margin-top: 4px; }
+.upload-dest p { margin: 6px 0 0; }
+.upload-into { font-size: 17px; }
+.upload-into strong { color: var(--blue-dark); }
+.upload-hint, .upload-step, .upload-diag { font-size: 14px; color: var(--sub); overflow-wrap: anywhere; }
+.upload-diag { color: var(--text); }
+.upload-sum { margin: 8px 0 0; font-size: 15px; font-weight: 700; }
+.upload-kv { font-size: 14px; }
+.upload-kv dt { color: var(--sub); }
+.upload-file .cp-new { gap: 0; }
+.upload-file .cp-new .upload-hint { margin: 0 0 4px; }
+.cp-row { padding: 10px 0; border-top: 1px solid var(--line); }
+.cp-row-line { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.cp-row-name { display: flex; flex-direction: column; min-width: 0; }
+.cp-row-name strong { font-size: 15px; overflow-wrap: anywhere; }
+.cp-row-meta { font-size: 14px; color: var(--sub); }
+.cp-select { min-height: 44px; font-size: 15px; width: auto; max-width: 62vw; }
+.cp-row-cat, .cp-row-alias { margin-top: 6px; }
+.cp-row-tools { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; margin-top: 4px; }
+.cp-row-tools:empty { display: none; }
+.cp-row-note { font-size: 14px; color: var(--sub); }
+.upload-savebar { position: sticky; bottom: calc(59px + env(safe-area-inset-bottom)); z-index: 4; display: flex; flex-direction: column; gap: 6px;
+  margin-top: 12px; padding: 10px 12px; border-radius: 16px; background: var(--card); box-shadow: 0 -2px 12px rgba(0, 0, 0, .08); }
+.upload-savebar .btn { margin: 0; }
+.savebar-note { margin: 0; font-size: 14px; color: var(--sub); }
+.savebar-note:empty { display: none; }
+.savebar-note.error { color: var(--orange); }
+@media (min-width: 720px) { .upload-savebar { bottom: 12px; } }
+.upload-screen .small, .upload-screen .muted { font-size: 14px; color: var(--sub); }
