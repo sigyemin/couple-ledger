@@ -437,3 +437,11 @@ a.btn.small-btn { display: inline-flex; }
   color: var(--text); cursor: pointer; }
 .cat-item:hover, .cat-item:focus-visible, .cat-group-btn:focus-visible { background: var(--bg); }
 .cat-item.on { background: var(--blue-soft); color: var(--blue-dark); font-weight: 700; }
+
+/* 가맹점별로 분류하기 (CL-061) */
+.mc-list { display: flex; flex-direction: column; gap: 10px; }
+.mc-item { background: var(--card); border-radius: var(--radius); padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
+.mc-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.mc-name { font-size: 16px; overflow-wrap: anywhere; }
+.mc-item .muted { margin-top: 0; }
+.mc-item .btn { align-self: flex-end; }

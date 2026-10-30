@@ -1,0 +1,164 @@
+// =====================================================================
+// 가맹점별로 분류하기 #/classify (CL-061): 모든 달의 미분류 거래를 가맹점으로 묶어 한 번에 분류
+// 조회: v_transaction_detail(is_uncategorized, 휴지통·시험 결제수단 제외, 쪽 단위, 최대 MAX_ROWS), categories
+// 쓰기(묶음마다): bulk_set_category(변경 기록 — 되돌리기 가능) → 확인함으로(transactions update, 월 검토와 같음)
+//               → '앞으로 같은 가맹점 자동 분류'면 category_rules insert(정리값 똑같으면, 확정). 같은 규칙이 이미 있으면 건너뜀
+// - 통장 이체 행 묶음은 이름을 보여 주되 규칙은 이체 상대 규칙 쪽으로 안내
+// 의존: ui/dom.js, router.js, core/confirm.js, core/errors.js, screens/merchant-classify-model.js, screens/category-picker.js,
+//       screens/review-model.js(confirmBothPatch), screens/shell.js
+// =====================================================================
+import { h } from '../ui/dom.js';
+import { buildHash } from '../router.js';
+import { confirmDialog } from '../core/confirm.js';
+import { STAGES, ACTIONS } from '../core/errors.js';
+import { merchantGroups, groupSub, ruleFor, classifyText, classifyDescription } from './merchant-classify-model.js';
+import { categoryPicker } from './category-picker.js';
+import { confirmBothPatch } from './review-model.js';
+import { errorView } from './shell.js';
+
+const COLUMNS = 'id,merchant_raw,merchant_norm,kind,amount,lines,review_status,source_kind,card_kind,period_month,is_uncategorized,is_test_source';
+const PAGE_SIZE = 1000;
+export const MAX_ROWS = 3000;
+
+// 다시 그린 화면에 한 번 보여 줄 안내
+let classifyNotice = null;
+
+/** 미분류 거래를 쪽 단위로 끝까지(빈 쪽까지, id로 중복 거름) */
+export async function readUncategorized(db, { pageSize = PAGE_SIZE, max = MAX_ROWS } = {}) {
+  const rows = [];
+  const seen = new Set();
+  let offset = 0;
+  while (rows.length <= max) {
+    const r = await db.select('v_transaction_detail', {
+      columns: COLUMNS,
+      filters: [
+        { col: 'is_uncategorized', op: 'eq', value: true }, { col: 'deleted_at', op: 'is', value: null },
+        { col: 'is_test_source', op: 'eq', value: false },
+      ],
+      order: [{ col: 'id', ascending: true }],
+      range: { from: offset, to: offset + Math.min(pageSize, max + 1 - rows.length) - 1 },
+    });
+    if (r.error) return { error: r.error };
+    const page = r.data ?? [];
+    if (page.length === 0) break;
+    offset += page.length;
+    for (const row of page) {
+      if (seen.has(row.id)) continue;
+      seen.add(row.id);
+      rows.push(row);
+    }
+  }
+  return { data: { rows: rows.slice(0, max), capped: rows.length > max } };
+}
+
+/**
+ * @param {{ db, member, reload(), isCurrent(), onError(err, extra) → string }} ctx
+ */
+export async function renderMerchantClassify({ db, member, reload, isCurrent, onError }, doc = globalThis.document) {
+  const [txns, cats] = await Promise.all([
+    readUncategorized(db),
+    db.select('categories', { columns: 'id,parent_id,name,code,sort_order,is_active' }),
+  ]);
+  if (!isCurrent()) return null;
+  const head = h('header', { class: 'screen-head' }, [
+    h('nav', { class: 'month-nav' }, [
+      h('a', { class: 'icon-btn', text: '‹', attrs: { href: buildHash('more'), 'aria-label': '더보기로' } }, [], doc),
+      h('h1', { class: 'title', text: '가맹점별로 분류하기' }, [], doc),
+    ], doc),
+  ], doc);
+  const error = txns.error ?? cats.error;
+  if (error) {
+    onError?.(error);
+    return h('main', { class: 'screen' }, [head, errorView(error.message, error.detail?.sqlState ?? error.code, doc)], doc);
+  }
+  const categories = cats.data ?? [];
+  const groups = merchantGroups(txns.data.rows);
+
+  const status = h('p', { class: 'status-line', attrs: { role: 'status', 'aria-live': 'polite' } }, [], doc);
+  const say = (msg, isError = false) => {
+    status.textContent = msg;
+    status.className = `status-line${isError ? ' error' : ''}`;
+  };
+  if (classifyNotice) { say(classifyNotice.text, classifyNotice.isError); classifyNotice = null; }
+  const fail = (err, extra) => {
+    const code = onError?.(err, extra);
+    say(`${err.message}${code ? ` (오류 번호 ${code})` : ''}`, true);
+  };
+  const done = (text, isError = false) => { classifyNotice = { text, isError }; reload(); };
+
+  const groupItem = (g) => {
+    const pick = categoryPicker({ categories, kind: g.kind, label: `${g.merchant} 카테고리`, doc });
+    const rule = h('input', { attrs: { type: 'checkbox', 'aria-label': `앞으로 ${g.merchant} 자동 분류` } }, [], doc);
+    rule.checked = g.canRule;
+    const go = h('button', { class: 'btn primary small-btn', text: `${g.count}건 분류`, attrs: { type: 'button' } }, [], doc);
+    const lock = (on) => { go.disabled = on; rule.disabled = on || !g.canRule; pick.setDisabled(on); };
+    lock(false);
+    go.addEventListener('click', async () => {
+      if (!pick.value) { say(`${g.merchant}: 카테고리를 골라 주세요`, true); return; }
+      const name = pick.selectedName;
+      const makeRule = g.canRule && rule.checked;
+      const rv = makeRule ? ruleFor(g, pick.value) : null;
+      if (rv && !rv.ok) { say(`규칙을 만들 수 없어요: ${rv.message}. 체크를 끄고 분류만 할 수 있어요.`, true); return; }
+      if (!(await confirmDialog({ ...classifyText(g, name, makeRule), confirmLabel: '분류하기', doc }))) return;
+      lock(true);
+      const r = await db.rpc('bulk_set_category', { p_txn_ids: g.ids, p_category_id: pick.value, p_description: classifyDescription(g, name) });
+      if (r.error) { lock(false); fail(r.error, { stage: STAGES.db_rpc, action: ACTIONS.bulk_edit }); return; }
+      // 확인함으로(이미 확인함은 건너뜀). 실패하면 멈추고 몇 건 됐는지 알림
+      let confirmed = 0;
+      for (const id of g.toConfirm) {
+        if (g.toConfirm.length > 1) say(`확인함으로 바꾸는 중 ${confirmed + 1}/${g.toConfirm.length}`);
+        const u = await db.update('transactions', id, confirmBothPatch(member.memberId));
+        if (u.error || !u.data?.length) {
+          const code = u.error ? onError?.(u.error, { stage: STAGES.db_update, txnId: id }) : null;
+          done(`${g.count}건을 '${name}'(으)로 분류했지만 확인함으로는 ${confirmed}건만 바꿨어요${makeRule ? '(규칙은 만들지 않았어요)' : ''}.${code ? ` (오류 번호 ${code})` : ''}`, true);
+          return;
+        }
+        confirmed += 1;
+      }
+      let ruleNote = '';
+      if (makeRule) {
+        const ir = await db.insert('category_rules', { ...rv.value, created_by: member.memberId });
+        if (ir.error) {
+          if (ir.error.code === 'duplicate') ruleNote = ' 같은 규칙이 이미 있어요.';
+          else {
+            const code = onError?.(ir.error, { stage: STAGES.db_update });
+            done(`${g.count}건을 '${name}'(으)로 분류했지만 규칙은 만들지 못했어요. 규칙·카테고리에서 만들어 주세요.${code ? ` (오류 번호 ${code})` : ''}`, true);
+            return;
+          }
+        } else ruleNote = ' 앞으로 올릴 때 자동 분류돼요.';
+      }
+      done(`${g.merchant} ${g.count}건을 '${name}'(으)로 분류했어요.${ruleNote} 변경 기록에서 되돌릴 수 있어요.`);
+    });
+    return h('li', { class: 'mc-item' }, [
+      h('div', { class: 'mc-head' }, [
+        h('strong', { class: 'mc-name', text: g.merchant }, [], doc),
+        g.transferLike ? h('span', { class: 'tag', text: '이체 상대' }, [], doc) : null,
+        g.kind === 'income' ? h('span', { class: 'tag', text: '수입' }, [], doc) : null,
+      ], doc),
+      h('p', { class: 'muted small', text: groupSub(g) }, [], doc),
+      pick,
+      g.canRule
+        ? h('label', { class: 'filter-check' }, [rule, h('span', { text: '앞으로 같은 가맹점 자동 분류(가맹점 규칙 만들기)' }, [], doc)], doc)
+        : (g.transferLike
+          ? h('p', { class: 'muted small' }, [
+            '통장 이체예요. 앞으로 자동으로 하려면 ',
+            h('a', { text: '이체 상대 규칙', attrs: { href: buildHash('cprules') } }, [], doc),
+            '에서 정해요.',
+          ], doc)
+          : h('p', { class: 'muted small', text: '수입은 가맹점 규칙 없이 분류만 해요.' }, [], doc)),
+      go,
+    ], doc);
+  };
+
+  const total = groups.reduce((s, g) => s + g.total, 0);
+  return h('main', { class: 'screen' }, [
+    head,
+    status,
+    h('section', { class: 'card' }, [
+      h('p', { class: 'muted', text: groups.length ? `미분류 ${total}건 · 가맹점 ${groups.length}곳. 건수가 많은 곳부터 보여요.` : '분류가 필요한 거래가 없어요' }, [], doc),
+      txns.data.capped ? h('p', { class: 'notice small', text: `거래가 많아 앞 ${MAX_ROWS.toLocaleString('ko-KR')}건 안에서만 묶었어요. 분류하고 나면 나머지가 보여요.` }, [], doc) : null,
+      h('p', { class: 'muted small', text: '분류하면 확인함으로 바뀌어요. 가맹점 규칙은 이름이 똑같은 가맹점(띄어쓰기·전각 무시)에 적용돼요.' }, [], doc),
+    ], doc),
+    groups.length ? h('ul', { class: 'mc-list' }, groups.map(groupItem), doc) : null,
+  ], doc);
+}
