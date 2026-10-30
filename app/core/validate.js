@@ -6,7 +6,7 @@
 // 의존: sensitive.js, format.js (둘 다 의존 없음)
 // =====================================================================
 import { hasSensitiveNumber, approvalNoValid } from './sensitive.js';
-import { parseDateOnly } from './format.js';
+import { parseDateOnly, daysInMonth } from './format.js';
 
 const ok = (value) => ({ ok: true, value });
 const fail = (reason, message) => ({ ok: false, reason, message });
@@ -19,6 +19,7 @@ export const MESSAGES = Object.freeze({
   amount: '금액은 0 이상의 정수(14자리 이하)로 입력해 주세요',
   ratio: '비율은 0~100, 소수 둘째 자리까지 입력해 주세요',
   date: '실제 있는 날짜(YYYY-MM-DD)를 입력해 주세요',
+  date_range: '날짜는 2000-01-01부터 오늘에서 1년 뒤까지만 넣을 수 있어요',
   transfer_reason: '이체는 이체 성격의 제외 사유(카드대금·계좌 간 이동·개인 송금)가 필요합니다',
   exclude_reason: '제외하려면 사유를 골라 주세요',
 });
@@ -54,9 +55,27 @@ export function approvalNo(v) {
   return approvalNoValid(s) ? ok(s) : fail('invalid', MESSAGES.invalid);
 }
 
-/** 일자(DT): 실제 있는 날짜만 (2026-02-30 거부) */
-export function date(v) {
-  return parseDateOnly(v) ? ok(v) : fail('invalid', MESSAGES.date);
+export const DATE_MIN = '2000-01-01';
+/**
+ * 거래 날짜로 넣을 수 있는 범위: 2000-01-01 ~ 오늘+1년(같은 달·날, 2월 29일이면 28일) — 직접 추가·상세 고치기 공통 (CL-047)
+ * @param today 'YYYY-MM-DD'(서울 기준, format.todaySeoul)
+ */
+export function dateRange(today) {
+  const t = parseDateOnly(today);
+  if (!t) throw new TypeError('오늘 날짜가 필요합니다');
+  const y = t.y + 1;
+  const d = Math.min(t.d, daysInMonth(y, t.m));
+  return { min: DATE_MIN, max: `${y}-${String(t.m).padStart(2, '0')}-${String(d).padStart(2, '0')}` };
+}
+
+/** 일자(DT): 실제 있는 날짜만 (2026-02-30 거부). today를 주면 거래 날짜 범위(dateRange)도 검사 */
+export function date(v, { today = null } = {}) {
+  if (!parseDateOnly(v)) return fail('invalid', MESSAGES.date);
+  if (today) {
+    const r = dateRange(today);
+    if (v < r.min || v > r.max) return fail('invalid', MESSAGES.date_range);
+  }
+  return ok(v);
 }
 
 // 자유 입력 길이 (설계 v0.1 6장 [제안] + schema.sql CHECK가 있는 칸은 그 값)

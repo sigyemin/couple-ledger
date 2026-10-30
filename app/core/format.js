@@ -44,6 +44,13 @@ export function parseDateOnly(s) {
   return { y, m: mo, d };
 }
 
+/** 오늘(서울) 'YYYY-MM-DD' */
+export function todaySeoul(now = new Date()) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' })
+    .formatToParts(now).map((x) => [x.type, x.value]));
+  return `${p.year}-${p.month}-${p.day}`;
+}
+
 export function daysInMonth(y, m) {
   // Date.UTC로 계산하므로 시간대 영향 없음
   return new Date(Date.UTC(y, m, 0)).getUTCDate();

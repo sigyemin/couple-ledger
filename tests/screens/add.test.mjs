@@ -57,3 +57,10 @@ test('확인한 달에 추가하면 저장 전 알림', () => {
   assert.match(addConfirmText(row, 'reviewed').message, /^2026년 9월은 확인을 마친 달/);
   assert.ok(addConfirmText(row, 'changed_after_review'));
 });
+
+test('buildManualRow: 날짜 범위(today를 주면 2000-01-01 ~ 오늘+1년, CL-047)', () => {
+  const c = { ...ctx, today: '2026-10-30' };
+  assert.equal(buildManualRow({ ...form, date: '1999-12-31' }, c).field, 'date');
+  assert.equal(buildManualRow({ ...form, date: '2027-11-01' }, c).field, 'date');
+  assert.equal(buildManualRow({ ...form, date: '2027-10-30' }, c).ok, true);
+});

@@ -47,14 +47,15 @@ export function linesPlan(row, newAmount) {
 
 /**
  * 입력 검사 → update 값
- * form: { date, time, merchant, amountText }
+ * form: { date, time, merchant, amountText }, today: 'YYYY-MM-DD'(서울, 날짜 범위 검사)
  * @returns {{ ok: true, patch, changed: string[], amount, plan, monthFrom, monthTo } | { ok: false, field, message }}
  *   changed: 'amount' | 'date' | 'time' | 'merchant'
  *   monthFrom·monthTo: 귀속월이 바뀌면 둘 다, 아니면 null
  */
-export function buildValuesPatch(row, form, memberId) {
+export function buildValuesPatch(row, form, memberId, today = null) {
   const bad = (field, message) => ({ ok: false, field, message });
-  const d = checkDate(form.date);
+  // 날짜 범위(직접 추가와 같은 규칙)는 날짜를 바꿀 때만 본다 — 이미 들어온 범위 밖 거래도 다른 칸은 고칠 수 있게
+  const d = checkDate(form.date, { today: form.date !== row.occurred_on ? today : null });
   if (!d.ok) return bad('date', d.message);
   const time = String(form.time ?? '').trim();
   if (time && !RE_TIME.test(time)) return bad('time', '시각은 HH:MM으로 입력해 주세요');

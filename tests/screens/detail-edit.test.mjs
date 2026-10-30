@@ -137,3 +137,13 @@ test('파일 값에서 고침: 업로드 거래 + 수정 기록 칸, 직접 추�
   assert.equal(linesMismatch(row({ lines: [{ amount: 30000 }] })), false);
   assert.equal(linesMismatch(row({ lines: [{ amount: 20000 }, { amount: 5000 }] })), true);
 });
+
+test('날짜 범위(CL-047): 날짜를 바꿀 때만 직접 추가와 같은 범위를 본다', () => {
+  const T = '2026-10-30';
+  assert.equal(buildValuesPatch(row(), form({ date: '1999-12-31' }), ME, T).field, 'date');
+  assert.equal(buildValuesPatch(row(), form({ date: '2027-10-31' }), ME, T).field, 'date');
+  assert.equal(buildValuesPatch(row(), form({ date: '2027-10-30' }), ME, T).ok, true);
+  // 이미 범위 밖 날짜로 들어온 거래도 다른 칸은 고칠 수 있다
+  const old = row({ occurred_on: '1999-05-01', period_month: '1999-05-01' });
+  assert.equal(buildValuesPatch(old, { ...valuesDraft(old), merchant: '가짜분식' }, ME, T).ok, true);
+});

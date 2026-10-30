@@ -9,6 +9,8 @@ import { h } from '../ui/dom.js';
 import { buildHash, currentMonth } from '../router.js';
 import { confirmDialog } from '../core/confirm.js';
 import { STAGES } from '../core/errors.js';
+import { todaySeoul } from '../core/format.js';
+import { dateRange } from '../core/validate.js';
 import { ADD_KINDS, sourceOptions, buildManualRow, monthOf, addConfirmText } from './add-model.js';
 import { categoryOptions } from './detail-model.js';
 import { noteForTxn } from './detail.js';
@@ -25,13 +27,6 @@ export async function loadAdd(db) {
   const error = [sources, members, categories].find((r) => r.error)?.error;
   if (error) return { error };
   return { data: { sources: sources.data ?? [], members: members.data ?? [], categories: categories.data ?? [] } };
-}
-
-/** 오늘(서울) 'YYYY-MM-DD' */
-function today(now = new Date()) {
-  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' })
-    .formatToParts(now).map((x) => [x.type, x.value]));
-  return `${p.year}-${p.month}-${p.day}`;
 }
 
 /**
@@ -78,8 +73,10 @@ export async function renderAdd({ db, member, query, go, isCurrent, onError }, d
   }
   const src = select('결제수단', [['', '결제수단 고르기'], ...srcOpts.map((o) => [o.id, o.text])], '');
   const kind = select('종류', ADD_KINDS, 'expense');
-  const date = input('날짜', { type: 'date' });
-  date.value = today();
+  const today = todaySeoul();
+  const range = dateRange(today);
+  const date = input('날짜', { type: 'date', min: range.min, max: range.max });
+  date.value = today;
   const time = input('시각(선택)', { type: 'time' });
   const merchant = input('가맹점·내용', { maxlength: '200', placeholder: '예: 동네 시장' });
   const amount = input('금액', { inputmode: 'numeric', maxlength: '20', placeholder: '원' });
@@ -116,7 +113,7 @@ export async function renderAdd({ db, member, query, go, isCurrent, onError }, d
     const b = buildManualRow({
       sourceId: src.value, kind: kind.value, date: date.value, time: time.value, merchant: merchant.value,
       amountText: amount.value, categoryId: cat.value, isShared: shared.checked, memo: memo.value,
-    }, { sourceIds: new Set(srcOpts.map((o) => o.id)), categoryIds: allowedCats, memberId: member.memberId, newId: () => entryKey });
+    }, { sourceIds: new Set(srcOpts.map((o) => o.id)), categoryIds: allowedCats, memberId: member.memberId, newId: () => entryKey, today: todaySeoul() });
     if (!b.ok) { say(b.message, true); return; }
 
     busy(true);
