@@ -151,3 +151,34 @@ test('최근 3개월 읽기 상한: 넘으면 capped(일부만 계산 안내)', 
   const b = await readRecentTxns(db, 2026, ['2026-10-01'], { max: 100 });
   assert.deepEqual([b.data.rows.length, b.data.capped], [7, false]);
 });
+
+test('홈 카드(사용자 결정 10-30): 항목별 누구 무엇 + 이유, 총급여 없으면 입력 안내', async () => {
+  const { homeAdvice } = await import('../../app/screens/deduction-model.js');
+  const none = homeAdvice(peopleView([st('m1', { total_salary_amount: null }), st('m2', { total_salary_amount: null })], members));
+  assert.deepEqual(none, { needSalary: true, rows: [] });
+  const p = peopleView([
+    st('m1', { remaining_to_minimum_amount: '4200000', total_spend_amount: '3300000', marginal_credit_rate: '0', marginal_check_rate: '0', marginal_public_transit_rate: '0',
+      medical_remaining_to_threshold_amount: '600000', is_rent_eligible: false }),
+    st('m2', { medical_remaining_to_threshold_amount: '0', is_rent_eligible: true, rent_credit_amount: '20400' }),
+  ], members);
+  const a = homeAdvice(p);
+  assert.equal(a.needSalary, false);
+  assert.deepEqual(a.rows.map((r) => [r.label, r.text]), [
+    ['일반 지출', '나리 체크카드 30%'], ['대중교통', '나리 대중교통(카드) 40%'], ['의료비', '진료받는 사람 본인 카드'], ['월세', '나리 명의 통장'],
+  ]);
+  assert.equal(a.rows[0].reason, '가람은 공제 시작까지 420만 원 남음');
+  assert.equal(a.rows[2].reason, '본인 의료비 세액공제 + 카드 공제 · 가람 문턱까지 60만 원 · 나리 문턱 넘음');
+  assert.equal(a.rows[3].reason, '나리 예상 세액공제 20,400원');
+  const noRent = homeAdvice(peopleView([st('m1', { is_rent_eligible: false }), st('m2', { is_rent_eligible: false })], members));
+  assert.deepEqual([noRent.rows[3].text, noRent.rows[0].reason], ['월세 공제 요건을 켠 사람이 없어요', '두 사람 모두 공제가 시작됐어요(최저사용금액 넘음)']);
+  const half = homeAdvice(peopleView([st('m1', { total_salary_amount: null }), st('m2')], members));
+  assert.match(half.rows[0].reason, /가람 총급여 없음/);
+});
+
+test('홈: 공제 카드를 기다리지 않고 먼저 그린 뒤 바꿔 끼운다', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../../app/screens/home.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(src, /await adviceCard/);
+  assert.match(src, /확인하는 중…/);
+  assert.match(src, /adviceCard\.then\(\(card\) => \{\s*if \(isCurrent\(\)\) advice\.replaceWith\(card\);/);
+});

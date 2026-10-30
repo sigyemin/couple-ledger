@@ -6,7 +6,6 @@
 //   missingState         : 'loading'(아직 조회 중) | 'error'(조회 실패 — 이 줄만 '확인 못 함') | 없음(missing 사용)
 //   thisMonth            : 이번 달 'YYYY-MM-01'(달 이름에 해를 붙일지)
 //   changedMonths        : v_monthly_review_status 중 review_state = 'changed_after_review' 행들
-//   categories           : v_monthly_category 행들(그 달) + categoryNames(Map id → 이름)
 // 금액은 DB numeric이 문자열로 올 수 있어 Number로 바꾼다
 // 의존: core/format.js
 // =====================================================================
@@ -33,25 +32,9 @@ export function subjectParticle(name) {
   return '이';
 }
 
-/** 많이 쓴 곳: 그룹별 합계 상위 n개 (미분류는 '미분류'), 막대 비율 = 1등 대비 */
-export function topGroups(categoryRows, categoryNames, n = 3) {
-  const sums = new Map();
-  for (const r of categoryRows ?? []) {
-    const key = r.group_category_id ?? null;
-    sums.set(key, (sums.get(key) ?? 0) + num(r.total_amount));
-  }
-  const list = [...sums]
-    .filter(([, v]) => v > 0)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, n)
-    .map(([id, amount]) => ({ id, name: id ? (categoryNames.get(id) ?? '이름 없음') : '미분류', amount }));
-  const max = list[0]?.amount ?? 0;
-  return list.map((g) => ({ ...g, ratio: max ? g.amount / max : 0 }));
-}
-
 /**
  * @param {string} monthStart 'YYYY-MM-01'
- * @returns {{ title, expense, compare, todos: {key, text, sub, href, tone}[], pending, groups }}
+ * @returns {{ title, expense, compare, todos: {key, text, sub, href, tone}[], pending }}
  *   pending: 안 올린 파일을 아직 확인하는 중
  */
 export function buildHomeModel(monthStart, d) {
@@ -80,7 +63,7 @@ export function buildHomeModel(monthStart, d) {
     const ym = String(c.period_month).slice(0, 7);
     todos.push({
       key: `changed-${ym}`, tone: 'warn', href: `#/settle?month=${ym}`,
-      text: `${Number(ym.slice(5))}월 확인 후 변경됨`, sub: `정산 숫자가 바뀐 거래 ${num(c.changed_txn_count)}건`,
+      text: `${Number(ym.slice(5))}월 확인 후 변경됨`, sub: `확인 뒤 바뀐 거래 ${num(c.changed_txn_count)}건`,
     });
   }
   return {
@@ -89,6 +72,5 @@ export function buildHomeModel(monthStart, d) {
     compare: compareText(expense, d.prevSummary ? num(d.prevSummary.expense_amount) : null),
     todos,
     pending: d.missingState === 'loading',
-    groups: topGroups(d.categories, d.categoryNames ?? new Map()).map((g) => ({ ...g, amountText: won(g.amount) })),
   };
 }

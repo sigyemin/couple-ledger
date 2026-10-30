@@ -32,7 +32,7 @@ test('되살리기: 원거래 먼저·환불 나중, 원거래가 휴지통이�
   const both = restorePlan([U(2), U(1)], rows);
   assert.deepEqual([both.askOriginals, restoreOrder(both, rows, []).order], [[], [U(1), U(2)]]);
   const t = restoreConfirmText([rows[0], rows[1], rows[2]], new Map([['2026-10-01', 'reviewed'], ['2026-09-01', 'not_reviewed']]));
-  assert.match(t.message, /^3건을 되살릴까요\? 2026년 9월, 2026년 10월 집계·정산에 다시 들어가요\. 2026년 10월이 '확인 후 변경됨'이 돼요\. 원거래를 먼저/);
+  assert.match(t.message, /^3건을 되살릴까요\? 2026년 9월, 2026년 10월 집계에 다시 들어가요\. 2026년 10월이 '확인 후 변경됨'이 돼요\. 원거래를 먼저/);
   assert.match(restoreConfirmText([rows[2]], new Map()).message, /^시험상점 4,500원을 되살릴까요\?/);
   assert.match(restoreConfirmText([rows[2]], new Map(), { statesUnknown: true }).message, /확인 완료한 달인지 확인하지 못했어요/);
   assert.deepEqual(restorePatch('m1'), { deleted_at: null, deleted_by: null, updated_by: 'm1' });
@@ -63,7 +63,7 @@ test('변경 기록: 목록 줄, 상세 미리보기(원래대로/그대로), �
   assert.deepEqual(d.rows.map((r) => [r.tag, r.changes[0]]), [
     ['원래대로', '분류: 식비 · 외식 → 식비 · 식재료'], ['그대로', '분류: 그 뒤 직접 식비 · 식재료(으)로 고쳐 그대로'], ['원래대로', '분류: 식비 · 외식 → 분류 지움']]);
   assert.deepEqual([d.canRevert, d.buttonLabel, d.needsConfirm], [true, '2건 되돌리기', false]);
-  assert.match(d.notes[0], /정산 숫자는 그대로/);
+  assert.match(d.notes[0], /분류만 바뀐 묶음이라 '확인 후 변경됨'이 뜨지 않아요/);
   const tx = batchDetail({ ...b, kind: 'counterparty_apply' }, [{ txn_id: U(1), target_kind: 'txn', old_kind: 'expense', new_kind: 'transfer', old_is_shared: true, new_is_shared: false,
     old_exclude_reason: null, new_exclude_reason: 'personal_transfer', old_review_status: 'needs_review', new_review_status: 'confirmed', is_revertible: true, revert_action: 'revert' }], txns, cats);
   assert.equal(tx.rows[0].changes[0], '종류 이체 → 지출, 개인 → 공동, 제외 두 사람 사이 송금 → 없음, 확인함 → 검토 대기');

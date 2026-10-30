@@ -222,6 +222,46 @@ export function minimumRatio(r) {
   return Math.max(0, Math.min(1, (num(r.total_spend_amount) ?? 0) / m));
 }
 
+// ---------------------------------------------------------------- 홈 '지금 누구 카드가 유리' (사용자 결정 10-30)
+
+/** 사람별 '공제 시작까지' 이유 한 줄(최저 전인 사람만, 총급여 없는 사람은 그 말) */
+function startReason(people) {
+  const parts = people.map((p) => {
+    if (!p.hasSalary) return `${p.name} 총급여 없음`;
+    if (p.remaining > 0) return `${p.name}${josa(p.name, '은', '는')} 공제 시작까지 ${manWon(p.remaining)} 남음`;
+    return null;
+  }).filter(Boolean);
+  return parts.length ? parts.join(' · ') : '두 사람 모두 공제가 시작됐어요(최저사용금액 넘음)';
+}
+
+/**
+ * 홈 카드 줄: 공제 항목별(일반 지출·대중교통·의료비·월세) "누구의 무엇이 유리" + 짧은 이유
+ * 총급여가 둘 다 없으면 needSalary(입력 화면 링크를 보여 줌)
+ * @returns {{ needSalary: boolean, rows: { key, label, text, reason }[] }}
+ */
+export function homeAdvice(people) {
+  if (!people.some((p) => p.hasSalary)) return { needSalary: true, rows: [] };
+  const rows = [];
+  for (const [key, label] of [['general', '일반 지출'], ['transit', '대중교통']]) {
+    const b = bestChoice(people, key);
+    rows.push({ key, label, text: b.none ? '지금은 누구 카드든 0%' : `${b.who} ${b.mediumText} ${rateText(b.rate)}`, reason: startReason(people) });
+  }
+  const med = people.filter((p) => p.row).map((p) => {
+    if (!p.hasSalary) return `${p.name} 총급여 없음`;
+    const left = num(p.row.medical_remaining_to_threshold_amount);
+    return left > 0 ? `${p.name} 문턱까지 ${manWon(left)}` : `${p.name} 문턱 넘음`;
+  });
+  rows.push({ key: 'medical', label: '의료비', text: '진료받는 사람 본인 카드', reason: `본인 의료비 세액공제 + 카드 공제 · ${med.join(' · ')}` });
+  const eligible = people.filter((p) => p.row?.is_rent_eligible);
+  rows.push(eligible.length
+    ? {
+      key: 'rent', label: '월세', text: `${eligible.map((p) => p.name).join('·')} 명의 통장`,
+      reason: eligible.map((p) => (p.hasSalary ? `${p.name} 예상 세액공제 ${won(num(p.row.rent_credit_amount) ?? 0)}` : `${p.name} 총급여 없음`)).join(' · '),
+    }
+    : { key: 'rent', label: '월세', text: '월세 공제 요건을 켠 사람이 없어요', reason: '연말정산 설정에서 켤 수 있어요' });
+  return { needSalary: false, rows };
+}
+
 // ---------------------------------------------------------------- 설정 입력 검사 (E2)
 
 const RE_INT = /^[0-9]+$/;

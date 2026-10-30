@@ -85,8 +85,8 @@ test('확인 상태: 확인 전·확인 완료·확인 후 변경됨, 검토 대
   assert.deepEqual([c.title, c.sub, c.canConfirm, c.canUnconfirm], ['10월 확인 완료', '나리 · 2026-10-31 21:00', false, true]);
   const d = reviewView('2026-09-01', { review_state: 'changed_after_review', reviewed_by: 'm1', reviewed_at: '2026-10-01T00:00:00Z', changed_txn_count: '2' }, members);
   assert.deepEqual([d.title, d.changedCount, d.canConfirm, d.canUnconfirm, d.confirmLabel], ['9월 확인 후 변경됨', 2, true, true, '9월 다시 확인 완료']);
-  assert.match(d.sub, /^가람이 2026-10-01 09:00에 확인한 뒤 정산에 영향 주는 거래 2건이 바뀌었어요$/);
-  assert.match(confirmMonthText('2026-10-01', 3).message, /^2026년 10월 정산 숫자를 확인했다고 남겨요\. 검토 대기 3건이 남아 있어요\./);
+  assert.match(d.sub, /^가람이 2026-10-01 09:00에 확인한 뒤 공동 지출 거래 2건이 바뀌었어요$/);
+  assert.match(confirmMonthText('2026-10-01', 3).message, /^2026년 10월 거래를 확인했다고 남겨요\. 검토 대기 3건이 남아 있어요\./);
   assert.doesNotMatch(confirmMonthText('2026-10-01', 0).message, /검토 대기/);
   assert.match(unconfirmMonthText('2026-10-01').message, /확인 기록을 지워요/);
 });

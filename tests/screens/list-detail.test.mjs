@@ -156,7 +156,7 @@ test('상세 모델: 머리·기본 정보·분류·정산·기록', () => {
   assert.deepEqual([m.title, m.amount, m.status], ['가상식당', '12,000원', '자동 분류 · 10월 확인 전']);
   assert.deepEqual(m.info, [['이용일', '10월 5일 (월) 12:30'], ['결제수단', '시험 카드 · 가람'], ['할부', '3개월'], ['들어온 길', '파일에서 올림']]);
   assert.deepEqual(m.classification.lines.map((l) => [l.name, l.amount, l.source]), [['식비 · 외식', '12,000원', '규칙']]);
-  assert.deepEqual(m.settle, [['공동', '공동'], ['분담', '가람 50%'], ['이 건에서 상대 몫', '6,000원']]);
+  assert.deepEqual(m.settle, [['공동', '공동']]); // 5:5 분담·상대 몫 줄 없음(사용자 결정 10-30)
   assert.deepEqual(m.history, [['올림', '나리 · 2026-10-06 12:00']]);
   assert.deepEqual(m.refunds, [{ id: U(3), text: '10월 7일 (수) · 환불', amount: '−5,000원' }]);
   assert.equal(m.canChangeCategory, true);

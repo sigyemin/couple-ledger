@@ -92,7 +92,7 @@ export async function renderAdd({ db, member, query, go, isCurrent, onError }, d
   const form = h('section', { class: 'card add-form' }, [
     field('결제수단 (결제자 = 결제수단 주인)', src), field('종류', kind), field('날짜', date), field('시각(선택)', time),
     field('가맹점·내용', merchant), field('금액', amount), field('카테고리(선택)', cat),
-    h('label', { class: 'filter-check' }, [shared, h('span', { text: '공동 지출(정산에 넣기)' }, [], doc)], doc),
+    h('label', { class: 'filter-check' }, [shared, h('span', { text: '공동 지출' }, [], doc)], doc),
     field('메모(선택)', memo), save,
   ], doc);
   const busy = (on) => {

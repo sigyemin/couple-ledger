@@ -341,7 +341,7 @@ export async function renderReapply({ db, id, query, go, isCurrent, onError }, d
     sum.changed.length ? h('section', { class: 'card' }, [changeList, more], doc) : null,
     h('p', { class: 'muted small', text: r0.is_ambiguous
       ? '검토 대기로 두는 규칙이라 카테고리는 제안으로 붙어요(검토 대기는 그대로).'
-      : '분류만 바뀌고 정산 숫자는 그대로라 확인 완료한 달에 “확인 후 변경됨”이 뜨지 않아요. 바꾼 뒤에도 한 번에 되돌릴 수 있어요.' }, [], doc),
+      : '분류만 바뀌어 확인 완료한 달에 “확인 후 변경됨”이 뜨지 않아요. 바꾼 뒤에도 한 번에 되돌릴 수 있어요.' }, [], doc),
     apply, result, later,
   ], doc);
 }
