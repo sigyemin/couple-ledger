@@ -183,3 +183,63 @@ test('FF FE로 시작하지만 UTF-16이 아닌 파일도 숫자를 찾는다 (B
   assert.equal(decodeTexts(Buffer.from('SQLite format 3\0', 'latin1')), null);
   assert.deepEqual(decodeTexts(Buffer.from('abc')), ['abc']);
 });
+
+// ---------------------------------------------------------------- 글 검사 (CL-012 5번: 커밋 메시지·PR 제목·본문)
+import { checkText, eventTexts } from '../scripts/scan.mjs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+const SCAN = new URL('../scripts/scan.mjs', import.meta.url).pathname;
+
+test('글 검사: 같은 규칙(숫자·비밀값), 줄 번호·이름만, 허용 목록 없음, 식별자는 통과', () => {
+  const clean = ['fix(upload): 2,000건 상한', 'head 9f9a61e · main 6b841ab', 'id a0000000-0000-4000-8000-000000000001', '2026-10-30 09:41'].join('\n');
+  assert.deepEqual(checkText('pr_body', clean), []);
+  const bad = checkText('commit_abc1234', `첫 줄\n번호 ${digits(12)}\nsb_secret_${'x'.repeat(12)}`);
+  assert.deepEqual(bad, [{ label: 'commit_abc1234', line: 2, rule: 'sensitive_number' }, { label: 'commit_abc1234', line: 3, rule: 'supabase_secret_key' }]);
+  assert.ok(!JSON.stringify(bad).includes(digits(12)));
+  assert.deepEqual(checkText('pr_body', fakeJwt('anon')).map((f) => f.rule), ['jwt_outside_config']); // 글에서는 anon JWT도 막는다
+  assert.deepEqual(checkText('x', null), []);
+});
+
+test('이벤트 JSON에서 PR 제목·본문, 없는 칸은 빈 글', () => {
+  assert.deepEqual(eventTexts({ pull_request: { title: 't', body: null } }), [['pr_title', 't'], ['pr_body', '']]);
+  assert.deepEqual(eventTexts({}), [['pr_title', ''], ['pr_body', '']]);
+});
+
+test('명령줄: --text 파일·--event·--commits — 걸리면 종료 코드 1, 출력에 값 없음 (임시 폴더·임시 git 저장소)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'scan-text-'));
+  try {
+    const secret = digits(13, 3);
+    const run = (args) => spawnSync(process.execPath, [SCAN, ...args], { cwd: dir, encoding: 'utf8' });
+    writeFileSync(join(dir, 'ok.txt'), 'feat: 화면 추가\n');
+    writeFileSync(join(dir, 'bad.txt'), `feat: 화면\n\n번호 ${secret}\n`);
+    assert.equal(run(['--text', 'commit_msg', join(dir, 'ok.txt')]).status, 0);
+    const bad = run(['--text', 'commit_msg', join(dir, 'bad.txt')]);
+    assert.equal(bad.status, 1);
+    assert.match(bad.stderr, /commit_msg:3: sensitive_number/);
+    assert.ok(!bad.stderr.includes(secret) && !bad.stdout.includes(secret));
+    assert.equal(run(['--text', 'Bad Label', join(dir, 'ok.txt')]).status, 2); // 이름 형식이 틀리면 실행 오류
+
+    writeFileSync(join(dir, 'event.json'), JSON.stringify({ pull_request: { title: 'feat: 규칙', body: `본문\n${secret}` } }));
+    const ev = run(['--event', join(dir, 'event.json')]);
+    assert.equal(ev.status, 1);
+    assert.match(ev.stderr, /pr_body:2: sensitive_number/);
+    assert.ok(!ev.stderr.includes(secret));
+
+    const git = (...a) => execFileSync('git', a, { cwd: dir, stdio: 'pipe' });
+    git('init', '-q');
+    git('-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-q', '--allow-empty', '--no-verify', '-m', 'base');
+    const base = git('rev-parse', 'HEAD').toString().trim();
+    git('-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-q', '--allow-empty', '--no-verify', '-m', 'ok commit');
+    assert.equal(run(['--commits', base, 'HEAD']).status, 0);
+    git('-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-q', '--allow-empty', '--no-verify', '-m', `bad ${secret}`);
+    const cm = run(['--commits', base, 'HEAD']);
+    assert.equal(cm.status, 1);
+    assert.match(cm.stderr, /commit_[0-9a-f]{7}:1: sensitive_number/);
+    assert.ok(!cm.stderr.includes(secret));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

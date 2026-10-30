@@ -1,0 +1,4 @@
+#!/bin/sh
+# 커밋 메시지 유출 검사 (1층, CL-012 5번). 설정: git config core.hooksPath .githooks
+# 우회(--no-verify)해도 PR 검사(2층)에서 커밋 메시지를 다시 검사한다.
+exec node scripts/scan.mjs --text commit_msg "$1"
