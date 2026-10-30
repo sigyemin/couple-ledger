@@ -135,3 +135,26 @@ test('config.js: 주소는 https supabase.co, 키는 공개용(publishable)만 (
   if (config.SUPABASE_PUBLISHABLE_KEY) assert.match(config.SUPABASE_PUBLISHABLE_KEY, /^sb_publishable_/);
   assert.equal(config.APP_STORAGE_PREFIX, 'cl-');
 });
+
+test('화면 이동 메뉴(CL-051): 현재 탭만 aria-current=page, 하위 화면은 부모 탭', async () => {
+  const { tabBar } = await import('../../app/screens/shell.js');
+  const doc = {
+    createElement(tag) {
+      return { tag, attrs: {}, kids: [], className: '', setAttribute(k, v) { this.attrs[k] = v; }, append(...c) { this.kids.push(...c); }, addEventListener() {} };
+    },
+    createTextNode(t) { return { text: t }; },
+  };
+  const cur = (screen) => {
+    const nav = tabBar(screen, doc);
+    assert.equal(nav.attrs['aria-label'], '화면 이동');
+    const on = nav.kids.filter((a) => a.attrs['aria-current'] === 'page');
+    assert.equal(on.length, 1, screen);
+    return [on[0].attrs.href, on[0].textContent];
+  };
+  assert.deepEqual(cur('home'), ['#/home', '홈']);
+  assert.deepEqual(cur('upload'), ['#/upload', '올리기']);
+  assert.deepEqual(cur('txn'), ['#/list', '내역']);
+  assert.deepEqual(cur('add'), ['#/list', '내역']);
+  assert.deepEqual(cur('rules'), ['#/more', '더보기']);
+  assert.deepEqual(cur('settle'), ['#/settle', '정산']);
+});

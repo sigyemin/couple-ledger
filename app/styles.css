@@ -91,11 +91,29 @@ ul { list-style: none; margin: 0; padding: 0; }
 .btn.primary { background: var(--blue); color: #FFFFFF; }
 .btn:disabled { opacity: .5; cursor: default; }
 
-.tabbar { position: fixed; left: 0; right: 0; bottom: 0; display: flex; justify-content: center;
-  background: var(--card); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom); }
-.tab { flex: 1; max-width: 112px; display: flex; flex-direction: column; align-items: center; justify-content: center;
-  min-height: 56px; font-size: 12px; color: var(--sub-on-white); text-decoration: none; }
-.tab.on { color: var(--text); font-weight: 700; }
+/* 화면 이동 (CL-051): 좁은 화면 = 아래 탭, 넓은 화면(720px 이상) = 위쪽 고정 메뉴. 현재 화면은 파랑 + 굵게 + 막대 */
+.tabbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; display: flex; justify-content: center;
+  background: var(--card); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom);
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, .04); }
+.tab { position: relative; flex: 1; max-width: 112px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-height: 58px; font-size: 14px; font-weight: 600; color: var(--sub); text-decoration: none; }
+.tab:hover { color: var(--text); }
+.tab.on { color: var(--blue); font-weight: 800; }
+.tab.on::before { content: ''; position: absolute; top: 0; left: 22%; right: 22%; height: 3px; border-radius: 0 0 3px 3px; background: var(--blue); }
+.tab:focus-visible { outline: 3px solid var(--blue); outline-offset: -3px; }
+@media (min-width: 720px) {
+  .tabbar { top: 0; bottom: auto; border-top: 0; border-bottom: 1px solid var(--line); padding-bottom: 0;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, .05); gap: 4px; }
+  .tab { flex: none; max-width: none; min-height: 56px; padding: 0 22px; font-size: 16px; }
+  .tab.on { background: var(--blue-soft); }
+  .tab.on::before { top: auto; bottom: 0; left: 14px; right: 14px; border-radius: 3px 3px 0 0; }
+  .tabbar + .screen { margin-top: 57px; } /* 메뉴가 있는 화면만(로그인 화면은 메뉴 없음) */
+  .screen { padding-bottom: 32px; }
+}
+
+/* 올리기: 놓기 영역 (CL-051) */
+.drop-zone { border: 2px dashed var(--line); transition: border-color .15s, background .15s; }
+.drop-zone.dragging { border-color: var(--blue); background: var(--blue-soft); }
 
 /* 확인 대화상자 (core/confirm.js) */
 .confirm-dialog { border: 0; border-radius: var(--radius); padding: 24px 20px 16px; max-width: 360px; width: calc(100% - 32px); }
@@ -182,7 +200,7 @@ ul { list-style: none; margin: 0; padding: 0; }
 .txn.pick input[type=checkbox] { flex: none; width: 22px; height: 22px; }
 .txn.pick input[type=checkbox]:disabled + .payer { opacity: .5; }
 .screen.selecting { padding-bottom: 180px; }
-.bulk-bar { position: fixed; left: 0; right: 0; bottom: calc(57px + env(safe-area-inset-bottom)); z-index: 5; display: grid; grid-template-columns: 1fr auto; gap: 8px;
+.bulk-bar { position: fixed; left: 0; right: 0; bottom: calc(59px + env(safe-area-inset-bottom)); z-index: 5; display: grid; grid-template-columns: 1fr auto; gap: 8px;
   max-width: 560px; margin: 0 auto; padding: 12px 16px; background: var(--card); border-top: 1px solid var(--line);
   box-shadow: 0 -4px 12px rgba(0, 0, 0, .06); align-items: center; }
 .bulk-bar .field { grid-column: 1 / 2; }
@@ -355,3 +373,9 @@ a.btn.small-btn { display: inline-flex; }
 .cand input { width: 20px; height: 20px; flex: none; }
 .cand .txn-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .tag.blue { background: var(--blue); color: #FFFFFF; }
+
+/* 넓은 화면: 메뉴가 위로 가므로 일괄 바는 맨 아래 (CL-051, 위 규칙보다 뒤에 둬야 이긴다) */
+@media (min-width: 720px) {
+  .bulk-bar { bottom: 0; }
+  .screen.selecting { padding-bottom: 120px; }
+}
