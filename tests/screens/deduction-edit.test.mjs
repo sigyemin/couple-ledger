@@ -71,6 +71,9 @@ test('DB 값 검사: DB CHECK와 같은 목록 + null, 그 밖은 보내지 않�
   const db = createDb({ from: () => b, rpc() {} });
   assert.equal((await db.update('transactions', 't1', { deduction_kind: 'gift' })).error.code, 'invalid');
   assert.equal((await db.update('categories', 'c1', { tax_credit_kind: 'gift' })).error.code, 'invalid');
+  assert.equal((await db.update('transactions', 't1', { beneficiary_member_id: 'zzz' })).error.code, 'invalid');
+  assert.equal(COLUMN_VALUES.transactions.beneficiary_member_id(null), true);
+  assert.equal(COLUMN_VALUES.transactions.beneficiary_member_id(['a0000000', '0000', '4000', '8000', `${'0'.repeat(10)}e1`].join('-')), true);
   assert.equal(calls, 0);
   assert.equal((await db.update('transactions', 't1', { deduction_kind: null, updated_by: 'm1' })).error, null);
   assert.equal(calls, 1);

@@ -60,6 +60,8 @@ export const COLUMN_VALUES = Object.freeze({
   transactions: Object.freeze({
     deduction_kind: (v) => v === null
       || ['credit_card', 'check_card', 'cash_receipt', 'public_transit', 'traditional_market', 'culture', 'excluded', 'none'].includes(v),
+    // 의료비 대상자: null(결제수단 주인) 또는 uuid 모양만(구성원인지는 DB FK가 확인) — #52 리뷰 낮음
+    beneficiary_member_id: (v) => v === null || (typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(v)),
   }),
   categories: Object.freeze({
     default_deduction_kind: (v) => v === null || ['public_transit', 'traditional_market', 'culture', 'excluded'].includes(v),
