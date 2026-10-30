@@ -1,7 +1,9 @@
 // 날짜형 셀·엑셀 행 번호 (CL-049) — 합성 파일만. 실제 기관 형식이 아니다
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readGrid, parseFile, cellText } from '../../app/import/pipeline.js';
+import { readGrid, parseFile, cellText, cellDateIso } from '../../app/import/pipeline.js';
+import { normalizeRows } from '../../app/import/normalize.js';
+import { findHeader } from '../../app/import/formats.js';
 import { looksLikeDate } from '../../app/import/normalize.js';
 import { previewOf } from '../../app/screens/upload-model.js';
 import { XLSX, SOURCE } from './fixtures.mjs';
@@ -14,6 +16,8 @@ const FMT = {
   sensitive_headers: [], date_format: 'YYYY.MM.DD', time_format: 'HH24:MI', amount_sign: 'expense_positive', row_rules: [],
 };
 const SERIAL = 46268; // 2026-09-03 (1900 체계)
+const HOUR = 60 * 60;
+const DAY = 24 * HOUR;
 
 /** 헤더 위에 빈 줄·제목·빈 줄을 둔 합성 시트. 날짜 칸 4가지: 사용자 서식 / 기본 날짜(번호 14) / 서식 없는 숫자 / 글자 + 꼬리 합계 */
 function book(bookType) {
@@ -37,23 +41,49 @@ function book(bookType) {
   return new Uint8Array(XLSX.write(wb, { type: 'array', bookType }));
 }
 
-test('cellText: 날짜형 셀은 서식과 상관없이 ISO, 시각만 있는 셀은 HH:MI, 그 밖은 표시 글자', () => {
-  assert.equal(cellText(XLSX, { t: 'n', v: SERIAL, z: 'm/d/yy', w: '9/3/26' }), '2026-09-03');
-  assert.equal(cellText(XLSX, { t: 'n', v: SERIAL, z: 'yyyy\\.mm\\.dd' }), '2026-09-03');
-  assert.equal(cellText(XLSX, { t: 'n', v: SERIAL + 0.75, z: 'm/d/yy' }), '2026-09-03 18:00');
-  assert.equal(cellText(XLSX, { t: 'n', v: SERIAL, z: 'yyyy-mm-dd hh:mm:ss' }), '2026-09-03 00:00:00');
-  assert.equal(cellText(XLSX, { t: 'n', v: 0.5, z: 'hh:mm' }), '12:00');
-  assert.equal(cellText(XLSX, { t: 'n', v: 0.25, z: 'h:mm:ss' }), '06:00:00');
-  assert.equal(cellText(XLSX, { t: 'n', v: SERIAL - 1462, z: 'yyyy-mm-dd' }, true), '2026-09-03'); // 1904 체계
-  assert.equal(cellText(XLSX, { t: 'n', v: SERIAL, z: 'General', w: '46268' }), '46268');
-  assert.equal(cellText(XLSX, { t: 's', v: '가짜', w: '가짜' }), '가짜');
+test('cellDateIso: 날짜형 셀 값 → ISO(초 단위 반올림, 시각은 서식에 시·초 자리가 있을 때만), 아니면 null', () => {
+  const iso = (c, d1904) => cellDateIso(XLSX, c, d1904);
+  assert.equal(iso({ t: 'n', v: SERIAL, z: 'm/d/yy', w: '9/3/26' }), '2026-09-03');
+  assert.equal(iso({ t: 'n', v: SERIAL, z: 'yyyy\\.mm\\.dd' }), '2026-09-03');
+  assert.equal(iso({ t: 'n', v: SERIAL + 0.6, z: 'yyyy\\.mm\\.dd' }), '2026-09-03'); // 날짜만 보이는 서식이면 시각을 붙이지 않음(표시와 같게)
+  assert.equal(iso({ t: 'n', v: SERIAL + 0.75, z: 'yyyy-mm-dd hh:mm' }), '2026-09-03 18:00');
+  assert.equal(iso({ t: 'n', v: SERIAL, z: 'yyyy-mm-dd hh:mm:ss' }), '2026-09-03 00:00:00');
+  // 소수 초는 반올림(엑셀 표시와 같게): 10:15:59.6 → 10:16:00, 23:59:59.7 → 다음 날 00:00:00
+  assert.equal(iso({ t: 'n', v: SERIAL + (10 * HOUR + 15 * 60 + 59.6) / DAY, z: 'yyyy.mm.dd hh:mm:ss' }), '2026-09-03 10:16:00');
+  assert.equal(iso({ t: 'n', v: SERIAL + (DAY - 0.3) / DAY, z: 'yyyy.mm.dd hh:mm:ss' }), '2026-09-04 00:00:00');
+  assert.equal(iso({ t: 'n', v: SERIAL + 1 - 1e-8, z: 'yyyy.mm.dd hh:mm:ss' }), '2026-09-04 00:00:00');
+  assert.equal(iso({ t: 'n', v: 0.5, z: 'hh:mm' }), '12:00');
+  assert.equal(iso({ t: 'n', v: 0.25, z: 'h:mm:ss' }), '06:00:00');
+  assert.equal(iso({ t: 'n', v: SERIAL - 1462, z: 'yyyy-mm-dd' }, true), '2026-09-03'); // 1904 체계
+  assert.equal(iso({ t: 'n', v: SERIAL, z: 'General', w: '46268' }), null);
+  assert.equal(iso({ t: 's', v: '2026-09-03', w: '2026-09-03' }), null);
+  assert.equal(iso(null), null);
+});
+
+test('cellText: 표시 글자 그대로, 오류 셀은 빈 칸', () => {
+  assert.equal(cellText(XLSX, { t: 'n', v: SERIAL, z: 'm/d/yy', w: '9/3/26' }), '9/3/26');
   assert.equal(cellText(XLSX, { t: 'n', v: 1000, z: '#,##0', w: '1,000' }), '1,000');
+  assert.equal(cellText(XLSX, { t: 's', v: '가짜', w: '가짜' }), '가짜');
+  assert.equal(cellText(XLSX, { t: 'e', v: 42, w: '#N/A' }), '');
   assert.equal(cellText(XLSX, null), '');
 });
 
-test('날짜처럼 보이는 글자: 숫자·구분자만', () => {
-  for (const v of ['46268', '9/3/26', '2026.02.30', '2026-09-03 25:00']) assert.equal(looksLikeDate(v), true, v);
-  for (const v of ['합 계', '총 3건', '', null, '조회기간']) assert.equal(looksLikeDate(v), false, String(v));
+test('표시 글자로 읽히는 행은 셀 값을 쓰지 않는다(전에 올린 행의 날짜·시각·중복 키 그대로)', async () => {
+  // 날짜 칸은 글자로 읽히고, 시각 칸 표시가 형식에 안 맞음(오후 표기) → 이전처럼 시각 없음
+  const grid = [['이용일', '이용시각', '가맹점', '금액'], ['2026.09.03', '2:24 PM', '가짜식당', '1,000']];
+  const alts = [null, { 1: '14:24' }];
+  const r = await normalizeRows(grid, FMT, findHeader(grid, FMT), { sourceId: SOURCE, dateAlts: alts });
+  assert.deepEqual([r.rows[0].occurred_on, r.rows[0].occurred_time], ['2026-09-03', null]);
+  // 날짜를 셀 값으로 읽은 행만 시각도 셀 값으로
+  const grid2 = [['이용일', '이용시각', '가맹점', '금액'], ['9/3/26', '2:24 PM', '가짜식당', '1,000']];
+  const r2 = await normalizeRows(grid2, FMT, findHeader(grid2, FMT), { sourceId: SOURCE, dateAlts: [null, { 0: '2026-09-03', 1: '14:24' }] });
+  assert.deepEqual([r2.rows[0].occurred_on, r2.rows[0].occurred_time], ['2026-09-03', '14:24']);
+});
+
+test('날짜처럼 보이는 글자: 연·월·일 세 부분 또는 2000~2099년 일련번호', () => {
+  for (const v of ['46268', '46268.75', '9/3/26', '2026.02.30', '2026-09-03 25:00', '9/3/26 2:24 PM']) assert.equal(looksLikeDate(v), true, v);
+  for (const v of ['합 계', '총 3건', '', null, '조회기간', '1/1', '3', '12:00:00', '12345', '99999',
+    '2026.09.01 ~ 2026.09.30', '2026.10.01 기준']) assert.equal(looksLikeDate(v), false, String(v));
 });
 
 for (const bookType of ['xlsx', 'biff8']) {
