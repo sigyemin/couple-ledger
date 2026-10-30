@@ -4,12 +4,13 @@
 //       v_deduction_txn(이 거래의 자동 판정: 공제 항목·세액공제 항목·대상자)
 // 쓰기: transactions update(deduction_kind: 자동 = null, beneficiary_member_id: 결제수단 주인 = null) — 정산 값이 아님
 // - 대상자 칸은 의료비(세액공제 항목 medical) 거래만(D8)
+// - 전세자금대출 표시(tax_credit_kind housing_rent_loan — 소득공제) 거래는 '공제 대상' 표시 + 다른 대출이면 카테고리 표시를 비우라는 안내(CL-065 H3)
 // - 조회가 실패하면 이 카드만 오류 줄(상세는 그대로)
 // 의존: ui/dom.js, core/errors.js, screens/deduction-edit-model.js
 // =====================================================================
 import { h } from '../ui/dom.js';
 import { STAGES } from '../core/errors.js';
-import { TXN_KINDS, autoView, deductionPatch, beneficiaryNote } from './deduction-edit-model.js';
+import { TXN_KINDS, autoView, deductionPatch, beneficiaryNote, HOUSING_TXN_TEXT, HOUSING_TXN_OTHER } from './deduction-edit-model.js';
 
 const eq = (col, value) => ({ col, op: 'eq', value });
 
@@ -73,7 +74,10 @@ export async function renderTxnDeduction({ db, row, members, member, reload, onE
   });
   return h('section', { class: 'card form' }, [
     title,
-    h('p', { class: 'muted small', text: `지금 판정: ${auto.text}${cur?.deduction_kind ? ' (직접 고친 값)' : ''}` }, [], doc),
+    // 전세자금대출 거래는 '공제 대상 아님'(카드 공제)과 '공제 대상'(전세자금대출)이 함께 보여 헷갈리지 않게 어느 공제인지 밝힌다
+    h('p', { class: 'muted small', text: `지금 판정${auto.housingLoan ? '(카드 공제)' : ''}: ${auto.text}${cur?.deduction_kind ? ' (직접 고친 값)' : ''}` }, [], doc),
+    auto.housingLoan ? h('p', { class: 'ded-loan-tag', text: HOUSING_TXN_TEXT }, [], doc) : null,
+    auto.housingLoan ? h('p', { class: 'muted small', text: HOUSING_TXN_OTHER }, [], doc) : null,
     h('span', { class: 'field-label', text: '공제 항목' }, [], doc), kind,
     ben ? h('span', { class: 'field-label', text: '의료비 대상자(누구를 위한 지출)' }, [], doc) : null, ben,
     note,

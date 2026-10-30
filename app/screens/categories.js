@@ -212,10 +212,10 @@ export async function renderCategories({ db, reload, isCurrent, onError }, doc =
       return el;
     };
     const d = sel('카드 공제 기본 항목', CATEGORY_KINDS, cat.default_deduction_kind);
-    const t = sel('세액공제 항목', TAX_CREDIT_KINDS, cat.tax_credit_kind);
+    const t = sel('공제 표시', TAX_CREDIT_KINDS, cat.tax_credit_kind);
     return formDialog({
       title: `'${node.name}' 연말정산 기본값`, doc,
-      body: [label('카드로 냈을 때 공제 항목'), d, label('세액공제 항목'), t, h('p', { class: 'muted small', text: '거래에서 직접 고친 값은 그대로예요.' }, [], doc)],
+      body: [label('카드로 냈을 때 공제 항목'), d, label('공제 표시(의료비·월세·보험료·전세자금대출)'), t, h('p', { class: 'muted small', text: '거래에서 직접 고친 값은 그대로예요.' }, [], doc)],
       onSave: async () => {
         const patch = categoryDeductionPatch(cat, { defaultKind: d.value, taxCredit: t.value });
         if (!patch) return { ok: true };

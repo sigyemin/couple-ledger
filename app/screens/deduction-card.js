@@ -12,7 +12,7 @@ import { addMonths, buildHash } from '../router.js';
 import { won } from '../core/format.js';
 import {
   CHIPS, RATE_ROWS, peopleView, bestChoice, rateText, rateSub, monthlyCardAverage, minimumLine, medicalLines, rentLines,
-  detailRows, sourceLine, minimumRatio, minimumBarView, maskedSalary, MASK_NOTE,
+  detailRows, sourceLine, minimumRatio, minimumBarView, maskedSalary, MASK_NOTE, housingLoanLine,
 } from './deduction-model.js';
 
 const PAGE_SIZE = 1000;
@@ -25,6 +25,9 @@ const STATUS_COLUMNS = [
   'marginal_credit_rate', 'marginal_check_rate', 'marginal_culture_rate', 'marginal_traditional_market_rate', 'marginal_public_transit_rate',
   'medical_amount', 'medical_other_amount', 'medical_threshold_amount', 'medical_remaining_to_threshold_amount', 'medical_credit_amount',
   'rent_amount', 'is_rent_eligible', 'rent_credit_amount',
+  // 전세자금대출 원리금 상환액 소득공제(CL-065, v0.21)
+  'is_housing_loan_eligible', 'housing_loan_interest_amount', 'housing_loan_principal_amount', 'housing_loan_certified_amount',
+  'housing_loan_repaid_amount', 'housing_savings_deduction_amount', 'housing_loan_deduction_amount',
 ].join(',');
 
 /** 최근 3개월(그 연도 안, 고른 달 포함) */
@@ -161,6 +164,7 @@ export async function renderDeductionCard({ db, monthStart, onError }, doc = glo
   const details = people.map((p) => {
     const r = p.row;
     const box = h('div', { class: 'ded-person-body' }, [], doc);
+    const loan = housingLoanLine(r);
     let shown = false;
     const draw = () => {
       const bar = p.hasSalary ? minimumBarView(r, shown) : null;
@@ -184,6 +188,11 @@ export async function renderDeductionCard({ db, monthStart, onError }, doc = glo
           h('th', { text: k, attrs: { scope: 'row' } }, [], doc), h('td', { text: v }, [], doc),
         ], doc)), doc)], doc),
         h('p', { class: 'muted small', text: sourceLine(r) }, [], doc),
+        // 전세자금대출(CL-065 H1): 카드 선택과 무관 — 위 표가 아니라 사람별 상세에 한 줄
+        loan ? h('div', { class: 'ded-loan' }, [
+          h('p', { class: 'ded-loan-title', text: loan.text }, [], doc),
+          ...loan.sub.map((t) => h('p', { class: 'muted small', text: t }, [], doc)),
+        ], doc) : null,
         !shown && r?.total_salary_amount != null ? h('p', { class: 'muted small', text: MASK_NOTE }, [], doc) : null,
       ].filter(Boolean));
     };

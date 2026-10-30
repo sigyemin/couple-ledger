@@ -2,7 +2,8 @@
 // 거래 상세 · 카테고리의 연말정산 칸 — 화면 없이 계산하는 부분 (CL-062 ② E3·E4)
 // - 거래: transactions.deduction_kind(사람이 고친 공제 항목, null = 자동), beneficiary_member_id(의료비 대상자, null = 결제수단 주인)
 // - 자동 판정(v_deduction_txn): 거래에서 고친 값 → 결제 매체 없음(이체·현금) = none → 카테고리 기본값 → 결제 매체
-// - 카테고리: default_deduction_kind(카드로 냈을 때 기본 공제 항목, null = 결제수단 따라), tax_credit_kind(세액공제 항목)
+// - 카테고리: default_deduction_kind(카드로 냈을 때 기본 공제 항목, null = 결제수단 따라),
+//   tax_credit_kind(공제 표시 — 의료비·월세·보험료 세액공제 + 전세자금대출 소득공제(v0.21, '세액공제'라 부르지 않음 — 리뷰 P-1))
 // - 공제 구분·대상자는 정산 값이 아니라 '확인 후 변경됨'에 잡히지 않는다(설계 4장)
 // 의존 없음
 // =====================================================================
@@ -15,7 +16,12 @@ export const TXN_KINDS = Object.freeze([
 export const CATEGORY_KINDS = Object.freeze([
   ['public_transit', '대중교통'], ['traditional_market', '전통시장'], ['culture', '문화체육'], ['excluded', '공제 제외'],
 ]);
-export const TAX_CREDIT_KINDS = Object.freeze([['medical', '의료비'], ['rent', '월세'], ['insurance', '보험료']]);
+export const TAX_CREDIT_KINDS = Object.freeze([
+  ['medical', '의료비'], ['rent', '월세'], ['insurance', '보험료'], ['housing_rent_loan', '전세자금대출(소득공제)'],
+]);
+// 거래 상세: 전세자금대출 표시가 있는 거래 안내(CL-065 H3)
+export const HOUSING_TXN_TEXT = '전세자금대출 공제 대상(소득공제) — 이 이자는 결제수단 주인의 전세자금대출 상환액에 더해져요.';
+export const HOUSING_TXN_OTHER = "전세자금대출이 아닌 다른 대출 이자면, 규칙·카테고리 › 카테고리의 ⋯ › 연말정산 기본값에서 '공제 표시'를 비워 주세요.";
 
 const LABEL = new Map([...TXN_KINDS.map(([k, l]) => [k, l.replace(/\(.*\)$/, '')]), ['none', '공제 대상 아님']]);
 export const kindLabel = (k) => LABEL.get(k) ?? '-';
@@ -35,7 +41,10 @@ export function autoView(parts) {
   const kinds = [...new Set(list.map((p) => p.deduction_kind))];
   const text = kinds.length === 1 ? kindLabel(kinds[0]) : `${kinds.map(kindLabel).join(' · ')}(나눈 금액마다)`;
   const med = list.find((p) => p.tax_credit_kind === 'medical');
-  return { text, medical: Boolean(med), beneficiaryId: med?.beneficiary_member_id ?? null };
+  return {
+    text, medical: Boolean(med), beneficiaryId: med?.beneficiary_member_id ?? null,
+    housingLoan: list.some((p) => p.tax_credit_kind === 'housing_rent_loan'),
+  };
 }
 
 /**

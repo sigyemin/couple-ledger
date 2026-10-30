@@ -262,6 +262,74 @@ export function homeAdvice(people) {
   return { needSalary: false, rows };
 }
 
+// ---------------------------------------------------------------- 전세자금대출 원리금 상환액 소득공제 (CL-065, 스키마 v0.21)
+// - 카드 선택과 무관 → '어느 카드가 유리' 표에는 넣지 않고 사람별 상세에 한 줄(설계 2장)
+// - 소득공제다(세액공제라 부르지 않는다 — 리뷰 v0.21 P-1). 숫자는 뷰가 계산(요건 켬일 때 상환액 × 공제율, 청약 공제와 합산 한도)
+// - 가계부 이자 = 전세자금대출 표시가 있는 카테고리(기본 '대출이자') 거래 전체(P-2)
+
+/** 요건(사용자가 읽고 본인이 켬) */
+export const HOUSING_REQUIREMENTS = Object.freeze([
+  '12월 31일 기준 무주택 세대의 세대주',
+  '국민주택규모(전용 85㎡ 이하) 주택을 빌린 경우',
+  '대출기관이 임대인 계좌로 직접 보낸 대출',
+  '입주·전입 전후 3개월 이내에 받은 대출',
+]);
+export const HOUSING_INTEREST_NOTE = "가계부 이자 = '대출이자'처럼 전세자금대출 표시가 있는 카테고리 거래 전체예요. 다른 대출 이자가 섞이면 그 카테고리의 표시를 비워 주세요.";
+export const HOUSING_SAVINGS_NOTE = '청약(주택마련저축) 공제를 받으면 남은 한도가 줄어요.';
+
+/**
+ * 사람별 상세의 전세자금대출 한 줄
+ * @returns {{ text, sub: string[] } | null}  규칙이 없고 이자도 입력도 없으면 null(줄 안 보임)
+ */
+export function housingLoanLine(r) {
+  if (!r) return null;
+  const interest = num(r.housing_loan_interest_amount) ?? 0;
+  const principal = num(r.housing_loan_principal_amount) ?? 0;
+  const certified = num(r.housing_loan_certified_amount);
+  const savings = num(r.housing_savings_deduction_amount) ?? 0;
+  const ded = num(r.housing_loan_deduction_amount);
+  if (ded == null && !r.is_housing_loan_eligible && !interest && !principal && certified == null) return null;
+  const source = certified != null
+    ? `상환증명서 원리금 ${won(certified)}(가계부보다 우선)`
+    : `가계부 이자 ${won(interest)} + 원금(입력) ${won(principal)}`;
+  if (ded == null) return { text: '전세자금대출 상환 · 올해 공제 규칙이 없어요', sub: [source] };
+  if (!r.is_housing_loan_eligible) {
+    return { text: '전세자금대출 상환 · 요건을 확인하면 계산해요', sub: [source, '연말정산 설정에서 요건을 확인하고 켤 수 있어요.', HOUSING_INTEREST_NOTE] };
+  }
+  const sub = [source, HOUSING_INTEREST_NOTE];
+  if (savings > 0) sub.push(`청약(주택마련저축) 공제 ${won(savings)}만큼 한도가 줄었어요.`);
+  else sub.push(HOUSING_SAVINGS_NOTE);
+  return { text: `전세자금대출 상환 ${won(num(r.housing_loan_repaid_amount) ?? 0)} → 예상 소득공제 ${won(ded)}`, sub };
+}
+
+/**
+ * 본인 전세자금대출 입력 → member_tax_profiles 행(키 + 4칸만 — 다른 칸은 그대로 둠)
+ * @param form { eligible, principal, certified, savings } 원 단위 글자. 원금·청약은 비우면 0, 증명서는 비우면 없음(null)
+ * @returns {{ ok: true, row } | { ok: false, field, message }}
+ */
+export function checkHousing(form, memberId, taxYear) {
+  const bad = (field, message) => ({ ok: false, field, message });
+  const amount = (v) => {
+    const d = digits(v);
+    return d === '' ? '' : (RE_INT.test(d) && d.length <= 10 ? Number(d) : null);
+  };
+  const p = amount(form.principal);
+  if (p === null) return bad('principal', '원금 상환액은 원 단위 숫자로 넣어 주세요');
+  const c = amount(form.certified);
+  if (c === null) return bad('certified', '상환증명서 원리금은 원 단위 숫자로 넣어 주세요(없으면 비워 두세요)');
+  const sv = amount(form.savings);
+  if (sv === null) return bad('savings', '주택마련저축 공제액은 원 단위 숫자로 넣어 주세요(모르면 비워 두세요)');
+  return {
+    ok: true,
+    row: {
+      member_id: memberId, tax_year: taxYear, is_housing_loan_eligible: Boolean(form.eligible),
+      housing_loan_principal_amount: p === '' ? 0 : p,
+      housing_loan_certified_amount: c === '' ? null : c,
+      housing_savings_deduction_amount: sv === '' ? 0 : sv,
+    },
+  };
+}
+
 // ---------------------------------------------------------------- 설정 입력 검사 (E2)
 
 const RE_INT = /^[0-9]+$/;

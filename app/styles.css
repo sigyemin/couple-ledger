@@ -509,3 +509,10 @@ button.chip.on { border-color: var(--text); }
 .line-btn.uncat { padding: 10px 14px; border-radius: 14px; background: var(--blue-soft); }
 .line-btn.uncat .line-name { font-weight: 400; color: var(--sub-on-white); }
 .line-btn.uncat .line-act { margin-left: auto; font-size: 15px; font-weight: 700; color: var(--blue-dark); }
+
+/* 전세자금대출 공제 (CL-065) */
+.ded-loan { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 2px; }
+.ded-loan-title { margin: 0; font-size: 15px; font-weight: 700; overflow-wrap: anywhere; }
+.ded-loan .muted { margin: 0; }
+.req-list { margin: 0; padding-left: 20px; list-style: disc; font-size: 14px; color: var(--sub); display: flex; flex-direction: column; gap: 2px; }
+.ded-loan-tag { margin: 6px 0 0; padding: 8px 12px; border-radius: 12px; background: var(--blue-soft); color: var(--blue-dark); font-size: 14px; font-weight: 700; }
