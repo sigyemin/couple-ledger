@@ -3,9 +3,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   manWon, rateText, peopleView, bestChoice, rateSub, monthlyCardAverage, monthsToMinimum, minimumLine, medicalLines, rentLines,
-  detailRows, sourceLine, minimumRatio, checkProfile, checkBaselines, baselineGroups, maskedSalary, josa, BASELINE_KINDS, MAN,
+  detailRows, sourceLine, minimumRatio, minimumBarView, checkProfile, checkBaselines, baselineGroups, maskedSalary, josa, BASELINE_KINDS, MAN,
 } from '../../app/screens/deduction-model.js';
-import { recentMonths } from '../../app/screens/deduction-card.js';
+import { recentMonths, readRecentTxns } from '../../app/screens/deduction-card.js';
 import { defaultAsOf } from '../../app/screens/taxset.js';
 import { parseHash } from '../../app/router.js';
 import { activeTab } from '../../app/screens/shell.js';
@@ -126,4 +126,27 @@ test('국세청 기준값 검사: 6칸 모두(재리뷰 P-6), 그해 안, 오늘
 test('주소: #/taxset은 더보기 탭', () => {
   assert.equal(parseHash('#/taxset').screen, 'taxset');
   assert.equal(activeTab('taxset'), 'more');
+});
+
+test('총급여 가림(리뷰 #51 중): 최저사용금액 금액·막대 읽어 주기 글은 보기일 때만, 가림 상태는 남은 금액·비율만', () => {
+  const r = st('m1', { minimum_spend_amount: '10500000', total_spend_amount: '5250000', remaining_to_minimum_amount: '5250000',
+    credit_card_amount: '0', check_card_amount: '0', public_transit_amount: '0', traditional_market_amount: '0', culture_amount: '0', excluded_amount: '0',
+    card_deduction_amount: '0', base_limit_amount: '3000000', base_remaining_amount: '3000000', extra_limit_amount: '3000000', extra_remaining_amount: '3000000' });
+  const hidden = detailRows(r).map(([k, v]) => `${k} ${v}`).join(' | ');
+  assert.doesNotMatch(hidden, /10,500,000/);
+  assert.match(hidden, /최저사용금액까지 남은 금액 5,250,000원/);
+  assert.match(detailRows(r, { revealed: true }).map(([k, v]) => `${k} ${v}`).join(' | '), /최저사용금액\(총급여 25%\) 10,500,000원/);
+  const bar = minimumBarView(r);
+  assert.doesNotMatch(`${bar.text} ${bar.aria}`, /10,500,000/);
+  assert.equal(bar.aria, '최저사용금액의 50% 사용, 5,250,000원 남음');
+  assert.match(minimumBarView(r, true).aria, /^최저사용금액 10,500,000원 중 5,250,000원 사용\(50%\)$/);
+});
+
+test('최근 3개월 읽기 상한: 넘으면 capped(일부만 계산 안내)', async () => {
+  const all = Array.from({ length: 7 }, (_, i) => ({ txn_id: `t${i}`, deduction_kind: 'credit_card', signed_amount: 1, occurred_on: '2026-10-01' }));
+  const db = { async select(v, o) { return { data: all.slice(o.range.from, Math.min(o.range.to + 1, o.range.from + 2)), error: null }; } };
+  const a = await readRecentTxns(db, 2026, ['2026-10-01'], { max: 3 });
+  assert.deepEqual([a.data.rows.length, a.data.capped], [3, true]);
+  const b = await readRecentTxns(db, 2026, ['2026-10-01'], { max: 100 });
+  assert.deepEqual([b.data.rows.length, b.data.capped], [7, false]);
 });
