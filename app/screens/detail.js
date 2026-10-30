@@ -419,7 +419,7 @@ export async function renderDetail({ db, member, id, go, reload, isCurrent, onEr
     return h('div', { class: 'split-wrap' }, [toggle, box], doc);
   }
 
-  const settleCard = h('section', { class: 'card' }, [h('h2', { class: 'card-title', text: '정산' }, [], doc), rows(m.settle, doc)], doc);
+  const settleCard = h('section', { class: 'card' }, [h('h2', { class: 'card-title', text: '집계' }, [], doc), rows(m.settle, doc)], doc);
   const settleChange = async (change, patch) => {
     const t = settlementChangeText(row, change, refunds);
     if (!(await confirmDialog({ ...t, confirmLabel: '바꾸기', doc }))) return;

@@ -63,7 +63,7 @@ test('변경 기록: 목록 줄, 상세 미리보기(원래대로/그대로), �
   assert.deepEqual(d.rows.map((r) => [r.tag, r.changes[0]]), [
     ['원래대로', '분류: 식비 · 외식 → 식비 · 식재료'], ['그대로', '분류: 그 뒤 직접 식비 · 식재료(으)로 고쳐 그대로'], ['원래대로', '분류: 식비 · 외식 → 분류 지움']]);
   assert.deepEqual([d.canRevert, d.buttonLabel, d.needsConfirm], [true, '2건 되돌리기', false]);
-  assert.match(d.notes[0], /정산 숫자는 그대로/);
+  assert.match(d.notes[0], /분류만 바뀐 묶음이라 '확인 후 변경됨'이 뜨지 않아요/);
   const tx = batchDetail({ ...b, kind: 'counterparty_apply' }, [{ txn_id: U(1), target_kind: 'txn', old_kind: 'expense', new_kind: 'transfer', old_is_shared: true, new_is_shared: false,
     old_exclude_reason: null, new_exclude_reason: 'personal_transfer', old_review_status: 'needs_review', new_review_status: 'confirmed', is_revertible: true, revert_action: 'revert' }], txns, cats);
   assert.equal(tx.rows[0].changes[0], '종류 이체 → 지출, 개인 → 공동, 제외 두 사람 사이 송금 → 없음, 확인함 → 검토 대기');

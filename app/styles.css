@@ -467,3 +467,9 @@ button.chip.on { border-color: var(--text); }
 .mc-item .btn { align-self: flex-end; }
 .mc-rule { display: flex; flex-direction: column; gap: 2px; }
 .mc-wide { padding-left: 28px; }
+/* 홈 '지금 누구 카드가 유리' (CL-062) */
+.ded-advice li { display: grid; grid-template-columns: 72px 1fr; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.ded-advice-label { font-size: 13px; color: var(--sub-on-white); padding-top: 2px; }
+.ded-advice-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ded-advice-body strong { font-size: 15px; }
+.ded-advice-body .sub { font-size: 12px; color: var(--sub-on-white); overflow-wrap: anywhere; }

@@ -55,7 +55,7 @@ test('확인 완료 달 안내·연결 확인 문구', () => {
   assert.equal(reviewedNote(['2026-09-01', '2026-10-01', '2026-09-01'], states), '9월은 확인 완료한 달이라 연결하면 "확인 후 변경됨"으로 바뀌어요.');
   assert.equal(reviewedNote(['2026-10-01'], states), null);
   const t = linkConfirmText(R(1), C(11, { occurred_on: '2026-09-28' }), states);
-  assert.match(t.message, /^9월 28일 4,500원 결제와 연결해요\. 9월 정산에 반영되고 이 환불은 확인함이 돼요\. 9월은 확인 완료한 달/);
+  assert.match(t.message, /^9월 28일 4,500원 결제와 연결해요\. 9월 지출 합계에 반영되고 이 환불은 확인함이 돼요\. 9월은 확인 완료한 달/);
 });
 
 test('일괄 연결: 제안된 것만, 확인 창에 (환불 → 원거래) 전체, 상한, 결과 문장', () => {

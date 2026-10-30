@@ -96,7 +96,7 @@ export function unlinkConfirmText(refund, reviewStates) {
   parts.push(from === to ? `${short(to)}에 그대로 집계돼요.` : `집계하는 달이 ${short(from)}에서 환불일의 달인 ${short(to)}로 바뀌어요.`);
   if (!refund.is_excluded && refund.is_shared) {
     const hit = [...new Set([from, to])].sort().filter((m) => reviewStates.get(m) === 'reviewed' || reviewStates.get(m) === 'changed_after_review');
-    parts.push(hit.length ? `${hit.map(short).join(', ')}은 확인을 마친 달이라 정산이 바뀌고 '확인 후 변경됨'으로 표시돼요.` : '정산 금액이 바뀔 수 있어요.');
+    parts.push(hit.length ? `${hit.map(short).join(', ')}은 확인을 마친 달이라 '확인 후 변경됨'으로 표시돼요.` : '달별 지출 합계가 바뀔 수 있어요.');
   }
   parts.push('끊은 뒤에도 원거래 찾기로 다시 연결할 수 있어요.');
   return { title: '연결 끊기', message: parts.join(' ') };
@@ -111,7 +111,7 @@ export function reviewedNote(months, reviewStates) {
 /** 하나 연결 확인 문구 */
 export function linkConfirmText(refund, cand, reviewStates) {
   const m = monthOf(cand.occurred_on);
-  const parts = [`${shortDay(cand.occurred_on)} ${won(Number(cand.amount))} 결제와 연결해요. ${month(m).replace(/^[0-9]+년 /, '')} 정산에 반영되고 이 환불은 확인함이 돼요.`];
+  const parts = [`${shortDay(cand.occurred_on)} ${won(Number(cand.amount))} 결제와 연결해요. ${month(m).replace(/^[0-9]+년 /, '')} 지출 합계에 반영되고 이 환불은 확인함이 돼요.`];
   const note = reviewedNote([m], reviewStates);
   if (note) parts.push(note);
   return { title: `${refund.merchant_raw} 환불 연결`, message: parts.join(' ') };

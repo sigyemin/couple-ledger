@@ -70,8 +70,8 @@ export function batchDetail(batch, items, txns, cats) {
   const back = rows.filter((r) => r.revertible).length;
   const keep = rows.length - back;
   const notes = [];
-  if (batch.kind === 'counterparty_apply') notes.push('종류·공동 여부가 돌아가 정산 숫자가 바뀌어요. 확인 완료한 달이 \'확인 후 변경됨\'이 돼요.');
-  else notes.push('분류만 바뀐 묶음이라 정산 숫자는 그대로예요. \'확인 후 변경됨\'이 뜨지 않아요.');
+  if (batch.kind === 'counterparty_apply') notes.push('종류·공동 여부가 돌아가 지출 집계가 바뀌어요. 확인 완료한 달이 \'확인 후 변경됨\'이 돼요.');
+  else notes.push('분류만 바뀐 묶음이라 \'확인 후 변경됨\'이 뜨지 않아요.');
   notes.push('되돌린 것을 다시 되돌릴 수는 없어요.');
   return {
     rows,
