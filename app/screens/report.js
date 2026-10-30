@@ -1,6 +1,7 @@
 // =====================================================================
 // 리포트 (화면 설계 v0.2 3-2 시안 11 · 3-3 시안 12 · 3-4 시안 13). 읽기만 한다
 // 11 #/report?month&view=income : v_monthly_summary(6개월), v_monthly_category | v_monthly_income(그 달·지난달)
+//    지출 보기에는 '어디에 얼마나 썼나' 비중 카드(report-share.js, ?by=item|source|owner&span=ytd — CL-059)
 // - 수입 칸은 카테고리별만(결정 C6: 구성원별 줄 없음)
 // 12 #/rgroup/<그룹 id>?month   : v_monthly_category(그 그룹, 6개월), v_monthly_summary(그 달·지난달)
 // 13 #/ritem/<카테고리 id>?month : v_monthly_category_txn(그 달·그 카테고리), v_transaction_detail(그 귀속월, 내역과 같은 읽기)
@@ -19,6 +20,8 @@ import {
 import { readMonthRows } from './list.js';
 import { capNotice, groupByDay } from './list-model.js';
 import { errorView } from './shell.js';
+import { renderShareCard } from './report-share.js';
+import { shareParams } from './report-share-model.js';
 
 const ym = (m) => m.slice(0, 7);
 const eq = (col, value) => ({ col, op: 'eq', value });
@@ -88,12 +91,17 @@ export async function loadReport(db, monthStart, view) {
 }
 
 /**
- * @param {{ db, monthStart, view: 'expense'|'income', isCurrent(), onError }} ctx
+ * @param {{ db, monthStart, view: 'expense'|'income', query?: Map, isCurrent(), onError }} ctx
  */
-export async function renderReport({ db, monthStart, view = 'expense', isCurrent, onError }, doc = globalThis.document) {
+export async function renderReport({ db, monthStart, view = 'expense', query: q = new Map(), isCurrent, onError }, doc = globalThis.document) {
+  // 비중 카드는 함께 읽는다(실패해도 그 카드만 오류 줄)
+  const sp = shareParams(q);
+  const sharing = view === 'income' ? null : renderShareCard({ db, monthStart, ...sp, onError }, doc);
   const res = await loadReport(db, monthStart, view);
+  const shareCard = sharing ? await sharing : null;
   if (!isCurrent()) return null;
-  const query = (n) => ({ month: ym(addMonths(monthStart, n)), view: view === 'income' ? 'income' : null });
+  // 달을 옮겨도 차트 기준·기간은 그대로
+  const query = (n) => ({ month: ym(addMonths(monthStart, n)), view: view === 'income' ? 'income' : null, by: sp.by === 'group' ? null : sp.by, span: sp.span === 'month' ? null : sp.span });
   const nav = (n, label, text) => h('a', { class: 'icon-btn', text, attrs: { href: buildHash('report', { query: query(n) }), 'aria-label': label } }, [], doc);
   const head = backHead(buildHash('more'), '더보기로', '', doc, [
     nav(-1, '이전 달', '‹'),
@@ -172,7 +180,7 @@ export async function renderReport({ db, monthStart, view = 'expense', isCurrent
       h('p', { class: 'muted small', text: '집계 제외는 뺐어요.' }, [], doc),
     ], doc);
   }
-  return h('main', { class: 'screen' }, [head, seg, hero, body], doc);
+  return h('main', { class: 'screen' }, [head, seg, hero, shareCard, body], doc);
 }
 
 // ---------------------------------------------------------------- 12 그룹 펼치기
