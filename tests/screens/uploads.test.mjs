@@ -20,11 +20,13 @@ test('대상 결제수단: missing_uploads와 같은 조건, 구성원·이름 �
   assert.deepEqual(monthlySources(null), []);
 });
 
-test('범위: 가장 이른 거래 달 ~ 지난달, 거래 없으면 올해 1월, 여러 해, 최근 12달까지', () => {
-  assert.deepEqual(uploadRange('2026-03-15', '2026-06-01'), ['2026-03-01', '2026-04-01', '2026-05-01']);
+test('범위: min(올해 1월, 가장 이른 거래 달) ~ 지난달, 여러 해, 최근 12달까지', () => {
+  // 모든 결제수단의 첫 거래가 3월이어도 1·2월부터(1·2월이 비면 알려야 함)
+  assert.deepEqual(uploadRange('2026-03-15', '2026-06-01'), ['2026-01-01', '2026-02-01', '2026-03-01', '2026-04-01', '2026-05-01']);
   assert.deepEqual(uploadRange(null, '2026-04-01'), ['2026-01-01', '2026-02-01', '2026-03-01']);
   assert.deepEqual(uploadRange(null, '2026-01-01'), []); // 1월에 거래 없음 → 지난 달 없음
-  assert.deepEqual(uploadRange('2026-10-02', '2026-10-01'), []); // 이번 달 거래만
+  assert.equal(uploadRange('2026-10-02', '2026-10-01').length, 9); // 이번 달 거래만이어도 1~9월
+  assert.deepEqual(uploadRange('2026-01-10', '2026-01-01'), []); // 1월: 올해 지난 달 없음
   assert.deepEqual(uploadRange('2025-11-30', '2026-02-01'), ['2025-11-01', '2025-12-01', '2026-01-01']);
   const long = uploadRange('2023-01-01', '2026-10-01');
   assert.equal(long.length, MAX_MONTHS);
@@ -87,14 +89,15 @@ function fakeDb({ sources = SOURCES, earliest = '2026-07-20', missing = {}, fail
 
 test('loadUploadStatus: 가장 이른 거래 1건 → 달마다 missing_uploads(재시도), 대상이 없으면 RPC 안 부름, 오류는 그대로', async () => {
   const db = fakeDb({ missing: { '2026-08-01': [{ source_id: 's1', label: '시험 카드' }] } });
-  const r = await loadUploadStatus(db, '2026-10-01');
-  assert.deepEqual(r.data.missing, [
-    { month: '2026-07-01', rows: [] }, { month: '2026-08-01', rows: [{ source_id: 's1', label: '시험 카드' }] }, { month: '2026-09-01', rows: [] },
-  ]);
+  const r = await loadUploadStatus(db, '2026-04-01');
+  assert.deepEqual(r.data.missing.map((x) => x.month), ['2026-01-01', '2026-02-01', '2026-03-01']); // 첫 거래 7월(가짜)이어도 1월부터
   const first = db.calls.find((c) => c[1] === 'transactions')[2];
   assert.deepEqual(first.filters, [{ col: 'source_id', op: 'in', value: ['s1', 's2', 's3'] }, { col: 'deleted_at', op: 'is', value: null }]);
   assert.deepEqual([first.order, first.range], [[{ col: 'occurred_on', ascending: true }], { from: 0, to: 0 }]);
-  assert.deepEqual(db.calls.filter((c) => c[0] === 'rpc').map((c) => [c[2].p_month, c[3].retry]), [['2026-07-01', true], ['2026-08-01', true], ['2026-09-01', true]]);
+  assert.deepEqual(db.calls.filter((c) => c[0] === 'rpc').map((c) => [c[2].p_month, c[3].retry]), [['2026-01-01', true], ['2026-02-01', true], ['2026-03-01', true]]);
+  const old = fakeDb({ earliest: '2025-11-20', missing: { '2025-12-01': [{ source_id: 's1', label: '시험 카드' }] } });
+  const r2 = await loadUploadStatus(old, '2026-02-01');
+  assert.deepEqual(r2.data.missing.map((x) => [x.month, x.rows.length]), [['2025-11-01', 0], ['2025-12-01', 1], ['2026-01-01', 0]]);
 
   const none = fakeDb({ sources: [SOURCES[3]] });
   assert.deepEqual((await loadUploadStatus(none, '2026-10-01')).data.missing, []);
