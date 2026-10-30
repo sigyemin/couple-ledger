@@ -1,7 +1,7 @@
 // 업로드 때 가맹점 규칙 적용(CL-044, 사용자 결정 U-16 A안) — 합성 값만
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sortCategoryRules, categoryRuleMatches, pickCategoryRule, toRpcRows } from '../../app/import/normalize.js';
+import { categoryRuleMatches, pickCategoryRule, toRpcRows } from '../../app/import/normalize.js';
 import { parseFile } from '../../app/import/pipeline.js';
 import { previewOf, previewLines, reviewText } from '../../app/screens/upload-model.js';
 import { XLSX, SOURCE, CAT_ID, FORMAT_A, FORMAT_B, bookBytes, sheetA, sheetB } from './fixtures.mjs';
@@ -25,34 +25,29 @@ test('일치 판정은 DB category_rule_matches와 같다(공백·전각 정리,
   assert.equal(categoryRuleMatches(rule('r1', '가짜.*', { match_type: 'regex' }), '가짜식당'), null);
 });
 
-test('여러 규칙이 맞으면 (priority, created_at, id) 순 첫 규칙', () => {
-  const rules = sortCategoryRules([
-    rule('r3', '가짜', { category_id: CAT_3, created_at: '2026-10-02T00:00:00Z' }),
-    rule('r2', '가짜', { category_id: CAT_2, created_at: '2026-10-01T00:00:00Z' }),
-    rule('r1', '가짜', { category_id: CAT_ID, created_at: '2026-10-01T00:00:00Z' }),
-    rule('r9', '가짜', { category_id: CAT_3, priority: 200, created_at: '2026-09-01T00:00:00Z' }),
-  ]);
-  assert.deepEqual(rules.map((r) => r.id), ['r1', 'r2', 'r3', 'r9']);
+test('여러 규칙이 맞으면 받은 순서(서버 정렬: priority, created_at, id)의 첫 규칙, 안 맞는 규칙은 건너뜀', () => {
+  const rules = [rule('r0', '없는가게', { category_id: CAT_3 }), rule('r1', '가짜', { category_id: CAT_ID }), rule('r2', '가짜', { category_id: CAT_2 })];
   assert.deepEqual(pickCategoryRule(rules, '가짜식당'), { category_id: CAT_ID, source: 'rule' });
-  const pri = sortCategoryRules([rule('a', '가짜', { priority: 50, category_id: CAT_2 }), ...rules]);
-  assert.equal(pickCategoryRule(pri, '가짜식당').category_id, CAT_2);
+  assert.equal(pickCategoryRule([...rules].reverse(), '가짜식당').category_id, CAT_2);
 });
 
 test('모호 규칙 → suggestion, 앞선 규칙의 카테고리가 꺼졌으면 분류 안 함, regex는 건너뛰고 다음 규칙', () => {
   assert.deepEqual(pickCategoryRule([rule('r1', '가짜', { is_ambiguous: true })], '가짜식당'), { category_id: CAT_ID, source: 'suggestion' });
-  const off = sortCategoryRules([rule('r1', '가짜', { categoryActive: false }), rule('r2', '가짜식당', { category_id: CAT_2, priority: 200 })]);
+  const off = [rule('r1', '가짜', { categoryActive: false }), rule('r2', '가짜식당', { category_id: CAT_2, priority: 200 })];
   assert.equal(pickCategoryRule(off, '가짜식당'), null);
-  const rx = sortCategoryRules([rule('r1', '.*', { match_type: 'regex', priority: 1 }), rule('r2', '가짜', { category_id: CAT_2 })]);
-  assert.equal(pickCategoryRule(rx, '가짜식당').category_id, CAT_2);
+  // 맞는 규칙보다 앞에 regex 규칙이 있으면 판정 불가 → 분류하지 않음. 뒤에 있으면 상관없음
+  const rx = [rule('r1', '.*', { match_type: 'regex', priority: 1 }), rule('r2', '가짜', { category_id: CAT_2 })];
+  assert.deepEqual(pickCategoryRule(rx, '가짜식당'), { blocked: 'regex' });
+  assert.equal(pickCategoryRule([...rx].reverse(), '가짜식당').category_id, CAT_2);
   assert.equal(pickCategoryRule([], '가짜식당'), null);
 });
 
-test('카드 파일: 확정 규칙 → rule + 확인함, 모호 → suggestion + 검토 대기, 환불 행은 그대로, RPC로 표시값 안 감', async () => {
-  const categoryRules = sortCategoryRules([
+test('카드 파일: 확정 규칙 → rule + 확인함, 모호 → suggestion + 검토 대기, 환불은 분류만(검토 대기), RPC로 표시값 안 감', async () => {
+  const categoryRules = [
     rule('r1', '가짜식당'),
     rule('r2', '가짜전자', { category_id: CAT_2, is_ambiguous: true }),
     rule('r3', '부분취소', { category_id: CAT_3 }),
-  ]);
+  ];
   const r = await parseFile(XLSX, bookBytes(sheetB(), 'xls'), { format: FORMAT_B, sourceId: SOURCE, categoryRules });
   const by = (m, kind) => r.rows.find((x) => x.merchant_raw === m && x.kind === kind);
   assert.equal(by('가짜식당', 'expense').category_id, CAT_ID);
@@ -61,29 +56,29 @@ test('카드 파일: 확정 규칙 → rule + 확인함, 모호 → suggestion +
   assert.equal(by('가짜전자', 'expense').category_id, CAT_2);
   assert.equal(by('가짜전자', 'expense').category_source, 'suggestion');
   assert.equal(by('가짜전자', 'expense').review_status, 'needs_review');
-  for (const ref of r.rows.filter((x) => x.kind === 'refund')) {
-    assert.equal(ref.category_id, null);
-    assert.equal(ref.review_status, 'needs_review');
-    assert.equal(ref.merchantRule, undefined);
-  }
+  // 환불도 DB 재적용처럼 분류하되 검토 대기 그대로(미연결 환불 목록은 검토 대기 환불만 봄)
+  assert.equal(by('가짜전자', 'refund').category_id, CAT_2);
+  assert.equal(by('가짜전자', 'refund').category_source, 'suggestion');
+  assert.equal(by('부분취소상점', 'refund').category_id, CAT_3);
+  assert.equal(by('부분취소상점', 'refund').category_source, 'rule');
+  for (const ref of r.rows.filter((x) => x.kind === 'refund')) assert.equal(ref.review_status, 'needs_review');
   assert.equal(by('부분취소상점', 'expense').category_id, CAT_3);
+  assert.equal(by('부분취소상점', 'expense').review_status, 'confirmed');
   for (const x of toRpcRows(r.rows)) assert.equal('merchantRule' in x, false);
 
   const p = previewOf(r, new Set());
-  assert.equal(p.merchantRule, 2);
-  assert.equal(p.merchantSuggest, 1);
+  assert.equal(p.merchantRule, 3);
+  assert.equal(p.merchantSuggest, 2);
   assert.equal(p.confirmed, 2);
-  assert.deepEqual(previewLines(p).find(([k]) => k === '가맹점 규칙으로 분류'), ['가맹점 규칙으로 분류', '3건(확인 필요 1건)']);
+  assert.deepEqual(previewLines(p).find(([k]) => k === '가맹점 규칙으로 분류'), ['가맹점 규칙으로 분류', '5건(확인 필요 2건)']);
   // 이미 DB에 있는 행은 세지 않는다
   const dup = previewOf(r, new Set([by('가짜식당', 'expense').dedup_key]));
-  assert.equal(dup.merchantRule, 1);
+  assert.equal(dup.merchantRule, 2);
 });
 
 test('통장 파일: 형식 행 규칙 분류는 그대로, 집계 제외·환불은 건너뜀, 이체 상대 규칙이 이긴다', async () => {
   const categories = new Map([['interest', CAT_3]]);
-  const categoryRules = sortCategoryRules([
-    rule('r1', '가짜마트'), rule('r2', '이자'), rule('r3', '카드대금'), rule('r4', '이시험'),
-  ]);
+  const categoryRules = [rule('r1', '가짜마트'), rule('r2', '이자'), rule('r3', '카드대금'), rule('r4', '이시험')];
   const counterpartyRules = [{
     id: 'p1', match_field: 'merchant', match_text: '이시험', match_type: 'exact', source_id: SOURCE, direction: 'out', txn_type: null,
     suggested_kind: 'expense', suggested_exclude_reason: null, suggested_category_id: CAT_2, suggested_is_shared: null,
@@ -93,7 +88,8 @@ test('통장 파일: 형식 행 규칙 분류는 그대로, 집계 제외·환�
   const mart = r.rows.filter((x) => x.merchant_raw === '가짜마트');
   assert.equal(mart.find((x) => x.kind === 'expense').category_id, CAT_ID);
   assert.equal(mart.find((x) => x.kind === 'expense').review_status, 'confirmed');
-  assert.equal(mart.find((x) => x.kind === 'refund').category_id, null);
+  assert.equal(mart.find((x) => x.kind === 'refund').category_id, CAT_ID); // 체크카드 환불: 분류, 검토 대기
+  assert.equal(mart.find((x) => x.kind === 'refund').review_status, 'needs_review');
   const interest = r.rows.find((x) => x.merchant_raw === '예금이자');
   assert.equal(interest.category_id, CAT_3); // 형식 행 규칙(category_code) 그대로
   assert.equal(interest.review_status, 'needs_review');
@@ -105,6 +101,17 @@ test('통장 파일: 형식 행 규칙 분류는 그대로, 집계 제외·환�
     assert.equal(x.category_id, CAT_2);
     assert.equal(x.review_status, 'needs_review');
   }
+});
+
+test('regex 규칙이 앞에 있으면 미분류 + 미리보기 안내', async () => {
+  const categoryRules = [rule('r0', '.*', { match_type: 'regex' }), rule('r1', '가짜식당')];
+  const r = await parseFile(XLSX, bookBytes(sheetB(), 'xls'), { format: FORMAT_B, sourceId: SOURCE, categoryRules });
+  assert.ok(r.rows.every((x) => x.category_id === null && x.review_status === 'needs_review'));
+  for (const x of toRpcRows(r.rows)) assert.equal('merchantRule' in x, false);
+  const p = previewOf(r, new Set());
+  assert.equal(p.merchantRegex, r.rows.length);
+  assert.equal(p.confirmed, 0);
+  assert.deepEqual(previewLines(p).find(([k]) => k.startsWith('정규식')), ['정규식 규칙 때문에 미분류(규칙 화면에서 다시 적용)', `${r.rows.length}건`]);
 });
 
 test('규칙이 없으면 이전과 같다(모두 검토 대기), 안내 문장', async () => {

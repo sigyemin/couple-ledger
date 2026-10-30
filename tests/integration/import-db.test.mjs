@@ -178,8 +178,8 @@ test('통합: 가맹점 규칙(CL-044) — 앱 정규화 결과가 DB에 그대�
        ('가짜전자', 'contains', :'g'::uuid, true, :'mem'::uuid, '2026-10-01')`, { d: dining, g: goods, mem: MEMBER });
   // 앱이 읽는 모양(구성원 권한 select) + 카테고리 켜짐 여부
   const rules = JSON.parse(psql(`select json_agg(json_build_object('id', r.id, 'pattern', r.pattern, 'match_type', r.match_type, 'category_id', r.category_id,
-      'is_ambiguous', r.is_ambiguous, 'priority', r.priority, 'is_active', r.is_active, 'created_at', r.created_at, 'categoryActive', c.is_active))
-      from category_rules r join categories c on c.id = r.category_id where r.is_active;`).out);
+      'is_ambiguous', r.is_ambiguous, 'priority', r.priority, 'is_active', r.is_active, 'created_at', r.created_at, 'categoryActive', c.is_active)
+      order by r.priority, r.created_at, r.id) from category_rules r join categories c on c.id = r.category_id where r.is_active;`).out);
   // 승인번호를 바꾼 카드 파일(앞 시험과 겹치지 않게)
   const sheet = sheetB().map((row, i) => (i >= 2 && row[6] ? row.map((c, k) => (k === 6 && c.length <= 8 ? `Z${c.slice(1)}` : c)) : row));
   const parsed = await parseFile(XLSX, bookBytes(sheet, 'biff8'), { format: FORMAT_B, sourceId: SOURCE_C, categoryRules: rules });
@@ -194,13 +194,16 @@ test('통합: 가맹점 규칙(CL-044) — 앱 정규화 결과가 DB에 그대�
   assert.deepEqual(got, [
     ['가짜식당', 'expense', 'confirmed', dining, 'rule'],
     ['가짜전자', 'expense', 'needs_review', goods, 'suggestion'],
-    ['가짜전자', 'refund', 'needs_review', null, null],
+    ['가짜전자', 'refund', 'needs_review', goods, 'suggestion'],
     ['부분취소상점', 'expense', 'needs_review', null, null],
     ['부분취소상점', 'refund', 'needs_review', null, null],
   ]);
-  // DB 재적용 미리보기(구성원 권한): 지출 행은 앱과 같은 판정(unchanged), 뒤 규칙은 skipped_priority
-  const pre = JSON.parse(psql(`select json_agg(json_build_array(r.pattern, x.result, x.merchant_norm) order by r.pattern, x.merchant_norm, x.result)
+  // DB 재적용 미리보기(구성원 권한): 지출·환불 행 모두 앱과 같은 판정(unchanged), 뒤 규칙은 skipped_priority
+  const pre = JSON.parse(psql(`select json_agg(json_build_array(r.pattern, t.kind, x.result, x.merchant_norm) order by r.pattern, x.merchant_norm, t.kind, x.result)
       from category_rules r, reapply_category_rule(r.id, false, null, null) x join transactions t on t.id = x.txn_id
-      where t.batch_id = :'b' and t.kind = 'expense';`, { b: batchId }).out);
-  assert.deepEqual(pre, [['가짜 식당', 'unchanged', '가짜식당'], ['가짜전자', 'unchanged', '가짜전자'], ['식당', 'skipped_priority', '가짜식당']]);
+      where t.batch_id = :'b';`, { b: batchId }).out);
+  assert.deepEqual(pre, [
+    ['가짜 식당', 'expense', 'unchanged', '가짜식당'], ['가짜전자', 'expense', 'unchanged', '가짜전자'], ['가짜전자', 'refund', 'unchanged', '가짜전자'],
+    ['식당', 'expense', 'skipped_priority', '가짜식당'],
+  ]);
 });

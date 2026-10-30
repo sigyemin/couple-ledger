@@ -48,7 +48,9 @@ export async function loadUpload(db, monthStart) {
     db.select('counterparty_rules', { columns: CP_COLUMNS, filters: [{ col: 'is_active', op: 'eq', value: true }] }),
     db.rpc('missing_uploads', { p_month: monthStart }, { retry: true }),
     db.select('members', { columns: 'id,member_slot,display_name' }),
-    db.select('category_rules', { columns: RULE_COLUMNS, filters: [{ col: 'is_active', op: 'eq', value: true }] }),
+    // 순서는 서버 정렬 그대로 쓴다(DB reapply_category_rule의 앞선 규칙 순서와 같음)
+    db.select('category_rules', { columns: RULE_COLUMNS, filters: [{ col: 'is_active', op: 'eq', value: true }],
+      order: [{ col: 'priority' }, { col: 'created_at' }, { col: 'id' }] }),
   ]);
   const error = res.find((r) => r.error)?.error;
   if (error) return { error };

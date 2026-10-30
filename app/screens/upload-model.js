@@ -56,6 +56,7 @@ export function previewOf(parsed, existingKeys = new Set()) {
     masked: parsed?.maskedCells ?? 0,
     merchantRule: fresh.filter((r) => r.merchantRule === 'rule').length,
     merchantSuggest: fresh.filter((r) => r.merchantRule === 'suggestion').length,
+    merchantRegex: fresh.filter((r) => r.merchantRule === 'regex').length,
     confirmed: fresh.filter((r) => r.review_status === 'confirmed').length,
     spendText: won(sum(fresh.filter((r) => !r.is_excluded && (r.kind === 'expense' || r.kind === 'refund')))),
   };
@@ -67,6 +68,7 @@ export function previewLines(p) {
   if (p.dupCount) out.push(['이미 들어온 행(건너뜀)', `${p.dupCount}건`]);
   const byRule = (p.merchantRule ?? 0) + (p.merchantSuggest ?? 0);
   if (byRule) out.push(['가맹점 규칙으로 분류', p.merchantSuggest ? `${byRule}건(확인 필요 ${p.merchantSuggest}건)` : `${byRule}건`]);
+  if (p.merchantRegex) out.push(['정규식 규칙 때문에 미분류(규칙 화면에서 다시 적용)', `${p.merchantRegex}건`]);
   if (p.excluded) out.push(['집계 제외(카드대금·이체 등)', `${p.excluded}건`]);
   if (p.checkCard) out.push(['체크카드 사용', `${p.checkCard}건`]);
   if (p.refunds) out.push(['환불', `${p.refunds}건`]);

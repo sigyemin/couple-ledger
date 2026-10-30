@@ -13,8 +13,9 @@
 // - 카드 취소(also_refund): 환불 금액 칸(refund_amount_key)이 정해져 있는데 비었거나 0이면 행 오류
 // - 모든 글자 칸은 민감번호 규칙으로 가린다('[숫자 가림]', 붙여 쓴 일시 단계는 끈 보수적 검사)
 // - 승인번호가 형식(영숫자 4~12자, 숫자 10개 연속 금지)에 맞지 않으면 행 오류
-// - 검토 상태는 needs_review. 단 가맹점 규칙(확정)으로 분류된 행은 confirmed(사용자 결정 U-16·Q3)
-// - 가맹점 규칙(category_rules)은 형식 행 규칙·이체 상대 규칙으로 분류되지 않은 지출·수입 행에만, DB와 같은 일치·순서로
+// - 검토 상태는 needs_review. 단 가맹점 규칙(확정)으로 분류된 지출·수입 행은 confirmed(사용자 결정 U-16·Q3)
+// - 가맹점 규칙(category_rules)은 형식 행 규칙·이체 상대 규칙으로 분류되지 않은 지출·환불·수입 행(집계 제외 빼고)에만,
+//   DB reapply_category_rule과 같은 일치·순서로. 환불은 분류만 하고 검토 대기 그대로(v_unlinked_refunds가 검토 대기 환불만 봄)
 // - 통장 행이 행 규칙·이체 상대 규칙 어디에도 안 맞으면 newCounterparty = true + merchantVariant(가림 전 설명의 파일 안 번호)
 //   둘 다 화면 표시용이라 RPC로는 안 보낸다(toRpcRows)
 // - 한 파일 안에서 같은 1순위 키(결제수단|승인번호|kind)가 두 번째로 나오면 그 행은 행 오류(duplicate_key)
@@ -98,15 +99,6 @@ export function matchCounterpartyRule(rules, { sourceId, direction, txnType, mer
 }
 
 /**
- * 가맹점 규칙 순서: DB reapply_category_rule의 앞선 규칙 판정과 같게 (priority, created_at, id) 오름차순
- */
-export function sortCategoryRules(rules) {
-  return [...(rules ?? [])].sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100)
-    || String(a.created_at ?? '').localeCompare(String(b.created_at ?? ''))
-    || String(a.id ?? '').localeCompare(String(b.id ?? '')));
-}
-
-/**
  * 가맹점 규칙 하나가 설명(merchant_norm)에 맞는지 — DB category_rule_matches와 같은 판정(contains·exact).
  * 비활성은 맞지 않음. regex는 브라우저에서 실행하지 않는다(null = 판정 안 함)
  */
@@ -121,15 +113,18 @@ export function categoryRuleMatches(rule, merchantNorm) {
 
 /**
  * 업로드 행에 붙일 가맹점 규칙(사용자 결정 U-16 A안): 순서대로 처음 맞는 규칙.
+ * 순서는 서버가 정렬해 준 그대로 쓴다(select … order by priority, created_at, id — DB reapply의 앞선 규칙 판정과 같은 순서).
  * 그 규칙의 카테고리가 꺼졌거나 없으면 분류하지 않는다(DB도 그 규칙은 재적용 불가, 뒤 규칙은 skipped_priority — 설계 v0.2 3-6)
- * regex 규칙은 판정하지 않고 건너뛴다(앱에서 만들 수 없음, 브라우저 정규식 실행 금지)
- * @param rules sortCategoryRules로 정렬한 켜진 규칙들 { pattern, match_type, category_id, is_ambiguous, categoryActive }
- * @returns {{ category_id, source: 'rule'|'suggestion' } | null}
+ * regex 규칙은 브라우저에서 판정하지 않는다. 맞는 규칙보다 앞에 regex 규칙이 있으면 결과를 알 수 없으므로 분류하지 않는다
+ * (업로드와 DB 재적용 결과가 달라지지 않게) → { blocked: 'regex' }
+ * @param rules 정렬된 켜진 규칙들 { pattern, match_type, category_id, is_ambiguous, categoryActive }
+ * @returns {{ category_id, source: 'rule'|'suggestion' } | { blocked: 'regex' } | null}
  */
 export function pickCategoryRule(rules, merchantNorm) {
   for (const r of rules ?? []) {
     const hit = categoryRuleMatches(r, merchantNorm);
-    if (hit === null || hit === false) continue;
+    if (hit === null) return { blocked: 'regex' };
+    if (hit === false) continue;
     if (!r.category_id || r.categoryActive === false) return null;
     return { category_id: r.category_id, source: r.is_ambiguous ? 'suggestion' : 'rule' };
   }
@@ -171,7 +166,19 @@ function decideAmount(sign, cell) {
  */
 export async function normalizeRows(grid, format, header, ctx) {
   const { sourceId, categories = new Map() } = ctx ?? {};
-  const merchantRules = sortCategoryRules(ctx?.categoryRules);
+  const merchantRules = Array.isArray(ctx?.categoryRules) ? ctx.categoryRules : [];
+  // 가맹점 규칙(U-16): 형식 행 규칙·이체 상대 규칙으로 분류되지 않은 지출·환불·수입 행에만(이체·집계 제외는 건너뜀).
+  // 확정 규칙 → 출처 rule, 지출·수입은 확인함(Q3) / 모호 규칙 → 출처 suggestion. 환불은 검토 대기 그대로
+  const applyMerchantRule = (row) => {
+    if (row.category_id || row.is_excluded || !['expense', 'refund', 'income'].includes(row.kind)) return;
+    const hit = pickCategoryRule(merchantRules, row.merchant_norm);
+    if (!hit) return;
+    if (hit.blocked) { row.merchantRule = 'regex'; return; }
+    row.category_id = hit.category_id;
+    row.category_source = hit.source;
+    if (hit.source === 'rule' && row.kind !== 'refund') row.review_status = 'confirmed';
+    row.merchantRule = hit.source;
+  };
   const cpRules = format.kind === 'bank_account' ? sortCounterpartyRules(ctx?.counterpartyRules) : [];
   if (typeof sourceId !== 'string' || !sourceId) throw new TypeError('결제수단 id가 필요합니다');
   const dateFmt = compileFormat(format.date_format || DEFAULT_DATE_FORMAT);
@@ -289,17 +296,7 @@ export async function normalizeRows(grid, format, header, ctx) {
         : cp?.suggested_category_id && (kind === 'expense' || kind === 'income') ? cp.suggested_category_id : null,
     };
     if (base.category_id) base.category_source = 'rule';
-    // 가맹점 규칙(U-16): 형식 행 규칙·이체 상대 규칙으로 분류되지 않은 지출·수입 행에만(환불·이체·집계 제외는 건너뜀).
-    // 확정 규칙 → 출처 rule + 확인함(Q3), 모호 규칙 → 출처 suggestion + 검토 대기
-    if (!base.category_id && !base.is_excluded && (kind === 'expense' || kind === 'income')) {
-      const hit = pickCategoryRule(merchantRules, merchantNorm);
-      if (hit) {
-        base.category_id = hit.category_id;
-        base.category_source = hit.source;
-        if (hit.source === 'rule') base.review_status = 'confirmed';
-        base.merchantRule = hit.source;
-      }
-    }
+    applyMerchantRule(base);
     // 통장 행인데 행 규칙·이체 상대 규칙에 안 맞았으면 "새 이체 상대" 후보(화면 4-2 ②). RPC로는 보내지 않는다(toRpcRows가 뺌)
     if (format.kind === 'bank_account' && !rule && !cp) {
       base.newCounterparty = true;
@@ -322,13 +319,13 @@ export async function normalizeRows(grid, format, header, ctx) {
     // 카드 취소 행: 원거래(지출)와 같은 승인번호의 환불 행 두 개 (원거래를 먼저)
     if (rule?.also_refund) {
       const refund = { ...base, kind: 'refund', amount: refundAmount, is_excluded: false, exclude_reason: null, direction: 'in' };
-      // 가맹점 규칙 결과는 원거래(지출)에만 — 환불은 분류·확인하지 않는다(확인함이면 미연결 환불이 검토에서 빠짐)
+      // 원거래에 붙인 가맹점 규칙 결과는 떼고 환불 행으로 다시 판정(환불은 확인함으로 바꾸지 않음)
       if (refund.merchantRule) {
+        if (refund.merchantRule !== 'regex') { refund.category_id = null; delete refund.category_source; }
         delete refund.merchantRule;
-        delete refund.category_source;
-        refund.category_id = null;
         refund.review_status = 'needs_review';
       }
+      applyMerchantRule(refund);
       variants.push(refund);
     }
 
