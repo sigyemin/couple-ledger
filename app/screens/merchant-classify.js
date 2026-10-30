@@ -8,17 +8,18 @@
 //   바뀌는 게 있는 규칙만 적용(p_apply=true), 기간 전체. 중간 실패면 멈추고 몇 개 했는지 안내. 변경 묶음은 규칙마다 하나
 // - 통장 이체 행 묶음은 이름을 보여 주되 규칙은 이체 상대 규칙 쪽으로 안내
 // 의존: ui/dom.js, router.js, core/confirm.js, core/errors.js, screens/merchant-classify-model.js, screens/category-picker.js,
-//       screens/review-model.js(confirmBothPatch), screens/shell.js
+//       screens/review-model.js(confirmBothPatch), screens/merchant-rule.js(규칙 저장), screens/shell.js
 // =====================================================================
 import { h } from '../ui/dom.js';
 import { buildHash } from '../router.js';
 import { confirmDialog } from '../core/confirm.js';
 import { STAGES, ACTIONS } from '../core/errors.js';
 import {
-  merchantGroups, groupSub, ruleFor, classifyText, classifyDescription, samePatternRule, reapplyOrder, reapplyCount, bulkReapplyText,
+  merchantGroups, groupSub, ruleFor, classifyText, classifyDescription, reapplyOrder, reapplyCount, bulkReapplyText,
 } from './merchant-classify-model.js';
 import { reapplyErrorText } from './rules-model.js';
 import { categoryPicker } from './category-picker.js';
+import { saveMerchantRule } from './merchant-rule.js';
 import { confirmBothPatch } from './review-model.js';
 import { errorView } from './shell.js';
 
@@ -139,38 +140,11 @@ export async function renderMerchantClassify({ db, member, reload, isCurrent, on
       }
       let ruleNote = '';
       let ruleLink = null;
-      // 같은 패턴(방식·정리값)의 켜진 규칙이 있으면 만들지 않는다(DB에 유일 제약이 없음 — 리뷰 ④).
-      // 카테고리가 다르면 규칙 화면에서 바꾸도록 안내(재리뷰 권장 — 같은 패턴 두 규칙이 다투지 않게)
-      let exists = false;
       if (makeRule) {
-        const ex = await db.select('category_rules', {
-          columns: 'id,pattern,match_type,category_id,is_active',
-          filters: [eq('is_active', true), eq('match_type', rv.value.match_type)],
-        });
-        if (ex.error) {
-          const code = onError?.(ex.error, { stage: STAGES.list });
-          done(`${g.count}건을 '${name}'(으)로 분류했지만 같은 규칙이 있는지 확인하지 못해 규칙은 만들지 않았어요. 규칙·카테고리에서 만들어 주세요.${code ? ` (오류 번호 ${code})` : ''}`, true);
-          return;
-        }
-        const found = samePatternRule(ex.data, rv.value);
-        exists = Boolean(found.same || found.other);
-        if (found.same) ruleNote = ' 같은 규칙이 이미 있어요.';
-        else if (found.other) {
-          const other = categories.find((c) => c.id === found.other.category_id)?.name ?? '다른 카테고리';
-          ruleNote = ` 이미 「${found.other.pattern}」 규칙이 '${other}'(으)로 있어 새 규칙은 만들지 않았어요 —`;
-          ruleLink = { href: buildHash('rule', { id: found.other.id }), text: '규칙 화면에서 바꾸기' };
-        }
-      }
-      if (makeRule && !exists) {
-        const ir = await db.insert('category_rules', { ...rv.value, created_by: member.memberId });
-        if (ir.error) {
-          if (ir.error.code === 'duplicate') ruleNote = ' 같은 규칙이 이미 있어요.';
-          else {
-            const code = onError?.(ir.error, { stage: STAGES.db_update });
-            done(`${g.count}건을 '${name}'(으)로 분류했지만 규칙은 만들지 못했어요. 규칙·카테고리에서 만들어 주세요.${code ? ` (오류 번호 ${code})` : ''}`, true);
-            return;
-          }
-        } else ruleNote = ' 앞으로 올릴 때 자동 분류돼요.';
+        const sr = await saveMerchantRule({ db, member, value: rv.value, categories, onError });
+        if (!sr.ok) { done(`${g.count}건을 '${name}'(으)로 분류했지만 ${sr.text}`, true); return; }
+        ruleNote = sr.note;
+        ruleLink = sr.link;
       }
       done(ruleLink
         ? `${g.merchant} ${g.count}건을 '${name}'(으)로 분류했어요.${ruleNote}`

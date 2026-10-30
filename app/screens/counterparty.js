@@ -3,6 +3,8 @@
 // #/cprules            : counterparty_rules, payment_sources, categories
 // #/cprule/<id>        : 편집 = 선택(v0.1 4-2와 같은 선택지) + 보일 이름 + 끄기·켜기. 이름·범위는 그대로 보여 준다
 // #/cprulenew          : 직접 추가 = 이름·일치 방식·범위(통장·방향) + 선택 + 보일 이름
+//                        월 검토 '아직 안 정한 이체 상대'에서 오면 이름·통장·방향을 미리 채운다(startCounterpartyDraft —
+//                        이름은 주소에 넣지 않고 메모리로 한 번만 넘긴다, CL-066)
 // #/cpapply/<id>       : apply_counterparty_rule(id, false) 미리보기 → (id, true) 적용 → 변경 기록 상세에서 되돌리기
 // - 쓰기: counterparty_rules insert(created_by = 나) · update(바뀐 칸만). 지우기는 두지 않는다(끄기만 — 설계 일관성)
 // - 같은 이름·범위 중복은 DB가 거부(23505)
@@ -30,8 +32,16 @@ const PREVIEW_FIRST = 4;
 const PREVIEW_STEP = 20;
 const DETAIL_CHUNK = 50;
 const eq = (col, value) => ({ col, op: 'eq', value });
+const banks = (sources) => sources.filter((s) => s.kind === 'bank_account' && s.is_active);
 
 let cpNotice = null;
+// 다음 '직접 추가' 화면에 한 번 채울 값(이체 상대 이름 원문 — 주소·기록에 남기지 않으려고 메모리로 넘긴다)
+let cpDraft = null;
+
+/** 월 검토에서 이체 상대 규칙 만들기로 넘어가기 전에 부른다 */
+export function startCounterpartyDraft({ matchText, sourceId = null, direction = null }) {
+  cpDraft = { matchText: String(matchText ?? ''), sourceId, direction };
+}
 
 function head(title, back, doc, extra = null) {
   return h('header', { class: 'screen-head' }, [
@@ -105,6 +115,9 @@ export async function renderCounterpartyEdit({ db, member, id = null, go, isCurr
   ];
   if (id) reads.push(db.select('counterparty_rules', { columns: RULE_COLUMNS, filters: [eq('id', id)] }));
   const res = await Promise.all(reads);
+  // 미리 채울 값은 읽기 직후 바로 꺼내 지운다(버려진 그리기·오류 화면 뒤 다음 '직접 추가'에 남지 않게)
+  const draft = id ? null : cpDraft;
+  if (!id) cpDraft = null;
   if (!isCurrent()) return null;
   const back = buildHash('cprules');
   const title = id ? '이체 상대' : '이체 상대 직접 추가';
@@ -138,10 +151,9 @@ export async function renderCounterpartyEdit({ db, member, id = null, go, isCurr
     ], doc)
     : (() => {
       nameInput = h('input', { class: 'field', attrs: { 'aria-label': '상대 이름(통장 설명 칸 그대로)', maxlength: '100' } }, [], doc);
-      const banks = sources.filter((s) => s.kind === 'bank_account' && s.is_active);
       srcSel = h('select', { class: 'field', attrs: { 'aria-label': '어느 통장' } }, [
         h('option', { text: '모든 통장', attrs: { value: '' } }, [], doc),
-        ...banks.map((s) => h('option', { text: s.label, attrs: { value: s.id } }, [], doc)),
+        ...banks(sources).map((s) => h('option', { text: s.label, attrs: { value: s.id } }, [], doc)),
       ], doc);
       return h('section', { class: 'card form' }, [
         h('label', { class: 'field-label', text: '상대 이름(통장 설명 칸 그대로)' }, [], doc), nameInput,
@@ -150,12 +162,16 @@ export async function renderCounterpartyEdit({ db, member, id = null, go, isCurr
         ], doc),
         h('label', { class: 'field-label', text: '어느 통장' }, [], doc), srcSel,
         h('div', { class: 'radio-group', attrs: { role: 'radiogroup', 'aria-label': '방향' } },
-          DIRECTIONS.map((d) => radio('direction', d.key, d.label, d.key === 'out')), doc),
+          DIRECTIONS.map((d) => radio('direction', d.key, d.label, d.key === (draft?.direction ?? 'out'))), doc),
       ], doc);
     })();
+  if (draft) {
+    nameInput.value = draft.matchText;
+    if (banks(sources).some((s) => s.id === draft.sourceId)) srcSel.value = draft.sourceId;
+  }
 
   // 선택 카드(업로드 미리보기와 같은 부품)
-  const card = choiceCard({ categories, cats, initial: original, direction: original ? original.direction : 'out' }, doc);
+  const card = choiceCard({ categories, cats, initial: original, direction: original ? original.direction : (draft?.direction ?? 'out') }, doc);
 
   const save = h('button', { class: 'btn primary', text: '저장', attrs: { type: 'button' } }, [], doc);
   const lock = (on) => { for (const el of main.querySelectorAll('button, input, select')) el.disabled = on; card.setDisabled(on); };
@@ -225,6 +241,7 @@ export async function renderCounterpartyEdit({ db, member, id = null, go, isCurr
     original && !original.is_active ? h('p', { class: 'notice small', text: '꺼진 규칙이에요. 켜야 업로드에 쓰여요.' }, [], doc) : null,
     scopeSection,
     h('section', { class: 'card' }, [card.el], doc),
+    draft ? h('p', { class: 'notice small', text: '월 검토에서 고른 이름·통장·방향을 채웠어요. 지점·날짜처럼 바뀌는 글자가 있으면 줄이고 "이 글자가 들어 있으면"을 고르세요.' }, [], doc) : null,
     h('p', { class: 'muted small', text: '저장하면 다음 업로드부터 적용돼요. 이미 들어온 검토 대기 거래에도 적용할지 다음 화면에서 미리 보여 드려요. 이미 확인한 거래는 바뀌지 않아요.' }, [], doc),
     save,
   ], doc);
