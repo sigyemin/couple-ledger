@@ -339,6 +339,8 @@ a.btn { display: flex; align-items: center; justify-content: center; text-decora
 .upload-name { font-weight: 700; overflow-wrap: anywhere; }
 .upload-file.error { border: 1px solid var(--orange); }
 .upload-result { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.cp-new { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 12px; }
+.cp-new-item { padding: 12px; border-radius: 14px; background: var(--bg); }
 
 /* 환불 원거래 연결 (CL-034, 시안 27·8) */
 .refund-list { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }

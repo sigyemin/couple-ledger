@@ -9,6 +9,8 @@
 // 의존: core/format.js
 // =====================================================================
 import { won, month as monthLabel } from '../core/format.js';
+import { matchNorm } from '../import/formats.js';
+import { MASK_TEXT } from '../core/sensitive.js';
 
 export const MAX_FILES = 12;
 export const KEY_CHUNK = 100; // 중복 키 조회 한 번에 넣는 수
@@ -106,13 +108,52 @@ export function failedRows(res) {
 }
 
 /**
+ * 새 이체 상대 묶음(v0.1 4-2 ②): 통장 행 중 규칙에 안 맞은 행(newCounterparty)을 (방향, 설명 정리값)으로 묶는다. 건수 많은 순
+ * 방향은 정규화 기본값에서 온다(규칙이 없으면 out → 지출, in → 수입)
+ * variantCount = 가림 전 설명이 몇 가지였는지(2 이상이면 숫자 가림으로 서로 다른 설명이 한 카드가 됨 — 경고, 리뷰 PR #30)
+ * ruleAllowed = 가림 표시를 빼고 2글자 이상일 때만 규칙을 만들 수 있다(너무 넓은 규칙 방지)
+ * @returns {{ key, text, direction, count, totalText, variantCount, ruleAllowed }[]}
+ */
+export function counterpartyGroups(rows) {
+  const groups = new Map();
+  for (const r of rows ?? []) {
+    if (!r.newCounterparty) continue;
+    const norm = matchNorm(r.merchant_raw);
+    if (!norm) continue;
+    const direction = r.kind === 'income' ? 'in' : 'out';
+    const key = `${direction}|${norm}`;
+    const g = groups.get(key) ?? { key, text: r.merchant_raw, direction, count: 0, total: 0, variants: new Set() };
+    g.count += 1;
+    g.total += r.amount;
+    g.variants.add(r.merchantVariant ?? 0);
+    groups.set(key, g);
+  }
+  return [...groups.values()].sort((a, b) => b.count - a.count || b.total - a.total || a.text.localeCompare(b.text))
+    .map(({ total, variants, ...g }) => ({
+      ...g, totalText: won(total), variantCount: variants.size,
+      ruleAllowed: [...matchNorm(g.text.split(MASK_TEXT).join(''))].length >= 2,
+    }));
+}
+
+/** 고른 값 → 규칙 행(기본 범위 = 그 통장 + 같은 방향, 이름이 똑같으면). 미리보기용 draft는 id·created_at을 앞에 둬 기존 규칙보다 뒤에 온다 */
+export function counterpartyRule(group, sourceId, values, alias = null) {
+  return {
+    match_field: 'merchant', match_text: group.text, match_type: 'exact', source_id: sourceId, direction: group.direction,
+    alias, ...values,
+  };
+}
+export function draftRule(rule, n) {
+  return { ...rule, id: `draft-${n}`, txn_type: null, priority: 100, is_active: true, created_at: '9999-12-31T00:00:00Z' };
+}
+
+/**
  * 결제수단 고르기 반영. 빈 값으로 되돌리면 고른 결제수단·미리보기를 지우고 '고르기' 상태(저장 불가)로 — PR #29 재리뷰
  * @returns {'prepare'|'cleared'}
  */
 export function applySourceChoice(f, value) {
   f.result = null;
   if (!value) {
-    Object.assign(f, { sourceId: null, parsed: null, preview: null, state: 'choose' });
+    Object.assign(f, { sourceId: null, parsed: null, preview: null, cards: [], state: 'choose' });
     return 'cleared';
   }
   f.sourceId = value;
