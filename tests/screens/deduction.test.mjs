@@ -174,3 +174,11 @@ test('홈 카드(사용자 결정 10-30): 항목별 누구 무엇 + 이유, 총�
   const half = homeAdvice(peopleView([st('m1', { total_salary_amount: null }), st('m2')], members));
   assert.match(half.rows[0].reason, /가람 총급여 없음/);
 });
+
+test('홈: 공제 카드를 기다리지 않고 먼저 그린 뒤 바꿔 끼운다', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../../app/screens/home.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(src, /await adviceCard/);
+  assert.match(src, /확인하는 중…/);
+  assert.match(src, /adviceCard\.then\(\(card\) => \{\s*if \(isCurrent\(\)\) advice\.replaceWith\(card\);/);
+});

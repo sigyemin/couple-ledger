@@ -35,9 +35,9 @@ import { historyEntries, HISTORY_NOTE, EDIT_LIMIT, ITEM_LIMIT } from './history-
 
 export const DETAIL_COLUMNS = [
   'id', 'source_id', 'origin', 'occurred_on', 'occurred_time', 'merchant_raw', 'amount', 'period_month',
-  'installment_months', 'kind', 'is_shared', 'share_ratio', 'is_excluded', 'exclude_reason', 'review_status', 'memo',
+  'installment_months', 'kind', 'is_shared', 'is_excluded', 'exclude_reason', 'review_status', 'memo',
   'refund_of_txn_id', 'batch_id', 'created_at', 'created_by', 'updated_at', 'updated_by', 'deleted_at', 'source_label',
-  'payer_member_id', 'payer_name', 'lines', 'other_share_amount', 'month_reviewed_at', 'is_changed_after_review',
+  'payer_member_id', 'payer_name', 'lines', 'month_reviewed_at', 'is_changed_after_review',
   'is_uncategorized', 'inherited_category_id', 'card_kind', 'is_test_source',
 ].join(',');
 const MINI = 'id,occurred_on,merchant_raw,amount';

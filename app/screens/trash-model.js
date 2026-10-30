@@ -104,7 +104,7 @@ export function restoreConfirmText(rowsToRestore, reviewStates, { statesUnknown 
     ? `${first.merchant_raw} ${won(Number(first.amount))}을 되살릴까요?`
     : `${rowsToRestore.length}건을 되살릴까요?`;
   const months = [...new Set(rowsToRestore.map((r) => r.period_month))].sort();
-  const parts = [`${months.map((m) => month(m)).join(', ')} 집계·정산에 다시 들어가요.`];
+  const parts = [`${months.map((m) => month(m)).join(', ')} 집계에 다시 들어가요.`];
   const reviewed = months.filter((m) => reviewStates.get(m) === 'reviewed');
   if (statesUnknown) parts.push("확인 완료한 달인지 확인하지 못했어요. 확인 완료한 달이면 '확인 후 변경됨'이 돼요.");
   else if (reviewed.length) parts.push(`${reviewed.map((m) => month(m)).join(', ')}이 '확인 후 변경됨'이 돼요.`);

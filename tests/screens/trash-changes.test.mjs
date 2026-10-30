@@ -32,7 +32,7 @@ test('되살리기: 원거래 먼저·환불 나중, 원거래가 휴지통이�
   const both = restorePlan([U(2), U(1)], rows);
   assert.deepEqual([both.askOriginals, restoreOrder(both, rows, []).order], [[], [U(1), U(2)]]);
   const t = restoreConfirmText([rows[0], rows[1], rows[2]], new Map([['2026-10-01', 'reviewed'], ['2026-09-01', 'not_reviewed']]));
-  assert.match(t.message, /^3건을 되살릴까요\? 2026년 9월, 2026년 10월 집계·정산에 다시 들어가요\. 2026년 10월이 '확인 후 변경됨'이 돼요\. 원거래를 먼저/);
+  assert.match(t.message, /^3건을 되살릴까요\? 2026년 9월, 2026년 10월 집계에 다시 들어가요\. 2026년 10월이 '확인 후 변경됨'이 돼요\. 원거래를 먼저/);
   assert.match(restoreConfirmText([rows[2]], new Map()).message, /^시험상점 4,500원을 되살릴까요\?/);
   assert.match(restoreConfirmText([rows[2]], new Map(), { statesUnknown: true }).message, /확인 완료한 달인지 확인하지 못했어요/);
   assert.deepEqual(restorePatch('m1'), { deleted_at: null, deleted_by: null, updated_by: 'm1' });

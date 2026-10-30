@@ -102,7 +102,17 @@ export async function renderHome({ db, member, monthStart, isCurrent, onError },
     todos.replaceChildren(...todosKids(buildHomeModel(monthStart, homeData(up))));
   });
 
-  const advice = await adviceCard;
-  if (!isCurrent()) return null;
+  // 공제 카드는 기다리지 않는다: 자리만 먼저 그리고, 오면 바꿔 끼운다(다른 화면으로 넘어갔으면 그대로 둔다)
+  const advice = h('section', { class: 'card home-ded', attrs: { 'aria-live': 'polite' } }, [
+    h('h2', { class: 'card-title', text: '지금 누구 카드가 유리' }, [], doc),
+    h('p', { class: 'muted', text: '확인하는 중…' }, [], doc),
+  ], doc);
+  adviceCard.then((card) => {
+    if (isCurrent()) advice.replaceWith(card);
+  }, (err) => {
+    if (!isCurrent()) return;
+    onError?.(err);
+    advice.lastChild.textContent = '공제 정보를 불러오지 못했어요.';
+  });
   return h('main', { class: 'screen' }, [head, summary, todos, advice], doc);
 }
