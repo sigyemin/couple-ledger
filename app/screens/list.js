@@ -8,7 +8,7 @@
 import { h } from '../ui/dom.js';
 import { confirmDialog } from '../core/confirm.js';
 import { STAGES, ACTIONS } from '../core/errors.js';
-import { categoryOptions } from './detail-model.js';
+import { categoryPicker } from './category-picker.js';
 import { addMonths, buildHash } from '../router.js';
 import { month } from '../core/format.js';
 import {
@@ -211,16 +211,14 @@ export async function renderList({ db, monthStart, query, go, isCurrent, onError
   /** 아래 고정 막대: N건 · 모두 고르기 · 카테고리 · 바꾸기 */
   function bulkBar() {
     const count = h('strong', { text: '0건 고름' }, [], doc);
-    const cat = h('select', { class: 'field', attrs: { 'aria-label': '바꿀 카테고리' } }, [], doc);
+    const cat = categoryPicker({ categories, label: '바꿀 카테고리', doc });
     const apply = h('button', { class: 'btn primary', text: '바꾸기', attrs: { type: 'button' } }, [], doc);
     const all = h('button', { class: 'btn secondary small-btn', text: '모두 고르기', attrs: { type: 'button' } }, [], doc);
     let kindShown = null;
     const fillCats = (kind) => {
       if (kind === kindShown) return;
       kindShown = kind;
-      cat.replaceChildren(h('option', { text: '카테고리 고르기', attrs: { value: '' } }, [], doc),
-        ...categoryOptions(categories, kind).map((g) => h('optgroup', { attrs: { label: g.group } },
-          g.items.map((it) => h('option', { text: it.name, attrs: { value: it.id } }, [], doc)), doc)));
+      cat.setKind(kind);
     };
     const pickedRows = () => shown.filter((r) => picked.has(r.id));
     const el = h('section', { class: 'bulk-bar', attrs: { 'aria-label': '고른 거래 바꾸기' } }, [count, all, cat, apply], doc);

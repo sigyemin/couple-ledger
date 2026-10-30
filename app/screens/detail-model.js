@@ -117,13 +117,14 @@ export function buildDetailModel(row, { cats, members, original = null, refunds 
 
 /**
  * 고를 수 있는 카테고리 (v0.2 3-9: 켜진 것만, 지출·환불은 수입 그룹 제외, 수입은 수입 그룹만)
- * @returns {{ group: string, items: {id, name}[] }[]}
+ * @returns {{ id, group: string, items: {id, name}[] }[]}
  */
 export function categoryOptions(categories, kind) {
   const groups = categories.filter((c) => !c.parent_id && c.is_active)
     .filter((g) => (kind === 'income' ? g.code === INCOME_CODE : g.code !== INCOME_CODE))
     .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
   return groups.map((g) => ({
+    id: g.id,
     group: g.name,
     items: categories.filter((c) => c.parent_id === g.id && c.is_active)
       .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name))

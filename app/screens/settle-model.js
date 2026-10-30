@@ -5,7 +5,7 @@
 // - 검토 대기가 남아도 확인 완료를 누를 수 있다(남은 건수만 안내 — 확정 S2)
 // 의존: core/format.js, router.js, screens/home-model.js(subjectParticle)
 // =====================================================================
-import { won, month, dateTime } from '../core/format.js';
+import { month, dateTime } from '../core/format.js';
 import { subjectParticle } from './home-model.js';
 import { addMonths, currentMonth } from '../router.js';
 

@@ -19,7 +19,7 @@ import { confirmDialog } from '../core/confirm.js';
 import {
   progress, uncategorizedGroups, classifyConfirmText, duplicateGroups, unlinkedRefundCount, mismatchItems, confirmBothPatch,
 } from './review-model.js';
-import { categoryOptions } from './detail-model.js';
+import { categoryPicker } from './category-picker.js';
 import { readCandidates, readReviewStates, linkOne } from './refund.js';
 import {
   SUGGEST_CALL_LIMIT, isSuggestTarget, monthSuggestions, suggestionText, reviewedNote, bulkPlan, bulkConfirmText, bulkResultText,
@@ -119,15 +119,11 @@ export async function renderReview({ db, member, monthStart, reload, isCurrent, 
   const classifyCard = card(`분류가 필요해요${groups.length ? ` · ${groups.reduce((s, g) => s + g.total, 0)}건` : ''}`, [
     groups.length === 0 ? h('p', { class: 'muted', text: '분류가 필요한 거래가 없어요' }, [], doc)
       : h('ul', { class: 'review-groups' }, groups.map((g) => {
-        const sel = h('select', { class: 'field', attrs: { 'aria-label': `${g.merchant} 카테고리` } }, [
-          h('option', { text: '카테고리 고르기', attrs: { value: '' } }, [], doc),
-          ...categoryOptions(categories, g.kind).map((grp) => h('optgroup', { attrs: { label: grp.group } },
-            grp.items.map((it) => h('option', { text: it.name, attrs: { value: it.id } }, [], doc)), doc)),
-        ], doc);
+        const sel = categoryPicker({ categories, kind: g.kind, label: `${g.merchant} 카테고리`, doc });
         const go = h('button', { class: 'btn secondary small-btn', text: `${g.count}건 바꾸기`, attrs: { type: 'button' } }, [], doc);
         go.addEventListener('click', async () => {
           if (!sel.value) { say('카테고리를 골라 주세요', true); return; }
-          const name = sel.selectedOptions[0]?.textContent ?? '';
+          const name = sel.selectedName;
           if (!(await confirmDialog({ ...classifyConfirmText(g, name), confirmLabel: '분류하기', doc }))) return;
           go.disabled = true;
           const r = await db.rpc('bulk_set_category', { p_txn_ids: g.ids, p_category_id: sel.value, p_description: `월 검토 · ${g.merchant} → ${name}`.slice(0, 200) });

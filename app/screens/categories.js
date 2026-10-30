@@ -170,7 +170,7 @@ export async function renderCategories({ db, reload, isCurrent, onError }, doc =
 
   const main = h('main', { class: 'screen' }, [
     head, tabs, status,
-    h('p', { class: 'muted small', text: '고르기 화면에는 켜진 것만 보여요. 기본 항목은 지우거나 옮길 수 없어요.' }, [], doc),
+    h('p', { class: 'muted small', text: '고르기 화면에는 켜진 것만 보여요. 기본 카테고리는 지우기 대신 끄기를 써 주세요(지우거나 옮길 수 없어요).' }, [], doc),
     h('h2', { class: 'section-title', text: '지출' }, [], doc),
     ...tree.expense.map((g) => groupCard(g, tree.expense)),
     h('section', { class: 'card' }, [h('p', { class: 'label', text: '지출 그룹 추가' }, [], doc), addForm('지출 그룹 추가', null, '지출 그룹')], doc),

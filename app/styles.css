@@ -417,3 +417,23 @@ a.btn.small-btn { display: inline-flex; }
 .swatch.c0 { background: var(--s0); } .swatch.c1 { background: var(--s1); } .swatch.c2 { background: var(--s2); } .swatch.c3 { background: var(--s3); }
 .swatch.c4 { background: var(--s4); } .swatch.c5 { background: var(--s5); } .swatch.c6 { background: var(--s6); }
 .swatch.etc { background: var(--s-etc); } .swatch.none { background: var(--s-none); border: 1px solid var(--s-etc); }
+
+/* 카테고리 고르기 부품 (CL-060): 버튼 + 대화상자(검색 · 최근 · 대분류 펼침) */
+.cat-pick { min-width: 0; }
+.cat-pick-btn { width: 100%; text-align: left; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cat-pick-btn.empty { color: var(--sub); }
+.cat-dialog { border: 0; border-radius: var(--radius); padding: 20px 16px 12px; width: calc(100% - 32px); max-width: 420px;
+  max-height: calc(100vh - 48px); display: flex; flex-direction: column; gap: 10px; }
+.cat-dialog:not([open]) { display: none; }
+.cat-dialog::backdrop { background: rgba(0, 0, 0, .4); }
+.cat-list { overflow-y: auto; min-height: 120px; }
+.cat-groups > li { border-top: 1px solid var(--line); }
+.cat-group-btn { width: 100%; min-height: 44px; padding: 0 4px; text-align: left; background: none; border: 0; font: inherit; font-weight: 700;
+  color: var(--text); cursor: pointer; display: flex; align-items: center; justify-content: space-between; }
+.cat-group-btn::after { content: '›'; color: var(--sub); transition: transform .15s; }
+.cat-group-btn[aria-expanded="true"]::after { transform: rotate(90deg); }
+.cat-items.sub { padding: 0 0 6px 12px; }
+.cat-item { width: 100%; min-height: 44px; padding: 0 8px; text-align: left; background: none; border: 0; border-radius: 10px; font: inherit;
+  color: var(--text); cursor: pointer; }
+.cat-item:hover, .cat-item:focus-visible, .cat-group-btn:focus-visible { background: var(--bg); }
+.cat-item.on { background: var(--blue-soft); color: var(--blue-dark); font-weight: 700; }
