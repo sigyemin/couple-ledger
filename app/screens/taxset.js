@@ -155,6 +155,7 @@ export async function renderTaxSettings({ db, member, reload, isCurrent, onError
     h('h2', { class: 'card-title', text: '국세청 기준값(선택)' }, [], doc),
     h('p', { class: 'muted small', text: '가계부가 모르는 현금영수증·전통시장 등을 메워요. 홈택스 연말정산 미리보기(1~9월) 또는 간소화(1~12월)의 사용액을 그대로 넣어 주세요.' }, [], doc),
     h('p', { class: 'notice small', text: '한 기준일에 6개 항목을 모두 국세청 값 그대로 넣어 주세요(없는 항목은 0). 일부만 넣으면 가계부와 국세청의 분류가 다른 거래가 두 번 셀 수 있어요.' }, [], doc),
+    h('p', { class: 'muted small', text: '잘못 넣었으면 같은 기준일로 다시 넣어 덮어써 주세요(지우기는 아직 없어요).' }, [], doc),
     field('기준일(이 날까지의 합계)', asOf),
     ...BASELINE_KINDS.map(([k, label]) => field(`${label}(원)`, amounts[k])),
     saveBase,
