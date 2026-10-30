@@ -152,6 +152,15 @@ export function counterpartyRule(group, sourceId, values, alias = null) {
 export function draftRule(rule, n) {
   return { ...rule, id: `draft-${n}`, txn_type: null, priority: 100, is_active: true, created_at: '9999-12-31T00:00:00Z' };
 }
+/**
+ * 서버 정렬 규칙(priority, created_at, id) 사이에 미리보기 draft를 끼운다: 저장되면 priority 100·가장 늦게 만든 규칙이므로
+ * priority 100 이하 규칙들 뒤, 100보다 큰 규칙들 앞. 서버 순서는 바꾸지 않는다(CL-046)
+ */
+export function withDrafts(rules, drafts) {
+  const list = rules ?? [];
+  const at = list.findIndex((r) => (r.priority ?? 100) > 100);
+  return at < 0 ? [...list, ...drafts] : [...list.slice(0, at), ...drafts, ...list.slice(at)];
+}
 
 /**
  * 결제수단 고르기 반영. 빈 값으로 되돌리면 고른 결제수단·미리보기를 지우고 '고르기' 상태(저장 불가)로 — PR #29 재리뷰
