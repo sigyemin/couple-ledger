@@ -136,3 +136,10 @@ test('소스: 인라인 style·innerHTML 없음, main.js가 한 번 달고 그�
   assert.match(m, /const swipe = installMonthSwipe\(document, window\);/);
   assert.match(m, /swipe\.rendered\(view\);/);
 });
+
+test('#62 리뷰: 기울기는 main 자식에만(고정 막대 제외) — main 자체에 transform을 주지 않음', () => {
+  const css = readFileSync(new URL('../../app/styles.css', import.meta.url), 'utf8');
+  assert.doesNotMatch(css, /main\.screen\.swipe-(left|right) \{/);
+  assert.match(css, /main\.screen\.swipe-left > :not\(\.bulk-bar\) \{ transform: translateX\(-12px\); \}/);
+  assert.match(css, /main\.screen\.swipe-right > :not\(\.bulk-bar\) \{ transform: translateX\(12px\); \}/);
+});

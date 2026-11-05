@@ -559,13 +559,14 @@ button.chip.on { border-color: var(--text); }
 @media (min-width: 720px) { .upload-savebar { bottom: 12px; } }
 .upload-screen .small, .upload-screen .muted { font-size: 14px; color: var(--sub); }
 
-/* 좌우로 밀어 달 넘기기 (CL-074): 미는 동안 살짝 기울고, 넘긴 뒤 달 이름 강조. 움직임 줄이기 설정이면 기울기 없음 */
-main.screen { transition: transform .12s ease-out; }
-main.screen.swipe-left { transform: translateX(-12px); }
-main.screen.swipe-right { transform: translateX(12px); }
+/* 좌우로 밀어 달 넘기기 (CL-074): 미는 동안 살짝 기울고, 넘긴 뒤 달 이름 강조. 움직임 줄이기 설정이면 기울기 없음
+   기울기는 main이 아니라 그 자식들에 — main에 transform을 주면 안의 position: fixed 막대(.bulk-bar)가 화면 대신 main 기준이 됨(#62 리뷰) */
+main.screen > :not(.bulk-bar) { transition: transform .12s ease-out; }
+main.screen.swipe-left > :not(.bulk-bar) { transform: translateX(-12px); }
+main.screen.swipe-right > :not(.bulk-bar) { transform: translateX(12px); }
 .month-nav .title.month-flash { border-radius: 8px; background: var(--blue-soft); color: var(--blue-dark); transition: background .3s, color .3s; }
 @media (prefers-reduced-motion: reduce) {
-  main.screen { transition: none; }
-  main.screen.swipe-left, main.screen.swipe-right { transform: none; }
+  main.screen > :not(.bulk-bar) { transition: none; }
+  main.screen.swipe-left > :not(.bulk-bar), main.screen.swipe-right > :not(.bulk-bar) { transform: none; }
   .month-nav .title.month-flash { transition: none; }
 }
