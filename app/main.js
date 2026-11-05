@@ -35,6 +35,7 @@ import { renderRefundFind } from './screens/refund.js';
 import { renderReport, renderReportGroup, renderReportItem } from './screens/report.js';
 import { defaultReportMonth } from './screens/report-model.js';
 import { defaultReviewMonth } from './screens/review-model.js';
+import { installMonthSwipe } from './ui/swipe-month.js';
 
 const doc = globalThis.document;
 const root = doc.getElementById('app');
@@ -97,6 +98,9 @@ async function boot() {
   let router = null;
   const go = (hash) => router?.go(hash);
   const reload = () => router?.reload();
+
+  // 폰에서 좌우로 밀어 달 넘기기(CL-074): 문서에 한 번, 화면의 이전·다음 달 링크를 따른다
+  const swipe = installMonthSwipe(document, window);
 
   router = startRouter(async (route, isCurrent) => {
     let member;
@@ -185,6 +189,7 @@ async function boot() {
     }
     if (!view || !isCurrent()) return;
     replaceChildren(root, tabBar(route.screen), view); // 메뉴를 먼저(읽기 순서·키보드 이동). 위치는 CSS가 정함
+    swipe.rendered(view); // 좌우로 밀어 넘긴 직후면 달 이름 강조(CL-074)
   });
 }
 
