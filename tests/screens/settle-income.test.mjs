@@ -75,3 +75,18 @@ test('화면 소스: 명의별 사용 다음에 수입 카드, 이체 제외 안
   assert.match(s, /label: '수입 − 사용'/);
   assert.doesNotMatch(s, /innerHTML|console\./);
 });
+
+test('#63 리뷰: 카테고리 빈 라인 금액은 분류 안 됨으로 — 합계 = 수입 전체, 미분류 건수는 is_uncategorized와 같은 뜻', () => {
+  const mixed = [
+    { payer_member_id: 'm1', amount: 9000, period_month: '2026-10-01', is_uncategorized: true, lines: [L('cSal', 6000), { category_id: null, category: null, amount: 3000 }] },
+    { payer_member_id: 'm1', amount: 500, period_month: '2026-10-01', is_uncategorized: false, lines: [L('cInt', 500)] },
+  ];
+  const r = ownerIncome(mixed, members, '2026-10-01', categories);
+  const g = r.people[0].lines;
+  assert.deepEqual(g.map((l) => [l.label, l.month]), [['급여', 6000], ['이자', 500], ['분류 안 됨', 3000], ['합계', 9500]]);
+  assert.equal(g.at(-1).month, mixed.reduce((s, x) => s + x.amount, 0), '합계가 수입 전체와 같음');
+  assert.equal(r.uncategorizedMonth, 1, '카테고리 빈 라인이 있는 거래도 미분류(DB txn_is_uncategorized와 같음)');
+  const s = readFileSync(new URL('../../app/screens/settle.js', import.meta.url), 'utf8');
+  assert.match(s, /columns: 'id,payer_member_id,amount,period_month,lines,is_uncategorized'/);
+  assert.match(s, /내역에는 집계 제외된 수입도 함께 보여요\./);
+});

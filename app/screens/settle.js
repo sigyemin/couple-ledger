@@ -62,7 +62,7 @@ export async function readIncomeRows(db, monthStart, { pageSize = PAGE_SIZE, max
   let offset = 0;
   while (rows.length <= max) {
     const r = await db.select('v_transaction_detail', {
-      columns: 'id,payer_member_id,amount,period_month,lines',
+      columns: 'id,payer_member_id,amount,period_month,lines,is_uncategorized',
       filters: [
         { col: 'period_month', op: 'gte', value: `${monthStart.slice(0, 4)}-01-01` }, { col: 'period_month', op: 'lte', value: monthStart },
         { col: 'deleted_at', op: 'is', value: null }, { col: 'is_excluded', op: 'eq', value: false },
@@ -169,6 +169,8 @@ export async function renderSettle({ db, monthStart, reload, isCurrent, onError 
     inc.uncategorizedMonth ? h('a', { class: 'row-link soft', attrs: { href: buildHash('list', { query: { month: ym(monthStart), kind: 'income', cat: 'none' } }) } }, [
       h('span', { text: `${mLabel} 수입 ${inc.uncategorizedMonth}건 분류 안 됨` }, [], doc), h('strong', { text: '내역에서 보기 ›' }, [], doc),
     ], doc) : null,
+    // 내역은 종류 필터를 쓰면 집계 제외 거래도 함께 보인다(숨기는 필터 값이 없음 — list-model filterRows) → 건수가 다를 수 있어 알림(#63 리뷰)
+    inc.uncategorizedMonth ? h('p', { class: 'muted small', text: '내역에는 집계 제외된 수입도 함께 보여요.' }, [], doc) : null,
     income.capped ? h('p', { class: 'notice small', text: '수입 거래가 너무 많아 일부만 더했어요.' }, [], doc) : null,
   ], doc);
   const info = h('section', { class: 'card' }, [
