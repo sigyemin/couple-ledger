@@ -112,3 +112,61 @@ export function pastMonths(statusRows, { exclude, n = 12 } = {}) {
     .slice(0, n)
     .map((r) => ({ month: r.period_month, label: month(r.period_month), state: STATE_LABEL[r.review_state ?? 'not_reviewed'] }));
 }
+
+/**
+ * 명의별 수입(CL-076, 사용자 요청 11-14) — 명의별 사용과 같은 명의 규칙(결제수단 주인)
+ * - 수입(kind = income)만. 이체(두 사람 간 송금·내 계좌 이동)·환불은 수입이 아니다. 휴지통·집계 제외·시험 결제수단은 조회에서 뺐다
+ * - 항목 = 수입 카테고리(나눈 금액마다), 카테고리가 없는 금액은 '분류 안 됨'(라인 없음 = 거래 전체, 카테고리 빈 라인 = 그 라인 금액)
+ *   → 합계는 항상 수입 전체와 같다(빠지는 금액 없음 — #63 리뷰). 카테고리 순서는 카테고리 관리 순서(sort_order)
+ * - 그 달 '분류 안 됨' 건수는 v_transaction_detail.is_uncategorized(DB txn_is_uncategorized — 라인 없음 또는 카테고리 빈 라인)로 센다
+ *   → 내역의 미분류 필터와 같은 뜻
+ * @param rows v_transaction_detail { payer_member_id, amount, period_month, is_uncategorized, lines: [{ category_id, category, amount }] } (올해 1월 ~ 그 달)
+ * @param categories categories 행(순서·이름)
+ * @returns {{ people: { id, name, lines: { key, label, month, ytd }[] }[], uncategorizedMonth: number }}
+ *   lines: 금액이 있는 카테고리만 + 분류 안 됨(있으면) + 합계(key 'total')
+ */
+export function ownerIncome(rows, members, monthStart, categories) {
+  const cat = new Map((categories ?? []).map((c) => [c.id, c]));
+  const order = (id) => {
+    const c = cat.get(id);
+    return c ? (c.sort_order ?? 0) : Number.MAX_SAFE_INTEGER;
+  };
+  const byOwner = new Map();
+  let uncategorizedMonth = 0;
+  const add = (owner, key, label, amount, inMonth) => {
+    if (!byOwner.has(owner)) byOwner.set(owner, new Map());
+    const m = byOwner.get(owner);
+    if (!m.has(key)) m.set(key, { key, label, month: 0, ytd: 0 });
+    const cell = m.get(key);
+    cell.ytd += amount;
+    if (inMonth) cell.month += amount;
+  };
+  for (const r of rows ?? []) {
+    const inMonth = r.period_month === monthStart;
+    const lines = Array.isArray(r.lines) ? r.lines.filter(Boolean) : [];
+    if (inMonth && (r.is_uncategorized === true || !lines.length || lines.some((l) => !l.category_id))) uncategorizedMonth += 1;
+    if (!lines.length) { add(r.payer_member_id, 'none', '분류 안 됨', num(r.amount), inMonth); continue; }
+    for (const l of lines) {
+      if (l.category_id) add(r.payer_member_id, l.category_id, cat.get(l.category_id)?.name ?? l.category ?? '?', num(l.amount), inMonth);
+      else add(r.payer_member_id, 'none', '분류 안 됨', num(l.amount), inMonth);
+    }
+  }
+  const people = [...(members ?? [])].sort((a, b) => a.member_slot - b.member_slot).map((m) => {
+    const cells = [...(byOwner.get(m.id)?.values() ?? [])];
+    const named = cells.filter((c) => c.key !== 'none').sort((a, b) => order(a.key) - order(b.key) || a.label.localeCompare(b.label));
+    const lines = [...named, ...cells.filter((c) => c.key === 'none')];
+    lines.push({ key: 'total', label: '합계', month: lines.reduce((x, l) => x + l.month, 0), ytd: lines.reduce((x, l) => x + l.ytd, 0) });
+    return { id: m.id, name: m.display_name, lines };
+  });
+  return { people, uncategorizedMonth };
+}
+
+/** 사람별 수입 − 사용(명의 기준이 같아 비교 가능). 두 결과의 합계 줄로 */
+export function incomeMinusSpend(income, spend) {
+  const total = (p) => p?.lines.find((l) => l.key === 'total') ?? { month: 0, ytd: 0 };
+  return income.people.map((p) => {
+    const s = total(spend.people.find((x) => x.id === p.id));
+    const i = total(p);
+    return { id: p.id, name: p.name, month: i.month - s.month, ytd: i.ytd - s.ytd };
+  });
+}
