@@ -70,7 +70,7 @@ test('조회: 올해 1월~그 달, 휴지통·집계 제외 빼고 지출·환�
     { col: 'deleted_at', op: 'is', value: null }, { col: 'is_excluded', op: 'eq', value: false }, { col: 'kind', op: 'in', value: ['expense', 'refund'] }]);
   assert.equal((await readSpendRows(db, '2026-10-01', { max: 3 })).data.capped, true);
   const l = await loadSettle(db, '2026-10-01');
-  assert.deepEqual(Object.keys(l.data).sort(), ['members', 'sources', 'spend', 'status']);
+  assert.deepEqual(Object.keys(l.data).sort(), ['categories', 'income', 'members', 'sources', 'spend', 'status']);
   assert.equal(calls.some(([v]) => v === 'v_monthly_settlement'), false); // 5:5 정산 뷰는 더 안 읽는다
   const bad = { async select(v) { return v === 'transactions' ? { data: null, error: { code: 'network' } } : { data: [], error: null }; } };
   assert.equal((await loadSettle(bad, '2026-10-01')).error.code, 'network');

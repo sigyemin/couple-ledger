@@ -215,6 +215,7 @@ ul { list-style: none; margin: 0; padding: 0; }
 .settle-table thead th { font-weight: 400; font-size: 12px; color: var(--sub-on-white); }
 .settle-table tbody th { font-weight: 400; }
 .settle-table tr.total th, .settle-table tr.total td { font-weight: 700; border-bottom: 0; }
+.settle-table tr.net th, .settle-table tr.net td { border-top: 1px dashed var(--line); border-bottom: 0; color: var(--sub); } /* 명의별 수입: 수입 − 사용 (CL-076) */
 .card.review.changed_after_review { border: 1px solid var(--orange); }
 
 /* 업로드 현황 (CL-056): 칸은 색 + 글자(올림/안 올림). 좁은 화면은 표만 옆으로 밀림 */

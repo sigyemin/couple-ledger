@@ -3,6 +3,8 @@
 //   사람(결제수단 주인)마다 신용카드 · 체크카드 · 그 밖 사용액, 그 달 + 올해 1월~그 달 누계 · 월 확인 · 지난 달
 // 조회: transactions(올해 1월~그 달, 휴지통·집계 제외 빼고 지출·환불만, 쪽 단위), payment_sources, members, v_monthly_review_status(모든 달)
 //       + 공제 현황 카드(deduction-card.js — v_deduction_status·v_deduction_txn, CL-062)
+//       + 명의별 수입(CL-076): v_transaction_detail(올해 1월~그 달, 수입만, 휴지통·집계 제외·시험 결제수단 빼고, 쪽 단위), categories
+//         사람별 수입 카테고리 줄 · 분류 안 됨 · 합계, 그리고 '수입 − 사용'(명의 기준이 같음). 이체·환불은 수입이 아님
 // 쓰기: confirm_month(p_month) / unconfirm_month(p_month) — 기록 값은 서버가 정한다(v0.16 Q4)
 // - 확인 후 변경됨이면 "바뀐 거래 보기" → 내역(changed=1)
 // 의존: ui/dom.js, router.js, core/confirm.js, core/errors.js, screens/settle-model.js, screens/shell.js
@@ -12,7 +14,7 @@ import { addMonths, buildHash } from '../router.js';
 import { month, won } from '../core/format.js';
 import { confirmDialog } from '../core/confirm.js';
 import { STAGES, ACTIONS } from '../core/errors.js';
-import { ownerSpend, reviewView, confirmMonthText, unconfirmMonthText, pastMonths } from './settle-model.js';
+import { ownerSpend, ownerIncome, incomeMinusSpend, reviewView, confirmMonthText, unconfirmMonthText, pastMonths } from './settle-model.js';
 import { errorView } from './shell.js';
 import { renderDeductionCard } from './deduction-card.js';
 
@@ -50,8 +52,40 @@ export async function readSpendRows(db, monthStart, { pageSize = PAGE_SIZE, max 
   return { data: { rows: rows.slice(0, max), capped: rows.length > max } };
 }
 
+/**
+ * 올해 1월 ~ 그 달 수입 거래(명의별 수입, CL-076). 명의 = 결제수단 주인(payer_member_id), 나눈 금액(lines)마다 카테고리
+ * @returns {{ data: { rows, capped } } | { error }}
+ */
+export async function readIncomeRows(db, monthStart, { pageSize = PAGE_SIZE, max = MAX_ROWS } = {}) {
+  const rows = [];
+  const seen = new Set();
+  let offset = 0;
+  while (rows.length <= max) {
+    const r = await db.select('v_transaction_detail', {
+      columns: 'id,payer_member_id,amount,period_month,lines',
+      filters: [
+        { col: 'period_month', op: 'gte', value: `${monthStart.slice(0, 4)}-01-01` }, { col: 'period_month', op: 'lte', value: monthStart },
+        { col: 'deleted_at', op: 'is', value: null }, { col: 'is_excluded', op: 'eq', value: false },
+        { col: 'is_test_source', op: 'eq', value: false }, { col: 'kind', op: 'eq', value: 'income' },
+      ],
+      order: [{ col: 'id', ascending: true }],
+      range: { from: offset, to: offset + Math.min(pageSize, max + 1 - rows.length) - 1 },
+    });
+    if (r.error) return { error: r.error };
+    const page = r.data ?? [];
+    if (page.length === 0) break;
+    offset += page.length;
+    for (const row of page) {
+      if (seen.has(row.id)) continue;
+      seen.add(row.id);
+      rows.push(row);
+    }
+  }
+  return { data: { rows: rows.slice(0, max), capped: rows.length > max } };
+}
+
 export async function loadSettle(db, monthStart) {
-  const [spend, sources, status, members] = await Promise.all([
+  const [spend, sources, status, members, income, categories] = await Promise.all([
     readSpendRows(db, monthStart),
     db.select('payment_sources', { columns: 'id,owner_member_id,kind,is_test' }),
     db.select('v_monthly_review_status', {
@@ -59,10 +93,17 @@ export async function loadSettle(db, monthStart) {
       order: [{ col: 'period_month', ascending: false }],
     }),
     db.select('members', { columns: 'id,member_slot,display_name' }),
+    readIncomeRows(db, monthStart),
+    db.select('categories', { columns: 'id,parent_id,name,code,sort_order,is_active' }),
   ]);
-  const error = [spend, sources, status, members].find((r) => r.error)?.error;
+  const error = [spend, sources, status, members, income, categories].find((r) => r.error)?.error;
   if (error) return { error };
-  return { data: { spend: spend.data, sources: sources.data ?? [], status: status.data ?? [], members: members.data ?? [] } };
+  return {
+    data: {
+      spend: spend.data, sources: sources.data ?? [], status: status.data ?? [], members: members.data ?? [],
+      income: income.data, categories: categories.data ?? [],
+    },
+  };
 }
 
 /**
@@ -87,8 +128,10 @@ export async function renderSettle({ db, monthStart, reload, isCurrent, onError 
     onError?.(res.error);
     return h('main', { class: 'screen' }, [head, errorView(res.error.message, res.error.detail?.sqlState ?? res.error.code, doc)], doc);
   }
-  const { spend, sources, status, members } = res.data;
+  const { spend, sources, status, members, income, categories } = res.data;
   const sum = ownerSpend(spend.rows, sources, members, monthStart);
+  const inc = ownerIncome(income.rows, members, monthStart, categories);
+  const net = incomeMinusSpend(inc, sum);
   const st = status.find((r) => r.period_month === monthStart) ?? null;
   const rv = reviewView(monthStart, st, members);
 
@@ -100,16 +143,34 @@ export async function renderSettle({ db, monthStart, reload, isCurrent, onError 
   };
 
   const mLabel = month(monthStart).replace(/^[0-9]+년 /, '');
+  // 사람별 표(명의별 사용·명의별 수입이 같은 모양)
+  const table = (lines, extra = []) => h('table', { class: 'settle-table' }, [
+    h('thead', {}, [h('tr', {}, ['', mLabel, sum.ytdLabel].map((t) => h('th', { text: t, attrs: { scope: 'col' } }, [], doc)), doc)], doc),
+    h('tbody', {}, [...lines, ...extra].map((l) => h('tr', l.key === 'total' || l.key === 'net' ? { class: l.key } : {}, [
+      h('th', { text: l.label, attrs: { scope: 'row' } }, [], doc),
+      h('td', { text: won(l.month) }, [], doc), h('td', { text: won(l.ytd) }, [], doc),
+    ], doc)), doc),
+  ], doc);
   const people = sum.people.map((p) => h('section', { class: 'card' }, [
     h('h2', { class: 'card-title', text: `${p.name} 명의` }, [], doc),
-    h('table', { class: 'settle-table' }, [
-      h('thead', {}, [h('tr', {}, ['', mLabel, sum.ytdLabel].map((t) => h('th', { text: t, attrs: { scope: 'col' } }, [], doc)), doc)], doc),
-      h('tbody', {}, p.lines.map((l) => h('tr', l.key === 'total' ? { class: 'total' } : {}, [
-        h('th', { text: l.label, attrs: { scope: 'row' } }, [], doc),
-        h('td', { text: won(l.month) }, [], doc), h('td', { text: won(l.ytd) }, [], doc),
-      ], doc)), doc),
-    ], doc),
+    table(p.lines),
   ], doc));
+  // 명의별 수입(CL-076): 사람마다 수입 카테고리 줄 + 합계 + '수입 − 사용'
+  const incomeCards = inc.people.map((p) => {
+    const n = net.find((x) => x.id === p.id);
+    return h('section', { class: 'card' }, [
+      h('h2', { class: 'card-title', text: `${p.name} 명의 수입` }, [], doc),
+      p.lines.length === 1 ? h('p', { class: 'muted', text: `${sum.ytdLabel} 수입이 없어요.` }, [], doc) : null,
+      table(p.lines, [{ key: 'net', label: '수입 − 사용', month: n.month, ytd: n.ytd }]),
+    ], doc);
+  });
+  const incomeInfo = h('section', { class: 'card' }, [
+    h('p', { class: 'muted', text: '명의 기준(결제수단 주인), 이체 제외. 두 사람 간 송금·내 계좌 이동은 수입이 아니고, 환불은 사용에서 빠져요. 집계 제외·휴지통·시험 결제수단은 빼요. 수입 − 사용은 위 명의별 사용 합계와 같은 명의로 비교한 값이에요.' }, [], doc),
+    inc.uncategorizedMonth ? h('a', { class: 'row-link soft', attrs: { href: buildHash('list', { query: { month: ym(monthStart), kind: 'income', cat: 'none' } }) } }, [
+      h('span', { text: `${mLabel} 수입 ${inc.uncategorizedMonth}건 분류 안 됨` }, [], doc), h('strong', { text: '내역에서 보기 ›' }, [], doc),
+    ], doc) : null,
+    income.capped ? h('p', { class: 'notice small', text: '수입 거래가 너무 많아 일부만 더했어요.' }, [], doc) : null,
+  ], doc);
   const info = h('section', { class: 'card' }, [
     h('p', { class: 'muted', text: '명의 = 결제수단 주인. 공동·개인 구분 없이, 지출에서 환불을 뺀 금액이에요(홈 지출과 같은 기준). 집계 제외·휴지통·시험 결제수단은 빼요. 그 밖 = 통장 출금·현금.' }, [], doc),
     spend.capped ? h('p', { class: 'notice small', text: '거래가 너무 많아 일부만 더했어요.' }, [], doc) : null,
@@ -159,5 +220,5 @@ export async function renderSettle({ db, monthStart, reload, isCurrent, onError 
     onError?.(err);
     dedCard.lastChild.textContent = '공제 현황을 불러오지 못했어요. 잠시 뒤 다시 열어 주세요.';
   });
-  return h('main', { class: 'screen' }, [head, statusLine, dedCard, ...people, info, review, pastCard], doc);
+  return h('main', { class: 'screen' }, [head, statusLine, dedCard, ...people, info, ...incomeCards, incomeInfo, review, pastCard], doc);
 }
