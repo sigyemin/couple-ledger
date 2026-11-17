@@ -331,6 +331,8 @@ export async function renderReview({ db, member, monthStart, reload, isCurrent, 
     cp.unsure ? h('p', { class: 'muted small', text: `거래 종류·상대 칸을 보는 규칙이 있어 ${cp.unsure}건은 여기서 판정하지 못해 뺐어요.` }, [], doc) : null,
     cp.groups.length ? h('p', { class: 'muted small', text: '규칙을 저장하면 이 달을 포함한 검토 대기 거래에 적용할지 미리 보여 드려요. 이미 확인한 거래는 바뀌지 않아요.' }, [], doc) : null,
     link('이체 상대 규칙 모두 보기', buildHash('cprules')),
+    link('통장끼리 이체 짝 찾기(같은 금액·하루 안)', buildHash('pairs', { query: { month: ym(monthStart) } })), // CL-077 A4
+    link('통장에 찍히는 이름으로 정리', buildHash('tnames')),
   ]);
 
   // 나눈 금액이 안 맞는 거래

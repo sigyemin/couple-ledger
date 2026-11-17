@@ -18,12 +18,15 @@ const RE_NAME = /^[a-z_][a-z0-9_]{0,62}$/;
 // - category_rules: 가맹점 규칙 추가(화면 설계 v0.2 3-6). 정규식(regex)은 화면에서 만들지 않는다(결정 C2 — 앱이 막음)
 // - counterparty_rules: 이체 상대 직접 추가(화면 설계 v0.2 3-8). 업로드 미리보기도 같은 칸을 쓴다
 // - payment_sources: 결제수단 추가(화면 설계 v0.3 3-2). 시험용(is_test)은 칸 목록에 없다 — 관리자만
-export const INSERT_TABLES = Object.freeze(['import_batches', 'transactions', 'categories', 'category_rules', 'counterparty_rules', 'payment_sources']);
+// - member_transfer_names: 본인 '통장에 찍히는 이름'(v0.23 CL-077 — 본인 행만, 실제로 막는 것은 RLS). 이름 원문은 화면·DB에만
+export const INSERT_TABLES = Object.freeze(['import_batches', 'transactions', 'categories', 'category_rules', 'counterparty_rules', 'payment_sources',
+  'member_transfer_names']);
 // update를 허용하는 표 (지금 앱이 고치는 표만. 실수 방지용 — 실제로 막는 것은 RLS). 늘릴 때는 리뷰를 받는다
 export const UPDATE_TABLES = Object.freeze(['transactions', 'categories', 'category_rules', 'counterparty_rules', 'payment_sources']);
 // delete를 허용하는 표 (거래·업로드 묶음은 실제 삭제 금지 — DB도 막음). 카테고리는 쓰는 곳이 없을 때만 DB가 허용(FK)
 // 결제수단은 거래·업로드 묶음이 없을 때만 화면이 지우기를 보이고, 쓰는 곳이 있으면 DB가 거부(FK)
-export const DELETE_TABLES = Object.freeze(['categories', 'payment_sources']);
+// 통장에 찍히는 이름은 본인 행만 지운다(RLS)
+export const DELETE_TABLES = Object.freeze(['categories', 'payment_sources', 'member_transfer_names']);
 // upsert(넣거나 같은 키면 고치기)를 허용하는 표와 키 칸·넣을 수 있는 칸 (CL-062 연말정산 — 본인 행만, 실제로 막는 것은 RLS)
 // - member_tax_profiles: 사람·연도별 총급여·자녀 수·월세 요건·실손보험금(민감 — 값은 기록·주소에 남기지 않는다)
 //   + 전세자금대출(CL-065, v0.21): 요건 확인·원금 상환액·상환증명서 원리금·주택마련저축 공제액
@@ -48,6 +51,7 @@ export const INSERT_COLUMNS = Object.freeze({
   counterparty_rules: Object.freeze(['match_field', 'match_text', 'match_type', 'source_id', 'direction', 'alias', 'member_id',
     'suggested_kind', 'suggested_exclude_reason', 'suggested_category_id', 'suggested_is_shared', 'created_by']),
   payment_sources: Object.freeze(['owner_member_id', 'kind', 'institution', 'label', 'last4', 'import_format_id', 'is_monthly_upload', 'is_active']),
+  member_transfer_names: Object.freeze(['member_id', 'pattern', 'match_type']), // pattern_norm은 DB가 계산
 });
 // 표별로 고칠 수 있는 칸(없으면 칸 이름 형식만 검사)
 export const UPDATE_COLUMNS = Object.freeze({
@@ -72,6 +76,7 @@ const wonAmount = (v) => Number.isInteger(v) && v >= 0 && v <= WON_MAX;
 export const COLUMN_VALUES = Object.freeze({
   category_rules: Object.freeze({ match_type: Object.freeze(['contains', 'exact']) }),
   counterparty_rules: Object.freeze({ match_type: Object.freeze(['exact', 'contains']) }), // DB CHECK와 같음
+  member_transfer_names: Object.freeze({ match_type: Object.freeze(['exact', 'contains']) }), // v0.23 ck_mtn_match_type
   payment_sources: Object.freeze({ kind: Object.freeze(['credit_card', 'bank_account', 'cash']), last4: (v) => v === null || /^[0-9]{4}$/.test(v) }),
   // 연말정산 칸(CL-062 ②): DB CHECK와 같은 목록 + null(자동)
   transactions: Object.freeze({

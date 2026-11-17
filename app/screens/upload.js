@@ -7,6 +7,8 @@
 // ③ 미리보기: Worker parse(정규화 행) + DB에 이미 있는 중복 키 조회 → 새로 넣을 건수·이미 있음·행 오류·집계 제외 등
 // ④ 저장: 확인 대화상자 → 파일마다 묶음 찾기/만들기(ensureBatch) → import_transactions 200행씩(uploadRows) → 결과
 // - 파일은 이 기기 밖으로 나가지 않는다. DB에는 정규화한 행과 앱이 만든 묶음 이름만 간다(원본 파일 이름은 화면에만)
+// 구성원 이름(v0.23 CL-077): 통장 행이 행 규칙·이체 상대 규칙에 안 맞으면 두 사람의 '통장에 찍히는 이름'으로 이체 판정(정규화가) —
+//    미리보기에 '이름으로 이체 N건'(동명이인 확인용 — 리뷰 v0.23 P-1). 이름은 메모리에서만
 // ② 새 이체 상대: 통장 행 중 규칙에 안 맞은 행을 (방향, 설명)으로 묶어 카드(counterparty-card.js, 기본 '나중에').
 //    고르면 그 값을 임시 규칙으로 넣어 다시 정규화 → 미리보기에 바로 반영. 저장 때 그 파일을 올리기 전에 counterparty_rules insert
 //    (같은 이름·범위 규칙이 이미 있으면 DB가 거부 → 그대로 진행). '나중에'는 규칙 없이 검토 대기로 들어간다
@@ -54,13 +56,15 @@ export async function loadUpload(db) {
     // 순서는 서버 정렬 그대로 쓴다(DB reapply_category_rule의 앞선 규칙 순서와 같음)
     db.select('category_rules', { columns: RULE_COLUMNS, filters: [{ col: 'is_active', op: 'eq', value: true }],
       order: [{ col: 'priority' }, { col: 'created_at' }, { col: 'id' }] }),
+    // 구성원 '통장에 찍히는 이름'(v0.23): 비교용 정리값만(원문은 읽지 않음). 메모리에서만 쓰고 기록하지 않는다
+    db.select('member_transfer_names', { columns: 'member_id,pattern_norm,match_type' }),
   ]);
   const error = res.find((r) => r.error)?.error;
   if (error) return { error };
   return {
     data: {
       sources: res[0].data ?? [], formats: res[1].data ?? [], categories: res[2].data ?? [],
-      cpRules: res[3].data ?? [], members: res[4].data ?? [], categoryRules: res[5].data ?? [],
+      cpRules: res[3].data ?? [], members: res[4].data ?? [], categoryRules: res[5].data ?? [], memberNames: res[6].data ?? [],
     },
   };
 }
@@ -106,7 +110,7 @@ export async function renderUpload({ db, guard, member, fallbackMonth, isCurrent
     onError?.(res.error, { stage: STAGES.db_select });
     return h('main', { class: 'screen' }, [head, banner, errorView(res.error.message, res.error.detail?.sqlState ?? res.error.code, doc)], doc);
   }
-  const { sources, formats, categories, cpRules, members } = res.data;
+  const { sources, formats, categories, cpRules, members, memberNames } = res.data;
   // 가맹점 규칙(U-16 A안): 켜진 규칙 + 그 카테고리가 켜져 있는지(꺼졌으면 정규화가 분류하지 않음 — DB 재적용과 같게)
   const catActive = new Map(categories.map((c) => [c.id, c.is_active !== false]));
   const categoryRules = res.data.categoryRules.map((r) => ({ ...r, categoryActive: catActive.get(r.category_id) ?? false }));
@@ -147,6 +151,7 @@ export async function renderUpload({ db, guard, member, fallbackMonth, isCurrent
     try {
       f.parsed = await runParseWorker({
         op: 'parse', bytes: f.bytes.slice().buffer, format, sourceId: src.id, categories: catCodes, counterpartyRules: cpRules, categoryRules,
+        memberNames, ownerId: src.owner_member_id,
       }, { env });
     } catch (e) {
       fail(f, e?.message); draw(); return;
@@ -228,6 +233,7 @@ export async function renderUpload({ db, guard, member, fallbackMonth, isCurrent
     try {
       const parsed = await runParseWorker({
         op: 'parse', bytes: f.bytes.slice().buffer, format, sourceId: src.id, categories: catCodes, counterpartyRules: withDrafts(cpRules, drafts), categoryRules,
+        memberNames, ownerId: src.owner_member_id,
       }, { env });
       if (f.token !== token) return;
       f.parsed = parsed;

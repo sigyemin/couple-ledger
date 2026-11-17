@@ -571,3 +571,14 @@ main.screen.swipe-right > :not(.bulk-bar) { transform: translateX(12px); }
   main.screen.swipe-left > :not(.bulk-bar), main.screen.swipe-right > :not(.bulk-bar) { transform: none; }
   .month-nav .title.month-flash { transition: none; }
 }
+
+/* 통장끼리 이체 짝 (CL-077) */
+.pair-list { margin: 8px 0 0; padding: 0; list-style: none; }
+.pair-list li + li { border-top: 1px solid var(--line); }
+.pair-item { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 8px; align-items: start; padding: 10px 0; cursor: pointer; }
+.pair-item input { margin-top: 4px; width: 20px; height: 20px; }
+.pair-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pair-side { font-size: 14px; color: var(--sub); overflow-wrap: anywhere; }
+.pair-tag { display: inline-block; min-width: 34px; margin-right: 6px; font-weight: 700; color: var(--text); }
+.pair-choose { padding: 10px 0; border-top: 1px solid var(--line); }
+.pair-choose .sub { font-size: 14px; color: var(--sub); overflow-wrap: anywhere; }

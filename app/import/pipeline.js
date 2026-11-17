@@ -112,12 +112,12 @@ export function detectFormats(XLSX, bytes, formats) {
 
 /**
  * 고른 형식으로 정규화
- * @param {{ format: object, sourceId: string, categories?: Map<string,string>, counterpartyRules?: object[], categoryRules?: object[] }} p
+ * @param {{ format: object, sourceId: string, categories?: Map<string,string>, counterpartyRules?: object[], categoryRules?: object[], memberNames?: object[], ownerId?: string }} p
  */
-export async function parseFile(XLSX, bytes, { format, sourceId, categories, counterpartyRules, categoryRules }) {
+export async function parseFile(XLSX, bytes, { format, sourceId, categories, counterpartyRules, categoryRules, memberNames, ownerId }) {
   const { fileType, grid, rowNums, dateAlts } = readGrid(XLSX, bytes);
   const m = matchFormats(grid, [format], fileType)[0];
   if (!m) throw new Error('format_mismatch');
-  const result = await normalizeRows(grid, format, m.header, { sourceId, categories, counterpartyRules, categoryRules, rowNums, dateAlts });
+  const result = await normalizeRows(grid, format, m.header, { sourceId, categories, counterpartyRules, categoryRules, memberNames, ownerId, rowNums, dateAlts });
   return { fileType, ...result };
 }
