@@ -11,7 +11,10 @@ import { subjectParticle } from './home-model.js';
 
 export const KIND_NAME = Object.freeze({
   rule_reapply: '규칙 다시 적용', bulk_edit: '카테고리 바꾸기', counterparty_apply: '이체 상대 적용', order_match: '주문 맞추기',
+  member_name_apply: '이름으로 이체 정리', transfer_pair: '내 계좌 이동 짝', // v0.23 CL-077 A5
 });
+// 종류(지출↔이체)가 바뀌는 묶음: 되돌리면 집계가 바뀌고 확인 완료한 달이 '확인 후 변경됨'이 된다 → 안내 + 확인 창
+const KIND_CHANGING = new Set(['counterparty_apply', 'member_name_apply', 'transfer_pair']);
 const TXN_KIND = { expense: '지출', refund: '환불', income: '수입', transfer: '이체' };
 const EXCLUDE = { card_bill: '카드 대금', check_card: '체크카드 출금', internal_transfer: '내 계좌끼리·저축', personal_transfer: '두 사람 사이 송금', other: '기타' };
 const REVIEW = { auto: '자동 분류', needs_review: '검토 대기', confirmed: '확인함' };
@@ -70,7 +73,7 @@ export function batchDetail(batch, items, txns, cats) {
   const back = rows.filter((r) => r.revertible).length;
   const keep = rows.length - back;
   const notes = [];
-  if (batch.kind === 'counterparty_apply') notes.push('종류·공동 여부가 돌아가 지출 집계가 바뀌어요. 확인 완료한 달이 \'확인 후 변경됨\'이 돼요.');
+  if (KIND_CHANGING.has(batch.kind)) notes.push('종류·공동 여부가 돌아가 지출 집계가 바뀌어요. 확인 완료한 달이 \'확인 후 변경됨\'이 돼요.');
   else notes.push('분류만 바뀐 묶음이라 \'확인 후 변경됨\'이 뜨지 않아요.');
   notes.push('되돌린 것을 다시 되돌릴 수는 없어요.');
   return {
@@ -78,7 +81,7 @@ export function batchDetail(batch, items, txns, cats) {
     preview: batch.reverted_at ? null : `되돌리면 ${back}건이 원래대로${keep ? `, ${keep}건은 그 뒤에 다시 바뀌어 그대로 둬요` : ''}`,
     canRevert: !batch.reverted_at && back > 0,
     buttonLabel: `${back}건 되돌리기`,
-    needsConfirm: batch.kind === 'counterparty_apply',
+    needsConfirm: KIND_CHANGING.has(batch.kind),
     notes,
   };
 }

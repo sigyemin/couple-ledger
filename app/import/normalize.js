@@ -166,11 +166,33 @@ function decideAmount(sign, cell) {
 }
 
 /**
+ * 구성원 '통장에 찍히는 이름'으로 이체 판정 (v0.23 CL-077 A1 — DB member_transfer_reason과 같은 규칙)
+ * - 설명 칸·상대 예금주 칸 중 하나라도 맞으면 맞음. exact = 정리값(matchNorm)이 같음, contains = 정리값 안에 들어 있음
+ * - 맞은 이름의 주인이 한 사람: 결제수단 주인과 같으면 internal_transfer(내 계좌 이동), 다르면 personal_transfer(두 사람 간 송금)
+ * - 두 사람 이름이 모두 맞으면 'ambiguous'(아무것도 안 함), 안 맞으면 null
+ * @param names member_transfer_names { member_id, pattern_norm, match_type } (이름은 화면·메모리에만 — 기록하지 않는다)
+ */
+export function memberTransferReason(names, ownerId, merchantRaw, counterparty) {
+  const fields = [matchNorm(merchantRaw), matchNorm(counterparty)].filter(Boolean);
+  if (!fields.length) return null;
+  const hit = new Set();
+  for (const n of names ?? []) {
+    const p = n?.pattern_norm;
+    if (!p) continue;
+    if (fields.some((v) => (n.match_type === 'exact' ? v === p : v.includes(p)))) hit.add(n.member_id);
+  }
+  if (hit.size === 0) return null;
+  if (hit.size > 1) return 'ambiguous';
+  return hit.has(ownerId) ? 'internal_transfer' : 'personal_transfer';
+}
+
+/**
  * @param {string[][]} grid
  * @param {object} format   import_formats 행
  * @param {{ headerIndex: number, columns: Map<string, number> }} header  findHeader 결과
- * @param {{ sourceId: string, categories?: Map<string, string>, counterpartyRules?: object[] }} ctx
+ * @param {{ sourceId: string, categories?: Map<string, string>, counterpartyRules?: object[], memberNames?: object[], ownerId?: string }} ctx
  *   categories: category code → id, counterpartyRules: 활성 이체 상대 규칙 행(통장 형식에만 적용)
+ *   memberNames·ownerId: 구성원 이름 판정(v0.23) — 통장 형식에서 행 규칙·이체 상대 규칙이 안 맞은 행에만, 결제수단 주인 기준
  * @returns {Promise<{ rows: object[], errors: {rowNo:number, reason:string}[], skipped: number, maskedCells: number }>}
  *   rows: RPC 행 + rowNo(파일 줄 번호, 1부터. RPC에 보낼 때는 뺀다)
  */
@@ -191,6 +213,8 @@ export async function normalizeRows(grid, format, header, ctx) {
     row.merchantRule = hit.source;
   };
   const cpRules = format.kind === 'bank_account' && Array.isArray(ctx?.counterpartyRules) ? ctx.counterpartyRules : [];
+  const memberNames = format.kind === 'bank_account' && Array.isArray(ctx?.memberNames) ? ctx.memberNames : [];
+  const ownerId = ctx?.ownerId ?? null;
   if (typeof sourceId !== 'string' || !sourceId) throw new TypeError('결제수단 id가 필요합니다');
   const dateFmt = compileFormat(format.date_format || DEFAULT_DATE_FORMAT);
   const timeFmt = format.time_format ? compileFormat(format.time_format) : null;
@@ -302,8 +326,13 @@ export async function normalizeRows(grid, format, header, ctx) {
       sourceId, direction: money.direction, txnType: cell('txn_type'), merchantRaw, counterparty: raw.counterparty ?? '',
     });
 
-    const kind = rule?.kind ?? cp?.suggested_kind ?? (money.direction === 'out' ? 'expense' : 'income');
-    const excludeReason = rule ? (rule.exclude_reason ?? null) : kind === 'transfer' ? (cp?.suggested_exclude_reason ?? null) : null;
+    // 우선순위(v0.23 2-3): 행 규칙 → 이체 상대 규칙 → 구성원 이름 → 기본값. 카드 사용 행은 행 규칙이 먼저 잡으므로 이름 판정에 오지 않는다
+    const byName = rule || cp || !memberNames.length ? null
+      : memberTransferReason(memberNames, ownerId, merchantRaw, raw.counterparty ?? '');
+    const nameReason = byName === 'internal_transfer' || byName === 'personal_transfer' ? byName : null;
+    const kind = rule?.kind ?? cp?.suggested_kind ?? (nameReason ? 'transfer' : (money.direction === 'out' ? 'expense' : 'income'));
+    const excludeReason = rule ? (rule.exclude_reason ?? null)
+      : kind === 'transfer' ? (cp ? (cp.suggested_exclude_reason ?? null) : nameReason) : null;
     const base = {
       occurred_on: when.date,
       occurred_time: when.time,
@@ -325,9 +354,11 @@ export async function normalizeRows(grid, format, header, ctx) {
     if (base.category_id) base.category_source = 'rule';
     // 이체 상대 규칙이 맞은 행은 확인함(O2). 환불은 검토 대기 유지(가맹점 규칙과 같음 — 이 경로에서 환불은 생기지 않지만 지켜 둔다)
     if (cp && kind !== 'refund') base.review_status = 'confirmed';
+    // 이름으로 이체가 된 행도 확인함(설계 제안 E-2 — 이체 상대 규칙과 같은 처리). 미리보기 건수용 표시(RPC로는 안 보냄)
+    if (nameReason) { base.review_status = 'confirmed'; base.nameTransfer = nameReason; }
     applyMerchantRule(base);
     // 통장 행인데 행 규칙·이체 상대 규칙에 안 맞았으면 "새 이체 상대" 후보(화면 4-2 ②). RPC로는 보내지 않는다(toRpcRows가 뺌)
-    if (format.kind === 'bank_account' && !rule && !cp) {
+    if (format.kind === 'bank_account' && !rule && !cp && !nameReason) {
       base.newCounterparty = true;
       // 숫자 가림으로 서로 다른 설명이 같은 값이 될 수 있어, 가림 전 값의 번호만 붙인다(화면이 "N개가 같아졌어요"를 셈)
       const original = String(cell('merchant') ?? '').normalize('NFKC');
@@ -388,5 +419,5 @@ export async function normalizeRows(grid, format, header, ctx) {
 
 /** RPC로 보낼 모양(rowNo·화면용 표시 newCounterparty·merchantVariant·merchantRule 제거) */
 export function toRpcRows(rows) {
-  return rows.map(({ rowNo, newCounterparty, merchantVariant, merchantRule, ...r }) => r);
+  return rows.map(({ rowNo, newCounterparty, merchantVariant, merchantRule, nameTransfer, ...r }) => r);
 }

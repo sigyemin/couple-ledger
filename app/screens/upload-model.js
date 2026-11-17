@@ -59,6 +59,8 @@ export function previewOf(parsed, existingKeys = new Set()) {
     merchantSuggest: fresh.filter((r) => r.merchantRule === 'suggestion').length,
     merchantRegex: fresh.filter((r) => r.merchantRule === 'regex').length,
     confirmed: fresh.filter((r) => r.review_status === 'confirmed').length,
+    nameInternal: fresh.filter((r) => r.nameTransfer === 'internal_transfer').length,
+    namePersonal: fresh.filter((r) => r.nameTransfer === 'personal_transfer').length,
     spendText: won(sum(fresh.filter((r) => !r.is_excluded && (r.kind === 'expense' || r.kind === 'refund')))),
   };
 }
@@ -70,6 +72,9 @@ export function previewLines(p) {
   const byRule = (p.merchantRule ?? 0) + (p.merchantSuggest ?? 0);
   if (byRule) out.push(['가맹점 규칙으로 분류', p.merchantSuggest ? `${byRule}건(확인 필요 ${p.merchantSuggest}건)` : `${byRule}건`]);
   if (p.merchantRegex) out.push(['정규식 규칙 때문에 미분류(규칙 화면에서 다시 적용)', `${p.merchantRegex}건`]);
+  // 이름으로 이체(v0.23) — 같은 이름의 다른 사람일 수도 있어 건수를 따로 보인다(리뷰 v0.23 P-1)
+  const byName = (p.nameInternal ?? 0) + (p.namePersonal ?? 0);
+  if (byName) out.push(['이름으로 이체(내 계좌 이동·두 사람 간 송금)', `${byName}건(내 계좌 ${p.nameInternal ?? 0} · 두 사람 간 ${p.namePersonal ?? 0})`]);
   if (p.excluded) out.push(['집계 제외(카드대금·이체 등)', `${p.excluded}건`]);
   if (p.checkCard) out.push(['체크카드 사용', `${p.checkCard}건`]);
   if (p.refunds) out.push(['환불', `${p.refunds}건`]);
