@@ -6,7 +6,7 @@ import { memberTransferReason, toRpcRows } from '../../app/import/normalize.js';
 import { parseFile } from '../../app/import/pipeline.js';
 import { XLSX, SOURCE, FORMAT_A, FORMAT_B, bookBytes, sheetA, sheetB } from '../import/fixtures.mjs';
 import {
-  checkName, nameErrorText, namesByMember, nameApplySummary, nameApplyText, pairGroups, pickedPairs, pairApplyText, txnLine, CONTAINS_HINT,
+  checkName, nameErrorText, namesByMember, nameApplySummary, nameApplyText, pairGroups, pickedPairs, pairApplyText, pairStopText, PAIR_CHUNK, txnLine, CONTAINS_HINT,
 } from '../../app/screens/transfer-names-model.js';
 import { previewLines, previewOf } from '../../app/screens/upload-model.js';
 import { KIND_NAME } from '../../app/screens/changes-model.js';
@@ -97,6 +97,26 @@ test('짝 묶음: 모호하지 않은 짝은 체크 목록, 모호한 짝은 출
   assert.match(txnLine(null, '2026-10-02'), /불러오지 못함/);
   assert.deepEqual(pickedPairs([g.clear[0], g.choose[0].items[0], { outId: 'o1', inId: 'i9' }]), [{ out_txn_id: 'o1', in_txn_id: 'i1' }, { out_txn_id: 'o2', in_txn_id: 'i3' }]);
   assert.match(pairApplyText([g.clear[0], g.choose[0].items[0]]).message, /2쌍\(내 계좌 이동 1 · 두 사람 간 송금 1\)/);
+});
+
+test('짝을 나눠 보낼 때: 확인 창은 묶음 수만큼 변경 기록이 남는다고 알리고, 멈추면 바꾼 쌍·나머지 쌍을 따로 알림', () => {
+  const one = { reason: 'internal_transfer', amount: 1000 };
+  assert.equal(PAIR_CHUNK, 200);
+  assert.match(pairApplyText(Array(PAIR_CHUNK).fill(one)).undoNote, /하나로 남아요/);
+  const many = pairApplyText(Array(PAIR_CHUNK + 50).fill(one)).undoNote;
+  assert.match(many, /200쌍씩 2번에 나눠/);
+  assert.match(many, /변경 기록에 2개로/);
+  assert.doesNotMatch(many, /하나로/);
+  assert.match(pairApplyText(Array(5).fill(one), 2).undoNote, /3번에 나눠/);
+
+  const stop = pairStopText({ done: 200, rest: 50, changed: true });
+  assert.match(stop, /^200쌍은 바꿨어요/);
+  assert.match(stop, /나머지 50쌍은 그사이 바뀐 거래가 있어 바꾸지 않았어요/);
+  assert.doesNotMatch(stop, /아무것도/);
+  assert.match(pairStopText({ done: 0, rest: 3, changed: true }), /^그사이 바뀐 거래가 있어 아무것도 바꾸지 않았어요\. 다시 불러왔어요/);
+  const other = pairStopText({ done: 0, rest: 3, changed: false, message: '연결이 끊겼어요' });
+  assert.match(other, /오류로\(연결이 끊겼어요\) 아무것도/);
+  assert.doesNotMatch(other, /다시 불러왔어요/);
 });
 
 test('허용 칸·변경 기록 이름표·되돌리기 확인', async () => {

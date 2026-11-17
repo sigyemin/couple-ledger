@@ -131,13 +131,29 @@ export function pickedPairs(items) {
   return out;
 }
 
-/** 짝 확인 문구 */
-export function pairApplyText(items) {
+/** 한 번에 보내는 짝 수(apply_internal_transfer_pairs 한 번 = 변경 기록 하나) */
+export const PAIR_CHUNK = 200;
+
+/** 짝 확인 문구. 200쌍을 넘으면 나눠 보내므로 변경 기록도 묶음 수만큼 남는다 */
+export function pairApplyText(items, chunk = PAIR_CHUNK) {
   const internal = items.filter((x) => x.reason === 'internal_transfer').length;
   const personal = items.length - internal;
+  const chunks = Math.max(1, Math.ceil(items.length / chunk));
   return {
     title: '통장끼리 이체로',
     message: `고른 짝 ${items.length}쌍(내 계좌 이동 ${internal} · 두 사람 간 송금 ${personal})의 출금·입금을 모두 이체로 바꿔요. 집계에서 빠지고 '확인함'이 돼요. 금액 ${won(items.reduce((s, x) => s + x.amount, 0))}.`,
-    undoNote: '변경 기록에 하나로 남아요. 더보기 › 변경 기록에서 되돌릴 수 있어요.',
+    undoNote: chunks > 1
+      ? `짝이 많아 ${chunk}쌍씩 ${chunks}번에 나눠 적용해요. 변경 기록에 ${chunks}개로 남고 각각 되돌릴 수 있어요. 중간에 멈추면 앞에서 바꾼 묶음은 그대로 남아요.`
+      : '변경 기록에 하나로 남아요. 더보기 › 변경 기록에서 되돌릴 수 있어요.',
   };
+}
+
+/**
+ * 나눠 적용하다 멈췄을 때 안내(오류 번호는 부르는 쪽이 붙인다)
+ * @param {{ done: number, rest: number, changed: boolean, message?: string }} s  done = 이미 바꾼 쌍, rest = 바꾸지 않은 나머지 쌍, changed = LG007
+ */
+export function pairStopText({ done, rest, changed, message }) {
+  const why = changed ? '그사이 바뀐 거래가 있어' : `오류로(${message ?? '알 수 없음'})`;
+  if (!done) return `${why} 아무것도 바꾸지 않았어요.${changed ? ' 다시 불러왔어요 — 다시 골라 주세요.' : ''}`;
+  return `${done}쌍은 바꿨어요(변경 기록에 남음). 나머지 ${rest}쌍은 ${why} 바꾸지 않았어요.${changed ? ' 다시 불러왔어요 — 남은 짝을 다시 골라 주세요.' : ''}`;
 }

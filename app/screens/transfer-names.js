@@ -15,14 +15,13 @@ import { STAGES } from '../core/errors.js';
 import { month, won } from '../core/format.js';
 import {
   MATCH_TYPES, CONTAINS_HINT, checkName, nameErrorText, namesByMember, nameApplySummary, nameApplyText,
-  pairGroups, txnLine, pickedPairs, pairApplyText,
+  pairGroups, txnLine, pickedPairs, pairApplyText, pairStopText, PAIR_CHUNK,
 } from './transfer-names-model.js';
 import { previewSplit, applySplit } from './split-rpc.js';
 import { rangeText } from './merchant-classify-model.js';
 import { errorView } from './shell.js';
 
 const eq = (col, value) => ({ col, op: 'eq', value });
-const PAIR_CHUNK = 200;
 let tnNotice = null;
 let pairNotice = null;
 
@@ -256,7 +255,7 @@ export async function renderPairs({ db, monthStart, reload, isCurrent, onError }
         const code = onError?.(r.error, { stage: STAGES.db_rpc });
         const changed = r.error.detail?.sqlState === 'LG007';
         pairNotice = {
-          text: `${doneN ? `${doneN}쌍은 바꿨어요. ` : ''}${changed ? '그사이 바뀐 거래가 있어 아무것도 바꾸지 않았어요. 다시 불러왔어요 — 다시 골라 주세요.' : r.error.message}${code ? ` (오류 번호 ${code})` : ''}`,
+          text: `${pairStopText({ done: doneN, rest: pairs.length - doneN, changed, message: r.error.message })}${code ? ` (오류 번호 ${code})` : ''}`,
           isError: true,
         };
         reload();
